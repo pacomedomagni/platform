@@ -1,0 +1,20 @@
+{
+  "name": "meta",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/meta/src",
+  "projectType": "library",
+  "tags": [],
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/libs/meta",
+        "tsConfig": "libs/meta/tsconfig.lib.json",
+        "packageJson": "libs/meta/package.json",
+        "main": "libs/meta/src/index.ts",
+        "assets": ["libs/meta/*.md"]
+      }
+    }
+  }
+}

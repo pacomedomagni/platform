@@ -2,6 +2,7 @@ import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ClsModule } from 'nestjs-cls';
 import { DbModule } from '@platform/db';
 import { AuthModule } from '@platform/auth';
+import { MetaModule } from '@platform/meta';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TenantMiddleware } from './tenant.middleware';
@@ -14,6 +15,7 @@ import { TenantMiddleware } from './tenant.middleware';
     }),
     DbModule,
     AuthModule,
+    MetaModule,
   ],
   controllers: [AppController],
   providers: [AppService],

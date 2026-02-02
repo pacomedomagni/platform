@@ -17,7 +17,10 @@
     "paths": {
       "@platform/db": ["libs/db/src/index.ts"],
       "@platform/auth": ["libs/auth/src/index.ts"],
-      "@platform/gateway": ["libs/gateway/src/index.ts"]
+      "@platform/gateway": ["libs/gateway/src/index.ts"],
+      "@platform/meta": ["libs/meta/src/index.ts"],
+      "@platform/ui": ["libs/ui/src/index.ts"],
+      "@platform/ui/server": ["libs/ui/src/server.ts"]
     }
   },
   "exclude": ["node_modules", "tmp"]

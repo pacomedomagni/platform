@@ -39,3 +39,49 @@ model User {
   // Index for performance
   @@index([tenantId])
 }
+
+model DocType {
+  id          String   @id @default(uuid())
+  name        String   @unique // Internal ID name, e.g. "Sales Order"
+  module      String   // e.g. "Selling"
+  isSingle    Boolean  @default(false)
+  isChild     Boolean  @default(false)
+  description String?
+  
+  fields      DocField[]
+
+  // For storing the table name if it differs, though usually derived from name
+  tableName   String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("doc_types")
+}
+
+model DocField {
+  id          String   @id @default(uuid())
+  
+  docTypeName String
+  docType     DocType  @relation(fields: [docTypeName], references: [name], onDelete: Cascade)
+  
+  name        String   // e.g. "customer"
+  label       String   // e.g. "Customer"
+  type        String   // Data, Link, Int, etc.
+  
+  required    Boolean  @default(false)
+  unique      Boolean  @default(false)
+  hidden      Boolean  @default(false)
+  readonly    Boolean  @default(false)
+
+  options     String?  // For Select
+  target      String?  // For Link (related DocType name)
+
+  idx         Int      @default(0)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("doc_fields")
+  @@index([docTypeName])
+}
