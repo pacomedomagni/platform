@@ -40,3 +40,18 @@ Thumbs.db
 
 .nx/cache
 .nx/workspace-data
+
+# Next.js
+.next
+out
+
+/generated/prisma
+
+# Local Environment
+.env
+.env.local
+.env.*
+
+# Docker Local Data
+docker/postgres_data
+docker-compose.override.yml

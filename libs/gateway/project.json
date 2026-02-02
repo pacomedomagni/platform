@@ -1,0 +1,9 @@
+{
+  "name": "gateway",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/gateway/src",
+  "projectType": "library",
+  "tags": ["type:util"],
+  "// targets": "to see all targets run: nx show project gateway --web",
+  "targets": {}
+}
