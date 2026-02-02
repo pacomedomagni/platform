@@ -8,6 +8,7 @@ const navItems = [
     { name: 'Home', href: '/' },
     { name: 'Sales Order', href: '/desk/Sales Order' },
     { name: 'Customer', href: '/desk/Customer' },
+    { name: 'DocType', href: '/desk/DocType' }, // System Builder
     // Add more dynamically later
 ];
 

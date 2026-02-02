@@ -20,7 +20,8 @@
       "@platform/gateway": ["libs/gateway/src/index.ts"],
       "@platform/meta": ["libs/meta/src/index.ts"],
       "@platform/ui": ["libs/ui/src/index.ts"],
-      "@platform/ui/server": ["libs/ui/src/server.ts"]
+      "@platform/ui/server": ["libs/ui/src/server.ts"],
+      "@platform/business-logic": ["libs/business-logic/src/index.ts"]
     }
   },
   "exclude": ["node_modules", "tmp"]

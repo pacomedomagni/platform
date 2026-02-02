@@ -10,8 +10,11 @@ import {
   CommandList,
 } from "./command"
 
-export function GlobalCommandBar() {
-  const [open, setOpen] = React.useState(false)
+export function GlobalCommandBar({ open: externalOpen, onOpenChange }: { open?: boolean, onOpenChange?: (open: boolean) => void }) {
+  const [internalOpen, setInternalOpen] = React.useState(false)
+  
+  const open = externalOpen ?? internalOpen
+  const setOpen = onOpenChange ?? setInternalOpen
 
   React.useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -22,26 +25,21 @@ export function GlobalCommandBar() {
     }
     document.addEventListener("keydown", down)
     return () => document.removeEventListener("keydown", down)
-  }, [])
+  }, [setOpen])
 
   return (
     <>
-      <div className="text-sm text-muted-foreground hidden md:block">
-         Press <kbd className="pointer-events-none inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground opacity-100">
-          <span className="text-xs">⌘</span>K
-        </kbd> to search...
-      </div>
       <CommandDialog open={open} onOpenChange={setOpen}>
         <CommandInput placeholder="Type a command or search..." />
         <CommandList>
           <CommandEmpty>No results found.</CommandEmpty>
           <CommandGroup heading="Suggestions">
-            <CommandItem // onSelect={()=>...}
-            >
-                Sales Order
-            </CommandItem>
-            <CommandItem>Customer</CommandItem>
-            <CommandItem>User</CommandItem>
+            <CommandItem>Dashboard</CommandItem>
+            <CommandItem>Global Settings</CommandItem>
+            <CommandItem>Users</CommandItem>
+          </CommandGroup>
+           <CommandGroup heading="Recent">
+            <CommandItem>Invoice #INV-2024-001</CommandItem>
           </CommandGroup>
         </CommandList>
       </CommandDialog>

@@ -101,6 +101,24 @@ services:
     networks:
       - noslag_network
 
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: platform-web
+    container_name: noslag_web
+    restart: always
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost/api/v1
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.noslag-web.rule=Host(`localhost`)"
+      - "traefik.http.services.noslag-web.loadbalancer.server.port=3000"
+    depends_on:
+      - api
+    networks:
+      - noslag_network
+
 networks:
   noslag_network:
     driver: bridge

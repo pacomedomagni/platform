@@ -1,6 +1,8 @@
-import { Injectable, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { ValidationService } from './validation.service';
+import { PermissionService } from './permission.service';
+import { HookService } from './hook.service';
 
 @Injectable()
 export class DocService {
@@ -8,21 +10,29 @@ export class DocService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly validationService: ValidationService
+    private readonly validationService: ValidationService,
+    private readonly permissionService: PermissionService,
+    private readonly hookService: HookService
   ) {}
 
   private getTableName(docType: string): string {
     return `tab${docType.replace(/\s+/g, '')}`;
   }
 
-  async create(docType: string, data: any) {
+  async create(docType: string, data: any, user: any) {
+    await this.permissionService.ensurePermission(docType, user.roles, 'create');
+    
     const tableName = this.getTableName(docType);
     
     // 0. Validate Payload
     await this.validationService.validate(docType, data);
 
+    // 0.1 Hook: beforeSave
+    const processedData = await this.hookService.trigger(docType, 'beforeSave', { ...data }, user);
+    // Use processed data
+    const { id, creation, modified, ...rest } = processedData; // Keep 'name' in rest
+
     // 1. Separate Fields: Standard vs Child Tables
-    const { id, name, creation, modified, ...rest } = data;
     
     const standardFields: any = {};
     const childTables: any = {}; // Key: fieldName, Value: Array of objects
@@ -40,7 +50,10 @@ export class DocService {
         where: { docTypeName: docType, type: 'Table' }
     });
 
-    return await this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
+        // ... (transaction existing logic, wait no I need to capture the variable first to return it but also run afterSave)
+        // Refactoring to keep transaction logic inside but result outside
+        
         // 2. Insert Parent
         const columns = Object.keys(standardFields);
         const values = Object.values(standardFields);
@@ -99,9 +112,16 @@ export class DocService {
             ...childTables
         };
     });
+
+    // 4. Hook: afterSave
+    await this.hookService.trigger(docType, 'afterSave', result, user);
+
+    return result;
   }
 
-  async findOne(docType: string, name: string) {
+  async findOne(docType: string, name: string, user: any) {
+    await this.permissionService.ensurePermission(docType, user.roles, 'read');
+
     const tableName = this.getTableName(docType);
     const result = await this.prisma.$queryRawUnsafe(`
         SELECT * FROM "${tableName}" WHERE name = $1 LIMIT 1;
@@ -134,7 +154,8 @@ export class DocService {
   // async findAll ... (unchanged) -> actually no, I need to remove the broken duplicate findOne below
 
 
-  async findAll(docType: string) {
+  async findAll(docType: string, user: any) {
+      await this.permissionService.ensurePermission(docType, user.roles, 'read');
       const tableName = this.getTableName(docType);
       return this.prisma.$queryRawUnsafe(`SELECT * FROM "${tableName}" LIMIT 100`);
   }
@@ -149,11 +170,27 @@ export class DocService {
     // Let's defer strict required check for updates or fetch existing doc and merge.
     
     // For MVP, simple type check on provided fields via same service? 
-  async update(docType: string, name: string, data: any) {
+  async update(docType: string, name: string, data: any, user: any) {
+    await this.permissionService.ensurePermission(docType, user.roles, 'write');
+    
     const tableName = this.getTableName(docType);
+
+    // Check Status
+    const existing = await this.findOne(docType, name, user);
+    if (existing.docstatus === 1) {
+        throw new ForbiddenException('Cannot edit a submitted document');
+    }
+    // TODO: Allow amending (DocPerm.amend) which creates a new version? 
+    // For now, strict lock.
+
+    // 0. Hook: beforeSave (Yes, we run beforeSave on update too. We might want separate beforeUpdate?)
+    // Standard ERP pattern: beforeSave runs on both.
+    // Merge existing data? 
+    // Ideally we should fetch the existing doc to pass "oldDoc" to the hook, but for MVP let's just pass payload.
+    const processedData = await this.hookService.trigger(docType, 'beforeSave', { ...data }, user);
     
     // 0. Separate Fields
-    const { id, creation, modified, ...rest } = data;
+    const { id, creation, modified, ...rest } = processedData;
 
     const standardFields: any = {};
     const childTables: any = {};
@@ -171,7 +208,7 @@ export class DocService {
         where: { docTypeName: docType, type: 'Table' }
     });
 
-    return await this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
         // 1. Update Parent
         let parentDoc: any;
         const columns = Object.keys(standardFields);
@@ -248,11 +285,56 @@ export class DocService {
             ...childTables
         };
     });
+
+    // 4. Hook: afterSave
+    await this.hookService.trigger(docType, 'afterSave', result, user);
+
+    return result;
   }
 
-  async delete(docType: string, name: string) {
+  async delete(docType: string, name: string, user: any) {
+      await this.permissionService.ensurePermission(docType, user.roles, 'delete');
       const tableName = this.getTableName(docType);
       await this.prisma.$executeRawUnsafe(`DELETE FROM "${tableName}" WHERE name = $1`, name);
       return { status: 'deleted', name };
+  }
+
+  async submit(docType: string, name: string, user: any) {
+      await this.permissionService.ensurePermission(docType, user.roles, 'submit');
+      const tableName = this.getTableName(docType);
+
+      // Check current state
+      const existing = await this.findOne(docType, name, user);
+      if (existing.docstatus === 1) throw new BadRequestException('Document already submitted');
+      
+      // Update DB
+      // We assume docstatus column exists if they have submit permission? 
+      // Or we try/catch to valid "docstatus" column missing error.
+      try {
+          await this.prisma.$executeRawUnsafe(`UPDATE "${tableName}" SET docstatus = 1, modified = NOW() WHERE name = $1`, name);
+      } catch (e) {
+          this.logger.error(e);
+          throw new BadRequestException('Failed to submit. Does the DocType have a docstatus field?');
+      }
+
+      await this.hookService.trigger(docType, 'onSubmit', existing, user);
+      return { status: 'submitted', name };
+  }
+
+  async cancel(docType: string, name: string, user: any) {
+      await this.permissionService.ensurePermission(docType, user.roles, 'cancel');
+      const tableName = this.getTableName(docType);
+
+      const existing = await this.findOne(docType, name, user);
+      if (existing.docstatus !== 1) throw new BadRequestException('Document must be submitted to cancel');
+
+      try {
+          await this.prisma.$executeRawUnsafe(`UPDATE "${tableName}" SET docstatus = 2, modified = NOW() WHERE name = $1`, name);
+      } catch (e) {
+         throw new BadRequestException('Failed to cancel.');
+      }
+
+      await this.hookService.trigger(docType, 'onCancel', existing, user);
+      return { status: 'cancelled', name };
   }
 }

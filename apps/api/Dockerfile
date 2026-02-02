@@ -1,4 +1,4 @@
-FROM node:20-alpine AS builder
+FROM node:20 AS builder
 
 WORKDIR /app
 
@@ -8,6 +8,8 @@ COPY .npmrc* ./
 
 # Install dependencies (including dev dependencies for building)
 RUN npm install
+
+ENV NX_DAEMON=false
 
 # Copy source code
 COPY . .

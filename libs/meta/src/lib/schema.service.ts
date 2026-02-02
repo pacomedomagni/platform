@@ -8,11 +8,33 @@ export class SchemaService {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  async listDocTypes(): Promise<DocTypeDefinition[]> {
+      const docTypes = await this.prisma.docType.findMany({
+          orderBy: { name: 'asc' },
+          include: { fields: true }
+      });
+      
+      return docTypes.map(dt => ({
+          name: dt.name,
+          module: dt.module,
+          isSingle: dt.isSingle,
+          fields: dt.fields.map(f => ({
+              name: f.name,
+              label: f.label,
+              type: f.type,
+              hidden: f.hidden
+          }))
+      }));
+  }
+
   async getDocType(name: string): Promise<DocTypeDefinition | null> {
     const docType = await this.prisma.docType.findUnique({
       where: { name },
       include: {
         fields: {
+          orderBy: { idx: 'asc' }
+        },
+        perms: {
           orderBy: { idx: 'asc' }
         }
       }
@@ -37,6 +59,18 @@ export class SchemaService {
         options: f.options || undefined,
         target: f.target || undefined,
         idx: f.idx
+      })),
+      permissions: docType.perms.map(p => ({
+        role: p.role,
+        read: p.read,
+        write: p.write,
+        create: p.create,
+        delete: p.delete,
+        submit: p.submit,
+        cancel: p.cancel,
+        amend: p.amend,
+        report: p.report,
+        idx: p.idx
       }))
     };
   }
@@ -110,7 +144,34 @@ export class SchemaService {
       }
     }
 
-    // 3. Physical Schema Migration (DDL)
+    // 3. Sync Permissions
+    if (def.permissions) {
+        // Simple strategy: Clear all and re-insert. 
+        // Identifiers for perms are just indexes basically.
+        await this.prisma.docPerm.deleteMany({
+            where: { docTypeName: def.name }
+        });
+
+        for (const [idx, perm] of def.permissions.entries()) {
+            await this.prisma.docPerm.create({
+                data: {
+                    docTypeName: def.name,
+                    role: perm.role,
+                    read: perm.read ?? true,
+                    write: perm.write ?? false,
+                    create: perm.create ?? false,
+                    delete: perm.delete ?? false,
+                    submit: perm.submit ?? false,
+                    cancel: perm.cancel ?? false,
+                    amend: perm.amend ?? false,
+                    report: perm.report ?? false,
+                    idx: idx
+                }
+            });
+        }
+    }
+
+    // 4. Physical Schema Migration (DDL)
     // Only for standard tables, not Singles (which might be key-value store) or Virtual
     if (!def.isSingle) {
         await this.ensureTable(def.name);

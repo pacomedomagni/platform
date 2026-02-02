@@ -64,7 +64,7 @@ export const LinkField = ({ field, value, onChange }: LinkFieldProps) => {
         try {
             // Hardcoded fetch for now, matching the desk api structure
             // In a real lib we would inject this dependency
-            const res = await fetch(`http://localhost:3000/api/v1/${field.target}`);
+            const res = await fetch(`/api/v1/${field.target}`);
             if (res.ok) {
                 const json = await res.json();
                 setItems(json);

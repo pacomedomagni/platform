@@ -49,6 +49,7 @@ model DocType {
   description String?
   
   fields      DocField[]
+  perms       DocPerm[]
 
   // For storing the table name if it differs, though usually derived from name
   tableName   String?
@@ -84,4 +85,31 @@ model DocField {
 
   @@map("doc_fields")
   @@index([docTypeName])
+}
+
+model DocPerm {
+  id          String   @id @default(uuid())
+  
+  docTypeName String
+  docType     DocType  @relation(fields: [docTypeName], references: [name], onDelete: Cascade)
+  
+  role        String   // e.g. "System Manager", "Sales User"
+  
+  read        Boolean  @default(true)
+  write       Boolean  @default(false)
+  create      Boolean  @default(false)
+  delete      Boolean  @default(false)
+  submit      Boolean  @default(false)
+  cancel      Boolean  @default(false)
+  amend       Boolean  @default(false)
+  report      Boolean  @default(false)
+  
+  idx         Int      @default(0)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("doc_perms")
+  @@index([docTypeName])
+  @@index([role])
 }
