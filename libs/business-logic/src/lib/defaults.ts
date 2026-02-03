@@ -41,7 +41,9 @@ export const CORE_MODULES: DocTypeDefinition[] = [
             { name: 'standard_rate', label: 'Standard Selling Rate', type: 'Currency' },
             { name: 'description', label: 'Description', type: 'TextEditor' },
             { name: 'image', label: 'Image URL', type: 'Data' },
-            { name: 'is_stock_item', label: 'Maintain Stock', type: 'Check' }
+            { name: 'is_stock_item', label: 'Maintain Stock', type: 'Check' },
+            { name: 'has_batch', label: 'Batch Tracked', type: 'Check' },
+            { name: 'has_serial', label: 'Serial Tracked', type: 'Check' }
         ]
     },
     {
@@ -96,6 +98,7 @@ export const CORE_MODULES: DocTypeDefinition[] = [
         fields: [
             { name: 'supplier', label: 'Supplier', type: 'Data', required: true },
             { name: 'posting_date', label: 'Posting Date', type: 'Date', required: true },
+            { name: 'posting_time', label: 'Posting Time', type: 'Data' },
             { name: 'supplier_invoice', label: 'Supplier Invoice', type: 'Data' },
             { name: 'items', label: 'Items', type: 'Table', target: 'Purchase Receipt Item' },
             { name: 'total_amount', label: 'Total Amount', type: 'Currency', readonly: true }
@@ -108,6 +111,9 @@ export const CORE_MODULES: DocTypeDefinition[] = [
         fields: [
             { name: 'item_code', label: 'Item', type: 'Link', target: 'Item', required: true },
             { name: 'warehouse', label: 'Warehouse', type: 'Link', target: 'Warehouse', required: true },
+            { name: 'location', label: 'Location Code', type: 'Data' },
+            { name: 'batch_no', label: 'Batch No', type: 'Data' },
+            { name: 'expiry_date', label: 'Expiry Date', type: 'Date' },
             { name: 'qty', label: 'Quantity', type: 'Float', required: true },
             { name: 'rate', label: 'Rate', type: 'Currency', required: true },
             { name: 'amount', label: 'Amount', type: 'Currency', readonly: true }
@@ -120,6 +126,8 @@ export const CORE_MODULES: DocTypeDefinition[] = [
         fields: [
             { name: 'customer', label: 'Customer', type: 'Link', target: 'Customer', required: true },
             { name: 'posting_date', label: 'Posting Date', type: 'Date', required: true },
+            { name: 'posting_time', label: 'Posting Time', type: 'Data' },
+            { name: 'stock_consumption_strategy', label: 'Stock Consumption', type: 'Select', options: 'FIFO\nFEFO' },
             { name: 'items', label: 'Items', type: 'Table', target: 'Delivery Note Item' },
             { name: 'total_qty', label: 'Total Qty', type: 'Float', readonly: true }
         ]
@@ -131,6 +139,8 @@ export const CORE_MODULES: DocTypeDefinition[] = [
         fields: [
             { name: 'item_code', label: 'Item', type: 'Link', target: 'Item', required: true },
             { name: 'warehouse', label: 'Warehouse', type: 'Link', target: 'Warehouse', required: true },
+            { name: 'location', label: 'Location Code', type: 'Data' },
+            { name: 'batch_no', label: 'Batch No', type: 'Data' },
             { name: 'qty', label: 'Quantity', type: 'Float', required: true },
             { name: 'rate', label: 'Rate', type: 'Currency' },
             { name: 'amount', label: 'Amount', type: 'Currency', readonly: true }

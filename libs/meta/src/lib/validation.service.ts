@@ -1,11 +1,15 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { toSafeTableName } from './identifiers';
 
 @Injectable()
 export class ValidationService {
   constructor(private readonly prisma: PrismaService) {}
 
   async validate(docType: string, data: any) {
+    const docTypeExists = await this.prisma.docType.findUnique({ where: { name: docType } });
+    if (!docTypeExists) throw new BadRequestException(`DocType ${docType} does not exist`);
+
     // 1. Fetch Metadata
     const fields = await this.prisma.docField.findMany({
       where: { docTypeName: docType },
@@ -13,10 +17,6 @@ export class ValidationService {
     });
 
     if (!fields || fields.length === 0) {
-       // If no fields defined (or DocType doesn't exist yet/fully), maybe strict mode or permissive?
-       // For now, let's just warn or allow. But really we should validate DocType exists.
-       const docTypeExists = await this.prisma.docType.findUnique({ where: { name: docType } });
-       if (!docTypeExists) throw new BadRequestException(`DocType ${docType} does not exist`);
        return; 
     }
 
@@ -53,7 +53,10 @@ export class ValidationService {
   }
 
   private async validateLink(targetDocType: string, name: string) {
-    const tableName = `tab${targetDocType.replace(/\s+/g, '')}`;
+    const targetExists = await this.prisma.docType.findUnique({ where: { name: targetDocType } });
+    if (!targetExists) throw new BadRequestException(`Invalid Link Target: ${targetDocType}`);
+
+    const tableName = toSafeTableName(targetDocType);
     // Security risk: SQL injection if targetDocType is malformed? 
     // DocType names are strictly controlled via Meta sync, but good to be safe.
     // We trust metadata, but we should verify the table exists or just try select.

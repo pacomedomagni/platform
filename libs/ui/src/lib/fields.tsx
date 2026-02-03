@@ -5,8 +5,6 @@ import { LinkField } from './link-field';
 import { cn } from './utils';
 
 interface FieldProps {
-
-interface FieldProps {
     field: DocFieldDefinition;
     value: any;
     onChange: (val: any) => void;

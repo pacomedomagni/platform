@@ -1,10 +1,10 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, UseGuards, Req, ForbiddenException } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { DocService } from './doc.service';
 import { SchemaService } from './schema.service';
 import { DocTypeDefinition } from './types';
 
-@Controller('api/v1')
+@Controller('v1')
 export class UniversalController {
   constructor(
     private readonly docService: DocService,
@@ -28,8 +28,11 @@ export class UniversalController {
   // Let's protect it but maybe with a specific permission or just allow ANY auth for now (dangerous, but matching "user" request).
   @Post('meta')
   @UseGuards(AuthGuard('jwt')) 
-  async syncDocType(@Body() def: DocTypeDefinition) {
-    // TODO: Enforce System Manager only
+  async syncDocType(@Body() def: DocTypeDefinition, @Req() req: any) {
+    const roles: string[] = req.user?.roles || [];
+    if (!roles.includes('admin') && !roles.includes('System Manager')) {
+      throw new ForbiddenException('Only admins can sync metadata');
+    }
     await this.schemaService.syncDocType(def);
     return { status: 'synced', name: def.name };
   }

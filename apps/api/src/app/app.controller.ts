@@ -19,8 +19,8 @@ export class AppController {
   // Create User: Requires valid JWT + Tenant Context
   @UseGuards(AuthGuard('jwt'))
   @Post('users')
-  createUser(@Body() body: { email: string; tenantId: string }) {
-    return this.appService.createUser(body.email, body.tenantId);
+  createUser(@Body() body: { email: string }) {
+    return this.appService.createUser(body.email);
   }
 
   // List Users: Requires valid JWT + Tenant Context

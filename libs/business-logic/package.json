@@ -6,6 +6,10 @@
   "main": "./src/index.js",
   "types": "./src/index.d.ts",
   "dependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@prisma/client": "^7.3.0",
+    "@platform/db": "0.0.1",
+    "@platform/meta": "0.0.1",
     "@swc/helpers": "~0.5.11"
   }
 }

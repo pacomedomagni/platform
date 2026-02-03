@@ -9,6 +9,7 @@ export class SeederService implements OnApplicationBootstrap {
   constructor(private readonly schema: SchemaService) {}
 
   async onApplicationBootstrap() {
+    const syncAlways = process.env.SYNC_CORE_DOCTYPES !== 'false';
     this.logger.log('Checking for core modules...');
     
     // We run this sequentially to respect dependencies (though currently SchemaService handles basic dependency order if strict)
@@ -21,15 +22,19 @@ export class SeederService implements OnApplicationBootstrap {
     // Since `SchemaService` might not create FK constraints immediately (if it's dynamic), it's safer.
 
     for (const mod of CORE_MODULES) {
-        try {
-            const existing = await this.schema.getDocType(mod.name);
-            if (!existing) {
-                this.logger.log(`Seeding DocType: ${mod.name}`);
-                await this.schema.syncDocType(mod);
-            }
-        } catch (e) {
-            this.logger.error(`Failed to seed ${mod.name}`, e);
+      try {
+        if (!syncAlways) {
+          const existing = await this.schema.getDocType(mod.name);
+          if (existing) continue;
+          this.logger.log(`Seeding DocType: ${mod.name}`);
+        } else {
+          this.logger.log(`Syncing core DocType: ${mod.name}`);
         }
+
+        await this.schema.syncDocType(mod);
+      } catch (e) {
+        this.logger.error(`Failed to seed ${mod.name}`, e);
+      }
     }
     
     this.logger.log('Core modules check complete.');

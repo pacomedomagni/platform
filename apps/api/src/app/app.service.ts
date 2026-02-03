@@ -29,7 +29,7 @@ export class AppService {
     return { tA, tB };
   }
 
-  async createUser(email: string, tenantId: string) {
+  async createUser(email: string) {
     // We try to insert. 
     // Prerequisite: The RLS Session Config MUST be set on the transaction or connection.
     // Since we don't have the "Automatic Middleware" yet that sets it in the DB,
@@ -42,13 +42,13 @@ export class AppService {
 
     return await this.prisma.$transaction(async (tx) => {
       // 1. Set the RLS variable
-      await tx.$executeRawUnsafe(`SELECT set_config('app.tenant', '${sessionTenantId}', true)`);
+      await tx.$executeRaw`SELECT set_config('app.tenant', ${sessionTenantId}, true)`;
       
       // 2. Perform operation
       return await tx.user.create({
         data: {
           email,
-          tenantId: tenantId, // This must match sessionTenantId or RLS fails
+          tenantId: sessionTenantId,
         },
       });
     });
@@ -56,10 +56,11 @@ export class AppService {
 
   async getUsers() {
     const sessionTenantId = this.cls.get('tenantId');
+    if (!sessionTenantId) throw new Error('No Tenant Context in Code!');
     
     return await this.prisma.$transaction(async (tx) => {
       // 1. Set the RLS variable
-      await tx.$executeRawUnsafe(`SELECT set_config('app.tenant', '${sessionTenantId}', true)`);
+      await tx.$executeRaw`SELECT set_config('app.tenant', ${sessionTenantId}, true)`;
       
       // 2. Perform operation
       return await tx.user.findMany();

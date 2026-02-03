@@ -8,7 +8,8 @@ export class HookService {
 
     register(docType: string, hook: DocHooks) {
         this.logger.log(`Registering hooks for ${docType}`);
-        this.hooks.set(docType, hook);
+        const existing = this.hooks.get(docType) || {};
+        this.hooks.set(docType, { ...existing, ...hook });
     }
 
     async trigger(docType: string, event: keyof DocHooks, doc: any, user: any) {

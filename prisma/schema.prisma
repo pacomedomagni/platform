@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
   previewFeatures = ["driverAdapters"]
 }
 
@@ -7,109 +7,430 @@ datasource db {
   provider = "postgresql"
 }
 
-model Tenant {
-  id        String   @id @default(uuid())
-  name      String
-  domain    String?  @unique
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+enum StockConsumptionStrategy {
+  FIFO
+  FEFO
+}
 
-  users     User[]
+model Tenant {
+  id                       String                   @id @default(uuid())
+  name                     String
+  domain                   String?                  @unique
+  isActive                 Boolean                  @default(true)
+  baseCurrency             String                   @default("USD")
+  stockConsumptionStrategy StockConsumptionStrategy @default(FIFO)
+  allowNegativeStock       Boolean                  @default(false)
+  createdAt                DateTime                 @default(now())
+  updatedAt                DateTime                 @updatedAt
+
+  users                 User[]
+  warehouses            Warehouse[]
+  locations             Location[]
+  items                 Item[]
+  batches               Batch[]
+  warehouseItemBalances WarehouseItemBalance[]
+  binBalances           BinBalance[]
+  stockFifoLayers       StockFifoLayer[]
+  stockLedgerEntries    StockLedgerEntry[]
+  accounts              Account[]
+  glEntries             GlEntry[]
 
   @@map("tenants")
 }
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String   @default("") // Managed by Auth Provider usually, but here for completeness
+  id        String  @id @default(uuid())
+  email     String  @unique
+  password  String  @default("") // Managed by Auth Provider usually, but here for completeness
   firstName String?
   lastName  String?
-  
-  tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  
-  roles     String[] @default(["user"])
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  roles String[] @default(["user"])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@map("users")
   // Index for performance
   @@index([tenantId])
+  @@map("users")
+}
+
+model Currency {
+  code      String   @id // ISO 4217, e.g. "USD"
+  name      String
+  symbol    String?
+  decimals  Int      @default(2)
+  isEnabled Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("currencies")
+}
+
+model ExchangeRate {
+  id        String   @id @default(uuid())
+  fromCode  String
+  toCode    String
+  rate      Decimal  @db.Decimal(18, 9)
+  rateDate  DateTime @db.Date
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([fromCode, toCode, rateDate])
+  @@index([toCode, rateDate])
+  @@map("exchange_rates")
 }
 
 model DocType {
-  id          String   @id @default(uuid())
-  name        String   @unique // Internal ID name, e.g. "Sales Order"
-  module      String   // e.g. "Selling"
-  isSingle    Boolean  @default(false)
-  isChild     Boolean  @default(false)
+  id          String  @id @default(uuid())
+  name        String  @unique // Internal ID name, e.g. "Sales Order"
+  module      String // e.g. "Selling"
+  isSingle    Boolean @default(false)
+  isChild     Boolean @default(false)
   description String?
-  
-  fields      DocField[]
-  perms       DocPerm[]
+
+  fields DocField[]
+  perms  DocPerm[]
 
   // For storing the table name if it differs, though usually derived from name
-  tableName   String?
+  tableName String?
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("doc_types")
 }
 
 model DocField {
-  id          String   @id @default(uuid())
-  
+  id String @id @default(uuid())
+
   docTypeName String
-  docType     DocType  @relation(fields: [docTypeName], references: [name], onDelete: Cascade)
-  
-  name        String   // e.g. "customer"
-  label       String   // e.g. "Customer"
-  type        String   // Data, Link, Int, etc.
-  
-  required    Boolean  @default(false)
-  unique      Boolean  @default(false)
-  hidden      Boolean  @default(false)
-  readonly    Boolean  @default(false)
+  docType     DocType @relation(fields: [docTypeName], references: [name], onDelete: Cascade)
 
-  options     String?  // For Select
-  target      String?  // For Link (related DocType name)
+  name  String // e.g. "customer"
+  label String // e.g. "Customer"
+  type  String // Data, Link, Int, etc.
 
-  idx         Int      @default(0)
+  required Boolean @default(false)
+  unique   Boolean @default(false)
+  hidden   Boolean @default(false)
+  readonly Boolean @default(false)
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  options String? // For Select
+  target  String? // For Link (related DocType name)
 
-  @@map("doc_fields")
+  idx Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([docTypeName])
+  @@map("doc_fields")
 }
 
 model DocPerm {
-  id          String   @id @default(uuid())
-  
+  id String @id @default(uuid())
+
   docTypeName String
-  docType     DocType  @relation(fields: [docTypeName], references: [name], onDelete: Cascade)
-  
-  role        String   // e.g. "System Manager", "Sales User"
-  
-  read        Boolean  @default(true)
-  write       Boolean  @default(false)
-  create      Boolean  @default(false)
-  delete      Boolean  @default(false)
-  submit      Boolean  @default(false)
-  cancel      Boolean  @default(false)
-  amend       Boolean  @default(false)
-  report      Boolean  @default(false)
-  
-  idx         Int      @default(0)
+  docType     DocType @relation(fields: [docTypeName], references: [name], onDelete: Cascade)
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  role String // e.g. "System Manager", "Sales User"
 
-  @@map("doc_perms")
+  read   Boolean @default(true)
+  write  Boolean @default(false)
+  create Boolean @default(false)
+  delete Boolean @default(false)
+  submit Boolean @default(false)
+  cancel Boolean @default(false)
+  amend  Boolean @default(false)
+  report Boolean @default(false)
+
+  idx Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   @@index([docTypeName])
   @@index([role])
+  @@map("doc_perms")
+}
+
+model Warehouse {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  code     String
+  name     String
+  isActive Boolean @default(true)
+
+  // Optional defaults for operational flows
+  defaultReceivingLocationId String?
+  defaultPickingLocationId   String?
+
+  locations Location[]
+
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  warehouseItemBalances WarehouseItemBalance[]
+  binBalances           BinBalance[]
+  stockFifoLayers       StockFifoLayer[]
+  stockLedgerEntries    StockLedgerEntry[]
+
+  @@unique([tenantId, code])
+  @@unique([tenantId, name])
+  @@map("warehouses")
+}
+
+model Location {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  parentId String?
+  parent   Location?  @relation("LocationTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children Location[] @relation("LocationTree")
+
+  code String
+  name String?
+  path String // e.g. "WH1/A1/BIN-01"
+
+  isPickable Boolean @default(true)
+  isPutaway  Boolean @default(true)
+  isStaging  Boolean @default(false)
+  isActive   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stockFromEntries StockLedgerEntry[] @relation("StockFromLocation")
+  stockToEntries   StockLedgerEntry[] @relation("StockToLocation")
+  binBalances      BinBalance[]
+  stockFifoLayers  StockFifoLayer[]
+
+  @@unique([tenantId, warehouseId, code])
+  @@unique([tenantId, warehouseId, path])
+  @@index([warehouseId])
+  @@map("locations")
+}
+
+model Item {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  code        String
+  name        String
+  isStockItem Boolean @default(true)
+  isActive    Boolean @default(true)
+
+  hasBatch  Boolean @default(false)
+  hasSerial Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  batches               Batch[]
+  warehouseItemBalances WarehouseItemBalance[]
+  binBalances           BinBalance[]
+  stockFifoLayers       StockFifoLayer[]
+  stockLedgerEntries    StockLedgerEntry[]
+
+  @@unique([tenantId, code])
+  @@map("items")
+}
+
+model Batch {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  itemId String
+  item   Item   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  batchNo  String
+  mfgDate  DateTime? @db.Date
+  expDate  DateTime? @db.Date
+  isActive Boolean   @default(true)
+
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  binBalances        BinBalance[]
+  stockFifoLayers    StockFifoLayer[]
+  stockLedgerEntries StockLedgerEntry[]
+
+  @@unique([tenantId, itemId, batchNo])
+  @@index([itemId])
+  @@map("batches")
+}
+
+model WarehouseItemBalance {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  itemId String
+  item   Item   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  actualQty   Decimal @default(0) @db.Decimal(18, 6)
+  reservedQty Decimal @default(0) @db.Decimal(18, 6)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, itemId, warehouseId])
+  @@index([warehouseId])
+  @@map("warehouse_item_balances")
+}
+
+model BinBalance {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  itemId String
+  item   Item   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  batchId String?
+  batch   Batch?  @relation(fields: [batchId], references: [id], onDelete: SetNull)
+
+  actualQty Decimal @default(0) @db.Decimal(18, 6)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, itemId, warehouseId, locationId, batchId])
+  @@index([locationId])
+  @@map("bin_balances")
+}
+
+model StockFifoLayer {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  itemId String
+  item   Item   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  batchId String?
+  batch   Batch?  @relation(fields: [batchId], references: [id], onDelete: SetNull)
+
+  postingTs    DateTime
+  qtyRemaining Decimal  @db.Decimal(18, 6)
+  incomingRate Decimal  @db.Decimal(18, 6)
+
+  voucherType String
+  voucherNo   String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, itemId, warehouseId, postingTs])
+  @@index([batchId])
+  @@map("stock_fifo_layers")
+}
+
+model StockLedgerEntry {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  postingTs   DateTime
+  postingDate DateTime @db.Date
+
+  itemId String
+  item   Item   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  fromLocationId String?
+  fromLocation   Location? @relation("StockFromLocation", fields: [fromLocationId], references: [id], onDelete: SetNull)
+  toLocationId   String?
+  toLocation     Location? @relation("StockToLocation", fields: [toLocationId], references: [id], onDelete: SetNull)
+
+  batchId String?
+  batch   Batch?  @relation(fields: [batchId], references: [id], onDelete: SetNull)
+
+  qty                  Decimal @db.Decimal(18, 6)
+  valuationRate        Decimal @db.Decimal(18, 6)
+  stockValueDifference Decimal @db.Decimal(18, 6)
+
+  voucherType String
+  voucherNo   String
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, postingDate])
+  @@index([tenantId, itemId, warehouseId])
+  @@map("stock_ledger_entries")
+}
+
+model Account {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  code     String
+  name     String
+  currency String? // null means tenant base currency
+  isActive Boolean @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  glEntries GlEntry[]
+
+  @@unique([tenantId, code])
+  @@map("accounts")
+}
+
+model GlEntry {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  postingDate DateTime @db.Date
+  postingTs   DateTime
+
+  accountId String
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  currency     String
+  exchangeRate Decimal @db.Decimal(18, 9)
+
+  debitBc  Decimal @default(0) @db.Decimal(18, 6)
+  creditBc Decimal @default(0) @db.Decimal(18, 6)
+  debitFc  Decimal @default(0) @db.Decimal(18, 6)
+  creditFc Decimal @default(0) @db.Decimal(18, 6)
+
+  voucherType String
+  voucherNo   String
+  remarks     String?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, postingDate])
+  @@index([tenantId, voucherType, voucherNo])
+  @@map("gl_entries")
 }

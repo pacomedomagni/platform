@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { DocHooks, HookService } from '@platform/meta';
+import { HookService } from '@platform/meta';
 import { PrismaService } from '@platform/db';
+import { StockConsumptionStrategy } from '@prisma/client';
+import { StockService } from './inventory/stock.service';
 
 @Injectable()
 export class BusinessLogicService {
@@ -8,12 +10,17 @@ export class BusinessLogicService {
 
     constructor(
         private readonly hookService: HookService,
-        private readonly prisma: PrismaService
+        private readonly prisma: PrismaService,
+        private readonly stockService: StockService
     ) {
         this.registerHooks();
     }
 
     registerHooks() {
+        // Masters (sync dynamic DocTypes -> normalized tables)
+        this.registerItemMasterHooks();
+        this.registerWarehouseMasterHooks();
+
         // Stock Management
         this.registerPurchaseReceiptHooks();
         this.registerDeliveryNoteHooks();
@@ -26,9 +33,154 @@ export class BusinessLogicService {
         this.registerSalesOrderHooks();
         this.registerInvoiceHooks();
 
-        // Stock-to-GL Integration
-        this.registerPurchaseReceiptGLHooks();
-        this.registerDeliveryNoteGLHooks();
+        // Stock-to-GL Integration is handled in onSubmit hooks.
+    }
+
+    private registerItemMasterHooks() {
+        this.hookService.register('Item', {
+            afterSave: async (doc, user) => {
+                const tenantId = user?.tenantId;
+                if (!tenantId) return;
+                if (!doc?.name) return;
+
+                await this.prisma.$transaction(async (tx) => {
+                    await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+                    await tx.item.upsert({
+                        where: { tenantId_code: { tenantId, code: doc.name } },
+                        update: {
+                            name: doc.item_name ?? doc.name,
+                            isStockItem: Boolean(doc.is_stock_item ?? true),
+                            hasBatch: Boolean(doc.has_batch ?? false),
+                            hasSerial: Boolean(doc.has_serial ?? false),
+                            isActive: true,
+                        },
+                        create: {
+                            tenantId,
+                            code: doc.name,
+                            name: doc.item_name ?? doc.name,
+                            isStockItem: Boolean(doc.is_stock_item ?? true),
+                            hasBatch: Boolean(doc.has_batch ?? false),
+                            hasSerial: Boolean(doc.has_serial ?? false),
+                        },
+                    });
+                });
+            },
+        });
+    }
+
+    private registerWarehouseMasterHooks() {
+        this.hookService.register('Warehouse', {
+            afterSave: async (doc, user) => {
+                const tenantId = user?.tenantId;
+                if (!tenantId) return;
+                if (!doc?.name) return;
+
+                await this.prisma.$transaction(async (tx) => {
+                    await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+
+                    const warehouse = await tx.warehouse.upsert({
+                        where: { tenantId_code: { tenantId, code: doc.name } },
+                        update: { name: doc.name, isActive: true },
+                        create: { tenantId, code: doc.name, name: doc.name },
+                    });
+
+                    // Ensure a minimal 2-level location structure per warehouse:
+                    // ROOT -> RECEIVING, PICKING
+                    const root = await tx.location.upsert({
+                        where: {
+                            tenantId_warehouseId_code: {
+                                tenantId,
+                                warehouseId: warehouse.id,
+                                code: 'ROOT',
+                            },
+                        },
+                        update: { path: warehouse.code, isActive: true, isPickable: false },
+                        create: {
+                            tenantId,
+                            warehouseId: warehouse.id,
+                            parentId: null,
+                            code: 'ROOT',
+                            name: 'Root',
+                            path: warehouse.code,
+                            isPickable: false,
+                            isPutaway: false,
+                            isStaging: false,
+                        },
+                    });
+
+                    const receiving = await tx.location.upsert({
+                        where: {
+                            tenantId_warehouseId_code: {
+                                tenantId,
+                                warehouseId: warehouse.id,
+                                code: 'RECEIVING',
+                            },
+                        },
+                        update: {
+                            parentId: root.id,
+                            path: `${warehouse.code}/RECEIVING`,
+                            isActive: true,
+                            isPickable: false,
+                            isPutaway: true,
+                            isStaging: true,
+                        },
+                        create: {
+                            tenantId,
+                            warehouseId: warehouse.id,
+                            parentId: root.id,
+                            code: 'RECEIVING',
+                            name: 'Receiving',
+                            path: `${warehouse.code}/RECEIVING`,
+                            isPickable: false,
+                            isPutaway: true,
+                            isStaging: true,
+                        },
+                    });
+
+                    const picking = await tx.location.upsert({
+                        where: {
+                            tenantId_warehouseId_code: {
+                                tenantId,
+                                warehouseId: warehouse.id,
+                                code: 'PICKING',
+                            },
+                        },
+                        update: {
+                            parentId: root.id,
+                            path: `${warehouse.code}/PICKING`,
+                            isActive: true,
+                            isPickable: true,
+                            isPutaway: false,
+                            isStaging: true,
+                        },
+                        create: {
+                            tenantId,
+                            warehouseId: warehouse.id,
+                            parentId: root.id,
+                            code: 'PICKING',
+                            name: 'Picking',
+                            path: `${warehouse.code}/PICKING`,
+                            isPickable: true,
+                            isPutaway: false,
+                            isStaging: true,
+                        },
+                    });
+
+                    if (
+                        warehouse.defaultReceivingLocationId !== receiving.id ||
+                        warehouse.defaultPickingLocationId !== picking.id
+                    ) {
+                        await tx.warehouse.update({
+                            where: { id: warehouse.id },
+                            data: {
+                                defaultReceivingLocationId: receiving.id,
+                                defaultPickingLocationId: picking.id,
+                            },
+                        });
+                    }
+                });
+            },
+        });
     }
 
     private registerSalesOrderHooks() {
@@ -52,28 +204,28 @@ export class BusinessLogicService {
         });
     }
 
-    private registerInvoiceHooks() {
-         this.hookService.register('Invoice', {
-            beforeSave: async (doc, user) => {
+	    private registerInvoiceHooks() {
+	         this.hookService.register('Invoice', {
+	            beforeSave: async (doc, user) => {
                 // Auto-Name
                 if (!doc.name) {
                     doc.name = `INV-${Date.now().toString().slice(-6)}`;
                 }
 
                 // Calculate taxes and totals
-                await this.calculateTaxes(doc);
-                return doc;
-            },
-            afterSubmit: async (doc) => {
-                // Post to GL when invoice is submitted (docstatus = 1)
-                await this.postInvoiceToGL(doc);
-            }
-         });
-    }
+	                await this.calculateTaxes(doc);
+	                return doc;
+	            },
+	            onSubmit: async (doc) => {
+	                // Post to GL when invoice is submitted (docstatus = 1)
+	                await this.postInvoiceToGL(doc);
+	            }
+	         });
+	    }
 
-    private registerPurchaseReceiptHooks() {
-        this.hookService.register('Purchase Receipt', {
-            beforeSave: (doc, user) => {
+	    private registerPurchaseReceiptHooks() {
+	        this.hookService.register('Purchase Receipt', {
+	            beforeSave: (doc, user) => {
                 // Auto-Name
                 if (!doc.name) {
                     doc.name = `PR-${Date.now().toString().slice(-6)}`;
@@ -91,19 +243,37 @@ export class BusinessLogicService {
                     });
                     doc.total_amount = total;
                 }
-                return doc;
-            },
-            afterSave: async (doc, user) => {
-                // Create Stock Ledger Entries on Submit (docstatus = 1)
-                if (doc.docstatus === 1 && doc.items && Array.isArray(doc.items)) {
-                    await this.createStockLedgerEntries(doc, 'Purchase Receipt', 1);
-                }
-            }
-        });
-    }
+	                return doc;
+	            },
+	            onSubmit: async (doc, user) => {
+	                const tenantId = user?.tenantId;
+	                if (!tenantId) throw new Error('Missing tenantId in user context');
 
-    private registerDeliveryNoteHooks() {
-        this.hookService.register('Delivery Note', {
+	                if (!doc.items || !Array.isArray(doc.items)) return;
+	                const postingTs = this.resolvePostingTs(doc);
+
+	                for (const item of doc.items) {
+	                    await this.stockService.receiveStock({
+	                        tenantId,
+	                        voucherType: 'Purchase Receipt',
+	                        voucherNo: doc.name,
+	                        postingTs,
+	                        itemCode: item.item_code,
+	                        warehouseCode: item.warehouse,
+	                        locationCode: item.location,
+	                        batchNo: item.batch_no,
+	                        batchExpDate: this.parseDateOnly(item.expiry_date),
+	                        qty: item.qty,
+	                        incomingRate: item.rate ?? 0,
+	                    });
+	                }
+	                await this.postPurchaseReceiptToGL(doc);
+	            },
+	        });
+	    }
+
+	    private registerDeliveryNoteHooks() {
+	        this.hookService.register('Delivery Note', {
             beforeSave: (doc, user) => {
                 // Auto-Name
                 if (!doc.name) {
@@ -122,148 +292,59 @@ export class BusinessLogicService {
                     });
                     doc.total_qty = totalQty;
                 }
-                return doc;
-            },
-            afterSave: async (doc, user) => {
-                // Create Stock Ledger Entries on Submit (docstatus = 1)
-                if (doc.docstatus === 1 && doc.items && Array.isArray(doc.items)) {
-                    await this.createStockLedgerEntries(doc, 'Delivery Note', -1);
-                }
-            }
-        });
+	                return doc;
+	            },
+	            onSubmit: async (doc, user) => {
+	                const tenantId = user?.tenantId;
+	                if (!tenantId) throw new Error('Missing tenantId in user context');
+
+	                if (!doc.items || !Array.isArray(doc.items)) return;
+	                const postingTs = this.resolvePostingTs(doc);
+
+	                const strategy =
+	                  doc.stock_consumption_strategy === 'FEFO'
+	                    ? StockConsumptionStrategy.FEFO
+	                    : doc.stock_consumption_strategy === 'FIFO'
+	                      ? StockConsumptionStrategy.FIFO
+	                      : undefined;
+
+	                for (const item of doc.items) {
+	                    await this.stockService.issueStock({
+	                        tenantId,
+	                        voucherType: 'Delivery Note',
+	                        voucherNo: doc.name,
+	                        postingTs,
+	                        itemCode: item.item_code,
+	                        warehouseCode: item.warehouse,
+	                        locationCode: item.location,
+	                        batchNo: item.batch_no,
+	                        qty: item.qty,
+	                        strategy,
+	                    });
+	                }
+	                await this.postDeliveryNoteToCOGS(doc);
+	            },
+	        });
+	    }
+
+    private resolvePostingTs(doc: any): Date {
+        const postingDate: string | undefined = doc.posting_date;
+        const postingTime: string | undefined = doc.posting_time;
+        if (!postingDate) return new Date();
+        if (!postingTime) return new Date(`${postingDate}T00:00:00.000Z`);
+        return new Date(`${postingDate}T${postingTime}Z`);
     }
 
-    /**
-     * Create Stock Ledger Entries and update Bin
-     * @param doc Parent document (Purchase Receipt or Delivery Note)
-     * @param voucherType Type of transaction
-     * @param multiplier 1 for IN, -1 for OUT
-     */
-    private async createStockLedgerEntries(doc: any, voucherType: string, multiplier: number) {
-        for (const item of doc.items) {
-            const itemCode = item.item_code;
-            const warehouse = item.warehouse;
-            const qty = Number(item.qty || 0) * multiplier;
-            const rate = Number(item.rate || 0);
-
-            // Get current stock value using FIFO
-            const valuationRate = await this.getValuationRate(itemCode, warehouse, qty, rate);
-            
-            // Get qty before transaction
-            const qtyBefore = await this.getCurrentQty(itemCode, warehouse);
-            const qtyAfter = qtyBefore + qty;
-
-            const stockValueDifference = qty * valuationRate;
-            const stockValue = qtyAfter * valuationRate;
-
-            // Insert Stock Ledger Entry
-            const ledgerEntry = {
-                name: `SLE-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-                item_code: itemCode,
-                warehouse: warehouse,
-                posting_date: doc.posting_date,
-                posting_time: new Date().toISOString().split('T')[1].slice(0, 8),
-                qty: qty,
-                qty_after_transaction: qtyAfter,
-                valuation_rate: valuationRate,
-                stock_value: stockValue,
-                stock_value_difference: stockValueDifference,
-                voucher_type: voucherType,
-                voucher_no: doc.name,
-                incoming_rate: multiplier > 0 ? rate : null
-            };
-
-            await this.prisma.$queryRawUnsafe(
-                `INSERT INTO "tabStockLedgerEntry" 
-                (name, item_code, warehouse, posting_date, posting_time, qty, qty_after_transaction, 
-                 valuation_rate, stock_value, stock_value_difference, voucher_type, voucher_no, incoming_rate)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-                ledgerEntry.name, ledgerEntry.item_code, ledgerEntry.warehouse, 
-                ledgerEntry.posting_date, ledgerEntry.posting_time, ledgerEntry.qty,
-                ledgerEntry.qty_after_transaction, ledgerEntry.valuation_rate,
-                ledgerEntry.stock_value, ledgerEntry.stock_value_difference,
-                ledgerEntry.voucher_type, ledgerEntry.voucher_no, ledgerEntry.incoming_rate
-            );
-
-            // Update or Create Bin
-            await this.updateBin(itemCode, warehouse, qtyAfter, valuationRate, stockValue);
-        }
-    }
-
-    /**
-     * Get current quantity from Bin
-     */
-    private async getCurrentQty(itemCode: string, warehouse: string): Promise<number> {
-        const result = await this.prisma.$queryRawUnsafe(
-            `SELECT actual_qty FROM "tabBin" WHERE item_code = $1 AND warehouse = $2`,
-            itemCode, warehouse
-        );
-        return (result as any)[0]?.actual_qty || 0;
-    }
-
-    /**
-     * Calculate valuation rate using FIFO method
-     */
-    private async getValuationRate(
-        itemCode: string, 
-        warehouse: string, 
-        qty: number, 
-        incomingRate: number
-    ): Promise<number> {
-        if (qty > 0) {
-            // Incoming: Use the incoming rate
-            return incomingRate;
-        } else {
-            // Outgoing: Use FIFO - get weighted average of existing stock
-            const bin = await this.prisma.$queryRawUnsafe(
-                `SELECT valuation_rate FROM "tabBin" WHERE item_code = $1 AND warehouse = $2`,
-                itemCode, warehouse
-            );
-            return (bin as any)[0]?.valuation_rate || 0;
-        }
-    }
-
-    /**
-     * Update Bin with latest stock levels
-     */
-    private async updateBin(
-        itemCode: string, 
-        warehouse: string, 
-        actualQty: number, 
-        valuationRate: number,
-        stockValue: number
-    ) {
-        const existing = await this.prisma.$queryRawUnsafe(
-            `SELECT name FROM "tabBin" WHERE item_code = $1 AND warehouse = $2`,
-            itemCode, warehouse
-        );
-
-        const projectedQty = actualQty; // Simplified: actual + ordered - reserved
-
-        if ((existing as any).length > 0) {
-            // Update
-            await this.prisma.$queryRawUnsafe(
-                `UPDATE "tabBin" 
-                SET actual_qty = $1, valuation_rate = $2, stock_value = $3, projected_qty = $4, modified = NOW()
-                WHERE item_code = $5 AND warehouse = $6`,
-                actualQty, valuationRate, stockValue, projectedQty, itemCode, warehouse
-            );
-        } else {
-            // Insert
-            const binName = `BIN-${itemCode}-${warehouse}`;
-            await this.prisma.$queryRawUnsafe(
-                `INSERT INTO "tabBin" 
-                (name, item_code, warehouse, actual_qty, reserved_qty, ordered_qty, projected_qty, valuation_rate, stock_value)
-                VALUES ($1, $2, $3, $4, 0, 0, $5, $6, $7)`,
-                binName, itemCode, warehouse, actualQty, projectedQty, valuationRate, stockValue
-            );
-        }
+    private parseDateOnly(value: any): Date | undefined {
+        if (!value || typeof value !== 'string') return undefined;
+        return new Date(`${value}T00:00:00.000Z`);
     }
 
     // ==================== ACCOUNTING HOOKS ====================
 
     private registerJournalEntryHooks() {
-        this.hookService.register('Journal Entry', {\n            beforeSave: (doc, user) => {
+        this.hookService.register('Journal Entry', {
+            beforeSave: (doc, user) => {
                 // Auto-Name
                 if (!doc.name) {
                     doc.name = `JE-${Date.now().toString().slice(-6)}`;
@@ -286,16 +367,16 @@ export class BusinessLogicService {
 
                 // Validation: Debit must equal Credit
                 if (doc.difference > 0.01) {
-                    throw new Error(`Journal Entry is not balanced. Difference: ${doc.difference}`);\n                }
+                    throw new Error(`Journal Entry is not balanced. Difference: ${doc.difference}`);
+                }
 
                 return doc;
             },
-            afterSave: async (doc, user) => {
-                // Post to GL on Submit
-                if (doc.docstatus === 1 && doc.accounts && Array.isArray(doc.accounts)) {
+            onSubmit: async (doc, user) => {
+                if (doc.accounts && Array.isArray(doc.accounts)) {
                     await this.postJournalEntryToGL(doc);
                 }
-            }
+            },
         });
     }
 
@@ -314,12 +395,9 @@ export class BusinessLogicService {
 
                 return doc;
             },
-            afterSave: async (doc, user) => {
-                // Post to GL on Submit
-                if (doc.docstatus === 1) {
-                    await this.postPaymentEntryToGL(doc);
-                }
-            }
+            onSubmit: async (doc, user) => {
+                await this.postPaymentEntryToGL(doc);
+            },
         });
     }
 
@@ -342,7 +420,7 @@ export class BusinessLogicService {
             };
 
             await this.prisma.$queryRawUnsafe(
-                `INSERT INTO \"tabGLEntry\" 
+                `INSERT INTO "tabGLEntry" 
                 (name, posting_date, account, debit, credit, against, voucher_type, voucher_no, remarks, is_cancelled)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
                 glEntry.name, glEntry.posting_date, glEntry.account,
@@ -410,7 +488,7 @@ export class BusinessLogicService {
             };
 
             await this.prisma.$queryRawUnsafe(
-                `INSERT INTO \"tabGLEntry\" 
+                `INSERT INTO "tabGLEntry" 
                 (name, posting_date, account, debit, credit, against, voucher_type, voucher_no, remarks, is_cancelled, party_type, party)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
                 glEntry.name, glEntry.posting_date, glEntry.account,
@@ -421,35 +499,17 @@ export class BusinessLogicService {
         }
     }
 
-    /**
-     * Get list of counter accounts for \"against\" field
-     */
-    private getAgainstAccounts(accounts: any[], currentAccount: string): string {
+	    /**
+	     * Get list of counter accounts for "against" field
+	     */
+	    private getAgainstAccounts(accounts: any[], currentAccount: string): string {
         return accounts
             .filter(acc => acc.account !== currentAccount)
             .map(acc => acc.account)
             .join(', ');
     }
 
-    // ==================== TAX CALCULATION ENGINE ====================
-
-    registerSalesOrderHooks() {
-        this.registerHook('Sales Order', 'beforeSave', async (doc: any) => {
-            await this.calculateTaxes(doc);
-        });
-    }
-
-    registerInvoiceHooks() {
-        this.registerHook('Invoice', 'beforeSave', async (doc: any) => {
-            await this.calculateTaxes(doc);
-        });
-
-        this.registerHook('Invoice', 'afterSubmit', async (doc: any) => {
-            await this.postInvoiceToGL(doc);
-        });
-    }
-
-    private async calculateTaxes(doc: any) {
+	    private async calculateTaxes(doc: any) {
         const items = doc.items || [];
         let netTotal = 0;
 
@@ -525,15 +585,7 @@ export class BusinessLogicService {
         }
     }
 
-    // ==================== STOCK-TO-GL INTEGRATION ====================
-
-    registerPurchaseReceiptGLHooks() {
-        this.registerHook('Purchase Receipt', 'afterSubmit', async (doc: any) => {
-            await this.postPurchaseReceiptToGL(doc);
-        });
-    }
-
-    private async postPurchaseReceiptToGL(doc: any) {
+	    private async postPurchaseReceiptToGL(doc: any) {
         const tenantId = doc.tenant_id;
         const voucherType = 'Purchase Receipt';
         const voucherNo = doc.name;
@@ -563,13 +615,7 @@ export class BusinessLogicService {
         `, tenantId, postingDate, totalAmount, voucherType, voucherNo, supplier);
     }
 
-    registerDeliveryNoteGLHooks() {
-        this.registerHook('Delivery Note', 'afterSubmit', async (doc: any) => {
-            await this.postDeliveryNoteToCOGS(doc);
-        });
-    }
-
-    private async postDeliveryNoteToCOGS(doc: any) {
+	    private async postDeliveryNoteToCOGS(doc: any) {
         const tenantId = doc.tenant_id;
         const voucherType = 'Delivery Note';
         const voucherNo = doc.name;
@@ -594,7 +640,6 @@ export class BusinessLogicService {
                                         voucher_type, voucher_no, against, docstatus)
                 VALUES ($1, gen_random_uuid()::text, $2, 'Stock Asset', 0, $3, $4, $5, 'Cost of Goods Sold', 1)
             `, tenantId, postingDate, valuationAmount, voucherType, voucherNo);
-        }
-    }
+	    }
 }
-
+}

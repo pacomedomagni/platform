@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { DocTypeDefinition, DocFieldDefinition } from './types';
+import { assertSafeColumnName, toSafeTableName } from './identifiers';
 
 @Injectable()
 export class SchemaService {
@@ -81,6 +82,12 @@ export class SchemaService {
    */
   async syncDocType(def: DocTypeDefinition) {
     this.logger.log(`Syncing metadata for: ${def.name}`);
+
+    // Validate names early since they may be used as SQL identifiers later.
+    this.getTableName(def.name);
+    for (const field of def.fields) {
+      assertSafeColumnName(field.name);
+    }
     
     // 1. Upsert DocType Metadata
     await this.prisma.docType.upsert({
@@ -182,21 +189,21 @@ export class SchemaService {
   }
 
   private getTableName(docTypeName: string): string {
-    // "Sales Order" -> "tabSalesOrder"
-    return `tab${docTypeName.replace(/\s+/g, '')}`; 
+    return toSafeTableName(docTypeName);
   }
 
   private async ensureTable(docTypeName: string) {
     const tableName = this.getTableName(docTypeName);
     // Check if table exists
-    const result = await this.prisma.$queryRawUnsafe(`
-        SELECT EXISTS (
-            SELECT FROM information_schema.tables 
-            WHERE table_schema = 'public' 
-            AND table_name = '${tableName}'
-        );
-    `);
-    const exists = (result as any)[0]?.exists;
+    const result = await this.prisma.$queryRaw<{ exists: boolean }[]>`
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name = ${tableName}
+      ) AS "exists";
+    `;
+    const exists = result[0]?.exists;
 
     if (!exists) {
         this.logger.log(`Creating table ${tableName}`);
@@ -236,20 +243,22 @@ export class SchemaService {
 
   private async ensureColumn(docTypeName: string, field: DocFieldDefinition) {
      const tableName = this.getTableName(docTypeName);
-     const colName = field.name; 
-     
-     if (!/^[a-z0-9_]+$/.test(colName)) {
-         this.logger.warn(`Skipping invalid column name: ${colName}`);
-         return;
+     let colName: string;
+     try {
+       colName = assertSafeColumnName(field.name);
+     } catch {
+       this.logger.warn(`Skipping invalid column name: ${field.name}`);
+       return;
      }
-
+     
      // Check existence
-     const result = await this.prisma.$queryRawUnsafe(`
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_name='${tableName}' AND column_name='${colName}';
-     `);
-     const exists = (result as any).length > 0;
+     const result = await this.prisma.$queryRaw<{ column_name: string }[]>`
+       SELECT column_name
+       FROM information_schema.columns
+       WHERE table_name = ${tableName}
+         AND column_name = ${colName};
+     `;
+     const exists = result.length > 0;
 
      if (!exists) {
          const sqlType = this.mapTypeToSQL(field.type);

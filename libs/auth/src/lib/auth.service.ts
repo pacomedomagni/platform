@@ -1,13 +1,10 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { DbService } from '@platform/db';
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '@platform/db';
 import * as jwt from 'jsonwebtoken';
 
 @Injectable()
 export class AuthService {
-    // TODO: Move to Env
-    private readonly JWT_SECRET = process.env.JWT_SECRET || 'secretKey';
-
-    constructor(private readonly db: DbService) {}
+    constructor(private readonly db: PrismaService) {}
 
     async validateUser(email: string, pass: string): Promise<any> {
         const user = await this.db.user.findUnique({ where: { email } });
@@ -19,15 +16,19 @@ export class AuthService {
     }
 
     async login(user: any) {
+        const jwtSecret = process.env['JWT_SECRET'];
+        if (!jwtSecret) {
+            throw new Error('JWT_SECRET must be set when ENABLE_DEV_PASSWORD_LOGIN=true');
+        }
         const payload = { 
             username: user.email, 
             sub: user.id,
-            tenantId: user.tenantId,
+            tenant_id: user.tenantId,
             roles: user.roles 
         };
         
         return {
-            access_token: jwt.sign(payload, this.JWT_SECRET, { expiresIn: '1d' }),
+            access_token: jwt.sign(payload, jwtSecret, { expiresIn: '1d' }),
             user: user
         };
     }

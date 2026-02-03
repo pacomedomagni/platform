@@ -7,6 +7,9 @@ export class AuthController {
 
     @Post('login')
     async login(@Body() body: any) {
+        if (process.env.ENABLE_DEV_PASSWORD_LOGIN !== 'true') {
+            throw new UnauthorizedException('Password login disabled; use Keycloak/OIDC');
+        }
         const user = await this.authService.validateUser(body.email, body.password);
         if (!user) {
             throw new UnauthorizedException();

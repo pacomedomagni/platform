@@ -5,11 +5,11 @@ services:
     container_name: noslag_postgres
     restart: always
     environment:
-      POSTGRES_USER: noslag
-      POSTGRES_PASSWORD: noslag_password
-      POSTGRES_DB: noslag_db
+      POSTGRES_USER: ${POSTGRES_USER:-noslag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-noslag_password}
+      POSTGRES_DB: ${POSTGRES_DB:-noslag_db}
     ports:
-      - '5432:5432'
+      - '127.0.0.1:5432:5432'
     volumes:
       - ./docker/postgres_data:/var/lib/postgresql/data
       - ./docker/postgres_init:/docker-entrypoint-initdb.d
@@ -21,7 +21,7 @@ services:
     container_name: noslag_redis
     restart: always
     ports:
-      - '6379:6379'
+      - '127.0.0.1:6379:6379'
     networks:
       - noslag_network
 
@@ -31,15 +31,15 @@ services:
     command: start-dev --import-realm
     environment:
       KC_DB: postgres
-      KC_DB_URL: jdbc:postgresql://noslag_postgres:5432/keycloak
-      KC_DB_USERNAME: keycloak
-      KC_DB_PASSWORD: password
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB_URL: ${KC_DB_URL:-jdbc:postgresql://noslag_postgres:5432/keycloak}
+      KC_DB_USERNAME: ${KC_DB_USERNAME:-keycloak}
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD:-password}
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
     volumes:
       - ./docker/keycloak/noslag-realm.json:/opt/keycloak/data/import/noslag-realm.json
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     depends_on:
       - postgres
     networks:
@@ -54,8 +54,8 @@ services:
       - "--providers.docker.exposedbydefault=false"
       - "--entrypoints.web.address=:80"
     ports:
-      - "80:80"
-      - "8081:8080" # Dashboard
+      - "127.0.0.1:80:80"
+      - "127.0.0.1:8081:8080" # Dashboard (insecure; dev only)
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
@@ -69,18 +69,18 @@ services:
     container_name: noslag_api
     restart: always
     environment:
-      DATABASE_URL: postgresql://noslag:noslag_password@noslag_postgres:5432/noslag_db?schema=public
-      APP_DATABASE_URL: postgresql://app_user:app_password@noslag_postgres:5432/noslag_db?schema=public
-      REDIS_URL: rediss://noslag_redis:6379
-      KEYCLOAK_JWKS_URI: http://noslag_keycloak:8080/realms/noslag/protocol/openid-connect/certs
-      KEYCLOAK_ISSUER: http://localhost:8080/realms/noslag
-      PORT: 3000
+      DATABASE_URL: ${DATABASE_URL:-postgresql://noslag:noslag_password@noslag_postgres:5432/noslag_db?schema=public}
+      APP_DATABASE_URL: ${APP_DATABASE_URL:-postgresql://app_user:app_password@noslag_postgres:5432/noslag_db?schema=public}
+      REDIS_URL: ${REDIS_URL:-redis://noslag_redis:6379}
+      KEYCLOAK_JWKS_URI: ${KEYCLOAK_JWKS_URI:-http://noslag_keycloak:8080/realms/noslag/protocol/openid-connect/certs}
+      KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:8080/realms/noslag}
+      PORT: ${PORT:-3000}
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.noslag-api.rule=Host(`api.localhost`) || PathPrefix(`/api`)"
       - "traefik.http.services.noslag-api.loadbalancer.server.port=3000"
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       - postgres
       - redis
@@ -94,10 +94,10 @@ services:
     container_name: noslag_pgadmin
     restart: always
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@noslag.com
-      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@noslag.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
     ports:
-      - '5050:80'
+      - '127.0.0.1:5050:80'
     networks:
       - noslag_network
 
@@ -109,7 +109,7 @@ services:
     container_name: noslag_web
     restart: always
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost/api/v1
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost/api/v1}
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.noslag-web.rule=Host(`localhost`)"
