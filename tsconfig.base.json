@@ -21,7 +21,11 @@
       "@platform/meta": ["libs/meta/src/index.ts"],
       "@platform/ui": ["libs/ui/src/index.ts"],
       "@platform/ui/server": ["libs/ui/src/server.ts"],
-      "@platform/business-logic": ["libs/business-logic/src/index.ts"]
+      "@platform/business-logic": ["libs/business-logic/src/index.ts"],
+      "@platform/queue": ["libs/queue/src/index.ts"],
+      "@platform/storage": ["libs/storage/src/index.ts"],
+      "@platform/print": ["libs/print/src/index.ts"],
+      "@platform/email": ["libs/email/src/index.ts"]
     }
   },
   "exclude": ["node_modules", "tmp"]

@@ -23,6 +23,10 @@ export class BusinessLogicService {
         this.registerWarehouseMasterHooks();
         this.registerLocationMasterHooks();
         this.registerAccountMasterHooks();
+        this.registerCustomerMasterHooks();
+        this.registerSupplierMasterHooks();
+        this.registerAddressMasterHooks();
+        this.registerContactMasterHooks();
 
         // Stock Management
         this.registerPurchaseReceiptHooks();
@@ -42,6 +46,13 @@ export class BusinessLogicService {
         this.registerInvoiceHooks();
         this.registerPurchaseOrderHooks();
         this.registerPurchaseInvoiceHooks();
+        this.registerQuotationHooks();
+
+        // Banking
+        this.registerBankMasterHooks();
+        this.registerBankAccountHooks();
+        this.registerBankTransactionHooks();
+        this.registerBankReconciliationHooks();
 
         // Stock-to-GL Integration is handled in onSubmit hooks.
     }
@@ -430,6 +441,770 @@ export class BusinessLogicService {
                         },
                     });
                 });
+            },
+        });
+    }
+
+    private registerCustomerMasterHooks() {
+        this.hookService.register('Customer', {
+            beforeSave: async (doc, user) => {
+                // Auto-Name based on customer_name if not provided
+                if (!doc.name && doc.customer_name) {
+                    doc.name = doc.customer_name.replace(/[^a-zA-Z0-9]/g, '-').substring(0, 100);
+                }
+                // Set full_name for display
+                if (doc.customer_name) {
+                    doc.full_name = doc.customer_name;
+                }
+                return doc;
+            },
+            afterSave: async (doc, user) => {
+                const tenantId = user?.tenantId;
+                if (!tenantId) return;
+                if (!doc?.name) return;
+
+                await this.prisma.$transaction(async (tx) => {
+                    await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+                    
+                    // Build primary address string from address fields if present
+                    let primaryAddress = '';
+                    if (doc.address_line1) {
+                        primaryAddress = [
+                            doc.address_line1,
+                            doc.address_line2,
+                            doc.city,
+                            doc.state,
+                            doc.country,
+                            doc.postal_code
+                        ].filter(Boolean).join(', ');
+                    }
+
+                    await tx.customer.upsert({
+                        where: { tenantId_code: { tenantId, code: doc.name } },
+                        update: {
+                            customerName: doc.customer_name ?? doc.name,
+                            customerType: doc.customer_type ?? 'Company',
+                            customerGroup: doc.customer_group ?? null,
+                            territory: doc.territory ?? null,
+                            taxId: doc.tax_id ?? null,
+                            taxCategory: doc.tax_category ?? null,
+                            defaultCurrency: doc.default_currency ?? null,
+                            defaultPriceList: doc.default_price_list ?? null,
+                            defaultPaymentTerms: doc.payment_terms ?? null,
+                            creditLimit: doc.credit_limit ?? 0,
+                            creditDays: doc.credit_days ?? 0,
+                            receivableAccount: doc.receivable_account ?? null,
+                            primaryAddress: primaryAddress || doc.primary_address || null,
+                            primaryContact: doc.primary_contact ?? null,
+                            isActive: Boolean(doc.is_active ?? true),
+                            isFrozen: Boolean(doc.is_frozen ?? false),
+                            website: doc.website ?? null,
+                            notes: doc.notes ?? null,
+                        },
+                        create: {
+                            tenantId,
+                            code: doc.name,
+                            customerName: doc.customer_name ?? doc.name,
+                            customerType: doc.customer_type ?? 'Company',
+                            customerGroup: doc.customer_group ?? null,
+                            territory: doc.territory ?? null,
+                            taxId: doc.tax_id ?? null,
+                            taxCategory: doc.tax_category ?? null,
+                            defaultCurrency: doc.default_currency ?? null,
+                            defaultPriceList: doc.default_price_list ?? null,
+                            defaultPaymentTerms: doc.payment_terms ?? null,
+                            creditLimit: doc.credit_limit ?? 0,
+                            creditDays: doc.credit_days ?? 0,
+                            receivableAccount: doc.receivable_account ?? null,
+                            primaryAddress: primaryAddress || doc.primary_address || null,
+                            primaryContact: doc.primary_contact ?? null,
+                            isActive: Boolean(doc.is_active ?? true),
+                            isFrozen: Boolean(doc.is_frozen ?? false),
+                            website: doc.website ?? null,
+                            notes: doc.notes ?? null,
+                        },
+                    });
+
+                    // Handle address child table if present
+                    if (Array.isArray(doc.addresses)) {
+                        // Delete existing addresses for this customer
+                        await tx.address.deleteMany({
+                            where: { tenantId, linkDoctype: 'Customer', linkName: doc.name },
+                        });
+
+                        // Create new addresses
+                        for (const addr of doc.addresses) {
+                            await tx.address.create({
+                                data: {
+                                    tenantId,
+                                    linkDoctype: 'Customer',
+                                    linkName: doc.name,
+                                    addressType: addr.address_type ?? 'Billing',
+                                    addressTitle: addr.address_title ?? null,
+                                    addressLine1: addr.address_line1 ?? null,
+                                    addressLine2: addr.address_line2 ?? null,
+                                    city: addr.city ?? null,
+                                    state: addr.state ?? null,
+                                    country: addr.country ?? 'United States',
+                                    postalCode: addr.postal_code ?? null,
+                                    phone: addr.phone ?? null,
+                                    fax: addr.fax ?? null,
+                                    email: addr.email ?? null,
+                                    isPrimaryAddress: Boolean(addr.is_primary_address ?? false),
+                                    isShippingAddress: Boolean(addr.is_shipping_address ?? false),
+                                    isActive: true,
+                                },
+                            });
+                        }
+                    }
+
+                    // Handle contact links if present
+                    if (Array.isArray(doc.contacts)) {
+                        // Delete existing contact links
+                        await tx.contactLink.deleteMany({
+                            where: { tenantId, linkDoctype: 'Customer', linkName: doc.name },
+                        });
+
+                        // Create new contact links
+                        for (const contactName of doc.contacts) {
+                            const contact = await tx.contact.findUnique({
+                                where: { tenantId_name: { tenantId, name: contactName.contact ?? contactName } },
+                            });
+                            if (contact) {
+                                await tx.contactLink.create({
+                                    data: {
+                                        tenantId,
+                                        contactId: contact.id,
+                                        linkDoctype: 'Customer',
+                                        linkName: doc.name,
+                                    },
+                                });
+                            }
+                        }
+                    }
+                });
+            },
+        });
+    }
+
+    private registerSupplierMasterHooks() {
+        this.hookService.register('Supplier', {
+            beforeSave: async (doc, user) => {
+                // Auto-Name based on supplier_name if not provided
+                if (!doc.name && doc.supplier_name) {
+                    doc.name = doc.supplier_name.replace(/[^a-zA-Z0-9]/g, '-').substring(0, 100);
+                }
+                return doc;
+            },
+            afterSave: async (doc, user) => {
+                const tenantId = user?.tenantId;
+                if (!tenantId) return;
+                if (!doc?.name) return;
+
+                await this.prisma.$transaction(async (tx) => {
+                    await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+
+                    // Build primary address string from address fields if present
+                    let primaryAddress = '';
+                    if (doc.address_line1) {
+                        primaryAddress = [
+                            doc.address_line1,
+                            doc.address_line2,
+                            doc.city,
+                            doc.state,
+                            doc.country,
+                            doc.postal_code
+                        ].filter(Boolean).join(', ');
+                    }
+
+                    await tx.supplier.upsert({
+                        where: { tenantId_code: { tenantId, code: doc.name } },
+                        update: {
+                            supplierName: doc.supplier_name ?? doc.name,
+                            supplierType: doc.supplier_type ?? 'Company',
+                            supplierGroup: doc.supplier_group ?? null,
+                            country: doc.country ?? null,
+                            taxId: doc.tax_id ?? null,
+                            taxCategory: doc.tax_category ?? null,
+                            taxWithholdingCategory: doc.tax_withholding_category ?? null,
+                            defaultCurrency: doc.default_currency ?? null,
+                            defaultPriceList: doc.default_price_list ?? null,
+                            defaultPaymentTerms: doc.payment_terms ?? null,
+                            paymentDays: doc.payment_days ?? 0,
+                            payableAccount: doc.payable_account ?? null,
+                            expenseAccount: doc.expense_account ?? null,
+                            primaryAddress: primaryAddress || doc.primary_address || null,
+                            primaryContact: doc.primary_contact ?? null,
+                            isActive: Boolean(doc.is_active ?? true),
+                            isFrozen: Boolean(doc.is_frozen ?? false),
+                            website: doc.website ?? null,
+                            notes: doc.notes ?? null,
+                        },
+                        create: {
+                            tenantId,
+                            code: doc.name,
+                            supplierName: doc.supplier_name ?? doc.name,
+                            supplierType: doc.supplier_type ?? 'Company',
+                            supplierGroup: doc.supplier_group ?? null,
+                            country: doc.country ?? null,
+                            taxId: doc.tax_id ?? null,
+                            taxCategory: doc.tax_category ?? null,
+                            taxWithholdingCategory: doc.tax_withholding_category ?? null,
+                            defaultCurrency: doc.default_currency ?? null,
+                            defaultPriceList: doc.default_price_list ?? null,
+                            defaultPaymentTerms: doc.payment_terms ?? null,
+                            paymentDays: doc.payment_days ?? 0,
+                            payableAccount: doc.payable_account ?? null,
+                            expenseAccount: doc.expense_account ?? null,
+                            primaryAddress: primaryAddress || doc.primary_address || null,
+                            primaryContact: doc.primary_contact ?? null,
+                            isActive: Boolean(doc.is_active ?? true),
+                            isFrozen: Boolean(doc.is_frozen ?? false),
+                            website: doc.website ?? null,
+                            notes: doc.notes ?? null,
+                        },
+                    });
+
+                    // Handle address child table if present
+                    if (Array.isArray(doc.addresses)) {
+                        // Delete existing addresses for this supplier
+                        await tx.address.deleteMany({
+                            where: { tenantId, linkDoctype: 'Supplier', linkName: doc.name },
+                        });
+
+                        // Create new addresses
+                        for (const addr of doc.addresses) {
+                            await tx.address.create({
+                                data: {
+                                    tenantId,
+                                    linkDoctype: 'Supplier',
+                                    linkName: doc.name,
+                                    addressType: addr.address_type ?? 'Billing',
+                                    addressTitle: addr.address_title ?? null,
+                                    addressLine1: addr.address_line1 ?? null,
+                                    addressLine2: addr.address_line2 ?? null,
+                                    city: addr.city ?? null,
+                                    state: addr.state ?? null,
+                                    country: addr.country ?? 'United States',
+                                    postalCode: addr.postal_code ?? null,
+                                    phone: addr.phone ?? null,
+                                    fax: addr.fax ?? null,
+                                    email: addr.email ?? null,
+                                    isPrimaryAddress: Boolean(addr.is_primary_address ?? false),
+                                    isShippingAddress: Boolean(addr.is_shipping_address ?? false),
+                                    isActive: true,
+                                },
+                            });
+                        }
+                    }
+
+                    // Handle contact links if present
+                    if (Array.isArray(doc.contacts)) {
+                        // Delete existing contact links
+                        await tx.contactLink.deleteMany({
+                            where: { tenantId, linkDoctype: 'Supplier', linkName: doc.name },
+                        });
+
+                        // Create new contact links
+                        for (const contactName of doc.contacts) {
+                            const contact = await tx.contact.findUnique({
+                                where: { tenantId_name: { tenantId, name: contactName.contact ?? contactName } },
+                            });
+                            if (contact) {
+                                await tx.contactLink.create({
+                                    data: {
+                                        tenantId,
+                                        contactId: contact.id,
+                                        linkDoctype: 'Supplier',
+                                        linkName: doc.name,
+                                    },
+                                });
+                            }
+                        }
+                    }
+                });
+            },
+        });
+    }
+
+    private registerAddressMasterHooks() {
+        this.hookService.register('Address', {
+            beforeSave: async (doc, user) => {
+                // Auto-Name
+                if (!doc.name) {
+                    const parts = [
+                        doc.address_title || doc.link_name,
+                        doc.address_type || 'Address',
+                    ];
+                    doc.name = parts.filter(Boolean).join('-').replace(/[^a-zA-Z0-9-]/g, '').substring(0, 100);
+                }
+                return doc;
+            },
+            afterSave: async (doc, user) => {
+                const tenantId = user?.tenantId;
+                if (!tenantId) return;
+                if (!doc?.name) return;
+                if (!doc?.link_doctype || !doc?.link_name) return;
+
+                await this.prisma.$transaction(async (tx) => {
+                    await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+
+                    // Find existing address by unique combination
+                    const existing = await tx.address.findFirst({
+                        where: {
+                            tenantId,
+                            linkDoctype: doc.link_doctype,
+                            linkName: doc.link_name,
+                            addressType: doc.address_type ?? 'Billing',
+                        },
+                    });
+
+                    const addressData = {
+                        tenantId,
+                        linkDoctype: doc.link_doctype,
+                        linkName: doc.link_name,
+                        addressType: doc.address_type ?? 'Billing',
+                        addressTitle: doc.address_title ?? null,
+                        addressLine1: doc.address_line1 ?? null,
+                        addressLine2: doc.address_line2 ?? null,
+                        city: doc.city ?? null,
+                        state: doc.state ?? null,
+                        country: doc.country ?? 'United States',
+                        postalCode: doc.postal_code ?? null,
+                        phone: doc.phone ?? null,
+                        fax: doc.fax ?? null,
+                        email: doc.email ?? null,
+                        isPrimaryAddress: Boolean(doc.is_primary_address ?? false),
+                        isShippingAddress: Boolean(doc.is_shipping_address ?? false),
+                        isActive: Boolean(doc.is_active ?? true),
+                    };
+
+                    if (existing) {
+                        await tx.address.update({
+                            where: { id: existing.id },
+                            data: addressData,
+                        });
+                    } else {
+                        await tx.address.create({ data: addressData });
+                    }
+
+                    // If this is marked as primary, unmark others
+                    if (doc.is_primary_address) {
+                        await tx.address.updateMany({
+                            where: {
+                                tenantId,
+                                linkDoctype: doc.link_doctype,
+                                linkName: doc.link_name,
+                                isPrimaryAddress: true,
+                                NOT: { addressType: doc.address_type },
+                            },
+                            data: { isPrimaryAddress: false },
+                        });
+                    }
+                });
+            },
+        });
+    }
+
+    private registerContactMasterHooks() {
+        this.hookService.register('Contact', {
+            beforeSave: async (doc, user) => {
+                // Auto-Name and full_name
+                const fullName = [doc.first_name, doc.last_name].filter(Boolean).join(' ');
+                doc.full_name = fullName || doc.name;
+                
+                if (!doc.name) {
+                    doc.name = fullName.replace(/[^a-zA-Z0-9]/g, '-').substring(0, 100) || `CONTACT-${Date.now()}`;
+                }
+                return doc;
+            },
+            afterSave: async (doc, user) => {
+                const tenantId = user?.tenantId;
+                if (!tenantId) return;
+                if (!doc?.name) return;
+
+                await this.prisma.$transaction(async (tx) => {
+                    await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+
+                    const contact = await tx.contact.upsert({
+                        where: { tenantId_name: { tenantId, name: doc.name } },
+                        update: {
+                            firstName: doc.first_name ?? null,
+                            lastName: doc.last_name ?? null,
+                            fullName: doc.full_name ?? null,
+                            salutation: doc.salutation ?? null,
+                            designation: doc.designation ?? null,
+                            email: doc.email ?? null,
+                            phone: doc.phone ?? null,
+                            mobile: doc.mobile ?? null,
+                            isPrimaryContact: Boolean(doc.is_primary_contact ?? false),
+                            isBillingContact: Boolean(doc.is_billing_contact ?? false),
+                            isActive: Boolean(doc.is_active ?? true),
+                        },
+                        create: {
+                            tenantId,
+                            name: doc.name,
+                            firstName: doc.first_name ?? null,
+                            lastName: doc.last_name ?? null,
+                            fullName: doc.full_name ?? null,
+                            salutation: doc.salutation ?? null,
+                            designation: doc.designation ?? null,
+                            email: doc.email ?? null,
+                            phone: doc.phone ?? null,
+                            mobile: doc.mobile ?? null,
+                            isPrimaryContact: Boolean(doc.is_primary_contact ?? false),
+                            isBillingContact: Boolean(doc.is_billing_contact ?? false),
+                            isActive: Boolean(doc.is_active ?? true),
+                        },
+                    });
+
+                    // Handle links (child table linking contact to customers/suppliers)
+                    if (Array.isArray(doc.links)) {
+                        // Delete existing links
+                        await tx.contactLink.deleteMany({
+                            where: { tenantId, contactId: contact.id },
+                        });
+
+                        // Create new links
+                        for (const link of doc.links) {
+                            if (link.link_doctype && link.link_name) {
+                                await tx.contactLink.create({
+                                    data: {
+                                        tenantId,
+                                        contactId: contact.id,
+                                        linkDoctype: link.link_doctype,
+                                        linkName: link.link_name,
+                                    },
+                                });
+                            }
+                        }
+                    }
+                });
+            },
+        });
+    }
+
+    private registerQuotationHooks() {
+        this.hookService.register('Quotation', {
+            beforeSave: async (doc, user) => {
+                // Auto-Name
+                if (!doc.name) {
+                    doc.name = `QTN-${Date.now().toString().slice(-6)}`;
+                }
+
+                // Set customer name from customer link
+                if (doc.customer && !doc.customer_name) {
+                    const tenantId = user?.tenantId;
+                    if (tenantId) {
+                        const customer = await this.prisma.customer.findUnique({
+                            where: { tenantId_code: { tenantId, code: doc.customer } },
+                            select: { customerName: true },
+                        });
+                        if (customer) {
+                            doc.customer_name = customer.customerName;
+                        }
+                    }
+                }
+
+                // Calculate taxes and totals
+                await this.calculateTaxes(doc);
+
+                return doc;
+            },
+            onSubmit: async (doc, user) => {
+                const tenantId = user?.tenantId;
+                if (!tenantId) throw new Error('Missing tenantId in user context');
+                
+                // Set validity if not set
+                if (!doc.valid_till && doc.quotation_date) {
+                    const validityDays = doc.validity_days || 30;
+                    const validTill = new Date(doc.quotation_date);
+                    validTill.setDate(validTill.getDate() + validityDays);
+                    doc.valid_till = validTill.toISOString().slice(0, 10);
+                }
+
+                await this.updateDocStatus('Quotation', doc.name, 'Submitted', tenantId);
+            },
+            onCancel: async (doc, user) => {
+                const tenantId = user?.tenantId;
+                if (!tenantId) throw new Error('Missing tenantId in user context');
+                await this.updateDocStatus('Quotation', doc.name, 'Cancelled', tenantId);
+            },
+        });
+    }
+
+    // ==================== BANKING HOOKS ====================
+
+    private registerBankMasterHooks() {
+        this.hookService.register('Bank', {
+            beforeSave: async (doc, user) => {
+                if (!doc.name && doc.bank_name) {
+                    doc.name = doc.bank_name.replace(/[^a-zA-Z0-9]/g, '-').substring(0, 100);
+                }
+                return doc;
+            },
+            afterSave: async (doc, user) => {
+                const tenantId = user?.tenantId;
+                if (!tenantId) return;
+                if (!doc?.name) return;
+
+                await this.prisma.$transaction(async (tx) => {
+                    await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+                    await tx.bank.upsert({
+                        where: { tenantId_code: { tenantId, code: doc.name } },
+                        update: {
+                            bankName: doc.bank_name ?? doc.name,
+                            website: doc.website ?? null,
+                            swiftCode: doc.swift_code ?? null,
+                            isActive: Boolean(doc.is_active ?? true),
+                        },
+                        create: {
+                            tenantId,
+                            code: doc.name,
+                            bankName: doc.bank_name ?? doc.name,
+                            website: doc.website ?? null,
+                            swiftCode: doc.swift_code ?? null,
+                            isActive: Boolean(doc.is_active ?? true),
+                        },
+                    });
+                });
+            },
+        });
+    }
+
+    private registerBankAccountHooks() {
+        this.hookService.register('Bank Account', {
+            beforeSave: async (doc, user) => {
+                if (!doc.name) {
+                    const parts = [doc.bank, doc.account_type, doc.account_number?.slice(-4)];
+                    doc.name = parts.filter(Boolean).join('-').substring(0, 100) || `BA-${Date.now()}`;
+                }
+                return doc;
+            },
+            afterSave: async (doc, user) => {
+                const tenantId = user?.tenantId;
+                if (!tenantId) return;
+                if (!doc?.name) return;
+
+                await this.prisma.$transaction(async (tx) => {
+                    await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+                    await tx.bankAccount.upsert({
+                        where: { tenantId_name: { tenantId, name: doc.name } },
+                        update: {
+                            bankCode: doc.bank ?? null,
+                            accountNumber: doc.account_number ?? null,
+                            accountType: doc.account_type ?? 'Current',
+                            iban: doc.iban ?? null,
+                            branchCode: doc.branch_code ?? null,
+                            glAccount: doc.account ?? null,
+                            currency: doc.currency ?? 'USD',
+                            integrationId: doc.integration_id ?? null,
+                            isDefault: Boolean(doc.is_default ?? false),
+                            isActive: Boolean(doc.is_active ?? true),
+                        },
+                        create: {
+                            tenantId,
+                            name: doc.name,
+                            bankCode: doc.bank ?? null,
+                            accountNumber: doc.account_number ?? null,
+                            accountType: doc.account_type ?? 'Current',
+                            iban: doc.iban ?? null,
+                            branchCode: doc.branch_code ?? null,
+                            glAccount: doc.account ?? null,
+                            currency: doc.currency ?? 'USD',
+                            integrationId: doc.integration_id ?? null,
+                            isDefault: Boolean(doc.is_default ?? false),
+                            isActive: Boolean(doc.is_active ?? true),
+                        },
+                    });
+
+                    // Ensure the GL account exists
+                    if (doc.account) {
+                        await this.ensureAccount(tx, tenantId, doc.account);
+                    }
+                });
+            },
+        });
+    }
+
+    private registerBankTransactionHooks() {
+        this.hookService.register('Bank Transaction', {
+            beforeSave: async (doc, user) => {
+                if (!doc.name) {
+                    doc.name = `BT-${Date.now().toString().slice(-8)}`;
+                }
+                // Determine transaction type from amount if not set
+                if (!doc.transaction_type && doc.amount !== undefined) {
+                    doc.transaction_type = Number(doc.amount) >= 0 ? 'Credit' : 'Debit';
+                }
+                return doc;
+            },
+            afterSave: async (doc, user) => {
+                const tenantId = user?.tenantId;
+                if (!tenantId) return;
+                if (!doc?.name) return;
+
+                await this.prisma.$transaction(async (tx) => {
+                    await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+
+                    await tx.bankTransaction.upsert({
+                        where: { tenantId_name: { tenantId, name: doc.name } },
+                        update: {
+                            bankAccount: doc.bank_account,
+                            transactionDate: new Date(`${doc.date || doc.transaction_date}T00:00:00.000Z`),
+                            amount: Math.abs(doc.amount || 0),
+                            currency: doc.currency ?? 'USD',
+                            transactionType: doc.transaction_type ?? 'Credit',
+                            description: doc.description ?? null,
+                            referenceNumber: doc.reference_number ?? null,
+                            partyType: doc.party_type ?? null,
+                            party: doc.party ?? null,
+                            status: doc.status ?? 'Unreconciled',
+                            paymentEntry: doc.payment_entry ?? null,
+                            invoice: doc.invoice ?? null,
+                            importBatch: doc.import_batch ?? null,
+                            externalId: doc.external_id ?? null,
+                        },
+                        create: {
+                            tenantId,
+                            name: doc.name,
+                            bankAccount: doc.bank_account,
+                            transactionDate: new Date(`${doc.date || doc.transaction_date}T00:00:00.000Z`),
+                            amount: Math.abs(doc.amount || 0),
+                            currency: doc.currency ?? 'USD',
+                            transactionType: doc.transaction_type ?? 'Credit',
+                            description: doc.description ?? null,
+                            referenceNumber: doc.reference_number ?? null,
+                            partyType: doc.party_type ?? null,
+                            party: doc.party ?? null,
+                            status: doc.status ?? 'Unreconciled',
+                            paymentEntry: doc.payment_entry ?? null,
+                            invoice: doc.invoice ?? null,
+                            importBatch: doc.import_batch ?? null,
+                            externalId: doc.external_id ?? null,
+                        },
+                    });
+
+                    // Auto-match using rules if unreconciled
+                    if (doc.status !== 'Reconciled' && doc.status !== 'Matched') {
+                        await this.tryAutoMatchBankTransaction(tx, tenantId, doc);
+                    }
+                });
+            },
+        });
+    }
+
+    private async tryAutoMatchBankTransaction(tx: Prisma.TransactionClient, tenantId: string, doc: any) {
+        // Get matching rules sorted by priority
+        const rules = await tx.bankMatchingRule.findMany({
+            where: {
+                tenantId,
+                isActive: true,
+                OR: [
+                    { bankAccount: null },
+                    { bankAccount: doc.bank_account },
+                ],
+            },
+            orderBy: { priority: 'desc' },
+        });
+
+        for (const rule of rules) {
+            let matches = true;
+
+            // Check description contains
+            if (rule.descriptionContains && doc.description) {
+                matches = matches && doc.description.toLowerCase().includes(rule.descriptionContains.toLowerCase());
+            }
+
+            // Check description regex
+            if (rule.descriptionRegex && doc.description) {
+                try {
+                    const regex = new RegExp(rule.descriptionRegex, 'i');
+                    matches = matches && regex.test(doc.description);
+                } catch {
+                    // Invalid regex, skip
+                    continue;
+                }
+            }
+
+            // Check amount range
+            const amount = Math.abs(Number(doc.amount || 0));
+            if (rule.amountMin !== null && amount < Number(rule.amountMin)) matches = false;
+            if (rule.amountMax !== null && amount > Number(rule.amountMax)) matches = false;
+
+            // Check transaction type
+            if (rule.transactionType && rule.transactionType !== doc.transaction_type) matches = false;
+
+            if (matches) {
+                // Apply the rule - update the bank transaction with categorization
+                await tx.bankTransaction.update({
+                    where: { tenantId_name: { tenantId, name: doc.name } },
+                    data: {
+                        partyType: rule.partyType ?? doc.party_type,
+                        party: rule.party ?? doc.party,
+                        status: 'Matched',
+                    },
+                });
+                this.logger.log(`Auto-matched bank transaction ${doc.name} using rule ${rule.name}`);
+                break;
+            }
+        }
+    }
+
+    private registerBankReconciliationHooks() {
+        this.hookService.register('Bank Reconciliation', {
+            beforeSave: async (doc, user) => {
+                if (!doc.name) {
+                    doc.name = `RECON-${doc.bank_account}-${Date.now().toString().slice(-6)}`;
+                }
+
+                // Calculate difference
+                const closing = Number(doc.closing_balance || 0);
+                const statement = Number(doc.bank_statement_balance || 0);
+                doc.difference = Math.abs(closing - statement);
+
+                return doc;
+            },
+            onSubmit: async (doc, user) => {
+                const tenantId = user?.tenantId;
+                if (!tenantId) throw new Error('Missing tenantId in user context');
+
+                // Mark all matched transactions as reconciled
+                await this.prisma.$transaction(async (tx) => {
+                    await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+
+                    // Get the reconciliation record
+                    const recon = await tx.bankReconciliation.findUnique({
+                        where: { tenantId_name: { tenantId, name: doc.name } },
+                        include: { details: true },
+                    });
+
+                    if (recon) {
+                        // Update all matched bank transactions to Reconciled status
+                        for (const detail of recon.details) {
+                            if (detail.isMatched && detail.bankTransaction) {
+                                await tx.bankTransaction.update({
+                                    where: { tenantId_name: { tenantId, name: detail.bankTransaction } },
+                                    data: { 
+                                        status: 'Reconciled',
+                                        reconciliationId: recon.id,
+                                    },
+                                });
+                            }
+                        }
+
+                        // Update bank account balance
+                        await tx.bankAccount.update({
+                            where: { tenantId_name: { tenantId, name: doc.bank_account } },
+                            data: {
+                                bankBalance: doc.bank_statement_balance ?? 0,
+                                lastSyncDate: new Date(doc.to_date),
+                            },
+                        });
+                    }
+                });
+
+                await this.updateDocStatus('Bank Reconciliation', doc.name, 'Reconciled', tenantId);
             },
         });
     }

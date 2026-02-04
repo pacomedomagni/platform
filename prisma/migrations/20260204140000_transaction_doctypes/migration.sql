@@ -1,0 +1,747 @@
+-- Transaction DocTypes: Quotation, Sales Order, Delivery Note, Sales Invoice
+-- Purchase Order, Purchase Receipt, Purchase Invoice, Payment Entry
+
+-- ==================== SALES CYCLE ====================
+
+-- Quotation
+CREATE TABLE "tabQuotation" (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    
+    -- Customer info
+    customer VARCHAR(255),
+    customer_name VARCHAR(500),
+    customer_address TEXT,
+    
+    -- Dates
+    quotation_date DATE DEFAULT CURRENT_DATE,
+    valid_till DATE,
+    
+    -- Status
+    docstatus INT DEFAULT 0, -- 0=Draft, 1=Submitted, 2=Cancelled
+    status VARCHAR(50) DEFAULT 'Draft',
+    
+    -- Totals
+    net_total DECIMAL(18,6) DEFAULT 0,
+    total_taxes DECIMAL(18,6) DEFAULT 0,
+    discount_amount DECIMAL(18,6) DEFAULT 0,
+    grand_total DECIMAL(18,6) DEFAULT 0,
+    
+    -- Currency
+    currency VARCHAR(10) DEFAULT 'USD',
+    
+    -- References
+    order_type VARCHAR(50) DEFAULT 'Sales',
+    
+    -- Terms
+    terms TEXT,
+    notes TEXT,
+    
+    -- Metadata
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    owner VARCHAR(255),
+    modified_by VARCHAR(255),
+    
+    UNIQUE(tenant_id, name)
+);
+
+CREATE INDEX idx_quotation_tenant ON "tabQuotation"(tenant_id);
+CREATE INDEX idx_quotation_customer ON "tabQuotation"(tenant_id, customer);
+CREATE INDEX idx_quotation_date ON "tabQuotation"(tenant_id, quotation_date);
+
+-- Quotation Item (child table)
+CREATE TABLE "tabQuotation Item" (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(255),
+    parent VARCHAR(255) NOT NULL,
+    parenttype VARCHAR(100) DEFAULT 'Quotation',
+    parentfield VARCHAR(100) DEFAULT 'items',
+    idx INT DEFAULT 0,
+    
+    item_code VARCHAR(255) NOT NULL,
+    item_name VARCHAR(500),
+    description TEXT,
+    qty DECIMAL(18,6) DEFAULT 1,
+    uom VARCHAR(50),
+    conversion_factor DECIMAL(18,6) DEFAULT 1,
+    rate DECIMAL(18,6) DEFAULT 0,
+    amount DECIMAL(18,6) DEFAULT 0,
+    
+    -- Warehouse (for stock check)
+    warehouse VARCHAR(255),
+    
+    -- Discount
+    discount_percentage DECIMAL(18,6) DEFAULT 0,
+    discount_amount DECIMAL(18,6) DEFAULT 0,
+    
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_quotation_item_parent ON "tabQuotation Item"(parent, parenttype);
+CREATE INDEX idx_quotation_item_tenant ON "tabQuotation Item"(tenant_id);
+
+-- Sales Order
+CREATE TABLE "tabSales Order" (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    
+    -- Customer info
+    customer VARCHAR(255),
+    customer_name VARCHAR(500),
+    customer_address TEXT,
+    shipping_address TEXT,
+    
+    -- Dates
+    date DATE DEFAULT CURRENT_DATE,
+    delivery_date DATE,
+    
+    -- Status
+    docstatus INT DEFAULT 0,
+    status VARCHAR(50) DEFAULT 'Draft',
+    
+    -- Totals
+    net_total DECIMAL(18,6) DEFAULT 0,
+    total_taxes DECIMAL(18,6) DEFAULT 0,
+    discount_amount DECIMAL(18,6) DEFAULT 0,
+    grand_total DECIMAL(18,6) DEFAULT 0,
+    
+    -- Currency
+    currency VARCHAR(10) DEFAULT 'USD',
+    
+    -- References
+    quotation VARCHAR(255),
+    po_no VARCHAR(255), -- Customer PO number
+    po_date DATE,
+    
+    -- Delivery
+    reserve_stock BOOLEAN DEFAULT false,
+    
+    -- Terms
+    terms TEXT,
+    notes TEXT,
+    
+    -- Metadata
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    owner VARCHAR(255),
+    modified_by VARCHAR(255),
+    
+    UNIQUE(tenant_id, name)
+);
+
+CREATE INDEX idx_sales_order_tenant ON "tabSales Order"(tenant_id);
+CREATE INDEX idx_sales_order_customer ON "tabSales Order"(tenant_id, customer);
+CREATE INDEX idx_sales_order_date ON "tabSales Order"(tenant_id, date);
+CREATE INDEX idx_sales_order_status ON "tabSales Order"(tenant_id, status);
+
+-- Sales Order Item
+CREATE TABLE "tabSales Order Item" (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(255),
+    parent VARCHAR(255) NOT NULL,
+    parenttype VARCHAR(100) DEFAULT 'Sales Order',
+    parentfield VARCHAR(100) DEFAULT 'items',
+    idx INT DEFAULT 0,
+    
+    item_code VARCHAR(255) NOT NULL,
+    item_name VARCHAR(500),
+    description TEXT,
+    qty DECIMAL(18,6) DEFAULT 1,
+    uom VARCHAR(50),
+    conversion_factor DECIMAL(18,6) DEFAULT 1,
+    rate DECIMAL(18,6) DEFAULT 0,
+    amount DECIMAL(18,6) DEFAULT 0,
+    
+    warehouse VARCHAR(255),
+    location VARCHAR(255),
+    batch_no VARCHAR(255),
+    
+    -- Progress tracking
+    delivered_qty DECIMAL(18,6) DEFAULT 0,
+    billed_qty DECIMAL(18,6) DEFAULT 0,
+    
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_sales_order_item_parent ON "tabSales Order Item"(parent, parenttype);
+CREATE INDEX idx_sales_order_item_tenant ON "tabSales Order Item"(tenant_id);
+
+-- Delivery Note
+CREATE TABLE "tabDelivery Note" (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    
+    -- Customer info
+    customer VARCHAR(255),
+    customer_name VARCHAR(500),
+    shipping_address TEXT,
+    
+    -- Dates
+    posting_date DATE DEFAULT CURRENT_DATE,
+    posting_time TIME,
+    
+    -- Status
+    docstatus INT DEFAULT 0,
+    status VARCHAR(50) DEFAULT 'Draft',
+    
+    -- Totals
+    total_qty DECIMAL(18,6) DEFAULT 0,
+    
+    -- References
+    sales_order VARCHAR(255),
+    
+    -- Stock settings
+    stock_consumption_strategy VARCHAR(10) DEFAULT 'FIFO',
+    
+    -- Transport
+    transporter VARCHAR(255),
+    vehicle_no VARCHAR(100),
+    driver VARCHAR(255),
+    lr_no VARCHAR(255),
+    lr_date DATE,
+    
+    -- Notes
+    notes TEXT,
+    
+    -- Metadata
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    owner VARCHAR(255),
+    modified_by VARCHAR(255),
+    
+    UNIQUE(tenant_id, name)
+);
+
+CREATE INDEX idx_delivery_note_tenant ON "tabDelivery Note"(tenant_id);
+CREATE INDEX idx_delivery_note_customer ON "tabDelivery Note"(tenant_id, customer);
+CREATE INDEX idx_delivery_note_date ON "tabDelivery Note"(tenant_id, posting_date);
+
+-- Delivery Note Item
+CREATE TABLE "tabDelivery Note Item" (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(255),
+    parent VARCHAR(255) NOT NULL,
+    parenttype VARCHAR(100) DEFAULT 'Delivery Note',
+    parentfield VARCHAR(100) DEFAULT 'items',
+    idx INT DEFAULT 0,
+    
+    item_code VARCHAR(255) NOT NULL,
+    item_name VARCHAR(500),
+    description TEXT,
+    qty DECIMAL(18,6) DEFAULT 1,
+    uom VARCHAR(50),
+    conversion_factor DECIMAL(18,6) DEFAULT 1,
+    rate DECIMAL(18,6) DEFAULT 0,
+    amount DECIMAL(18,6) DEFAULT 0,
+    valuation_amount DECIMAL(18,6) DEFAULT 0,
+    
+    warehouse VARCHAR(255),
+    location VARCHAR(255),
+    batch_no VARCHAR(255),
+    serial_nos TEXT,
+    
+    sales_order VARCHAR(255),
+    
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_delivery_note_item_parent ON "tabDelivery Note Item"(parent, parenttype);
+CREATE INDEX idx_delivery_note_item_tenant ON "tabDelivery Note Item"(tenant_id);
+
+-- Invoice (Sales Invoice)
+CREATE TABLE "tabInvoice" (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    
+    -- Customer info
+    customer VARCHAR(255),
+    customer_name VARCHAR(500),
+    customer_address TEXT,
+    customer_tax_id VARCHAR(100),
+    
+    -- Dates
+    posting_date DATE DEFAULT CURRENT_DATE,
+    due_date DATE,
+    
+    -- Status
+    docstatus INT DEFAULT 0,
+    status VARCHAR(50) DEFAULT 'Draft',
+    
+    -- Totals
+    net_total DECIMAL(18,6) DEFAULT 0,
+    total_taxes DECIMAL(18,6) DEFAULT 0,
+    discount_amount DECIMAL(18,6) DEFAULT 0,
+    grand_total DECIMAL(18,6) DEFAULT 0,
+    outstanding_amount DECIMAL(18,6) DEFAULT 0,
+    
+    -- Currency
+    currency VARCHAR(10) DEFAULT 'USD',
+    
+    -- Accounts
+    debit_to VARCHAR(255) DEFAULT 'Accounts Receivable',
+    
+    -- References
+    sales_order VARCHAR(255),
+    delivery_note VARCHAR(255),
+    
+    -- Terms
+    terms TEXT,
+    notes TEXT,
+    
+    -- Metadata
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    owner VARCHAR(255),
+    modified_by VARCHAR(255),
+    
+    UNIQUE(tenant_id, name)
+);
+
+CREATE INDEX idx_invoice_tenant ON "tabInvoice"(tenant_id);
+CREATE INDEX idx_invoice_customer ON "tabInvoice"(tenant_id, customer);
+CREATE INDEX idx_invoice_date ON "tabInvoice"(tenant_id, posting_date);
+CREATE INDEX idx_invoice_status ON "tabInvoice"(tenant_id, status);
+
+-- Invoice Item
+CREATE TABLE "tabInvoice Item" (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(255),
+    parent VARCHAR(255) NOT NULL,
+    parenttype VARCHAR(100) DEFAULT 'Invoice',
+    parentfield VARCHAR(100) DEFAULT 'items',
+    idx INT DEFAULT 0,
+    
+    item_code VARCHAR(255) NOT NULL,
+    item_name VARCHAR(500),
+    description TEXT,
+    qty DECIMAL(18,6) DEFAULT 1,
+    uom VARCHAR(50),
+    conversion_factor DECIMAL(18,6) DEFAULT 1,
+    rate DECIMAL(18,6) DEFAULT 0,
+    amount DECIMAL(18,6) DEFAULT 0,
+    
+    income_account VARCHAR(255) DEFAULT 'Sales',
+    
+    sales_order VARCHAR(255),
+    delivery_note VARCHAR(255),
+    
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_invoice_item_parent ON "tabInvoice Item"(parent, parenttype);
+CREATE INDEX idx_invoice_item_tenant ON "tabInvoice Item"(tenant_id);
+
+-- ==================== PURCHASE CYCLE ====================
+
+-- Purchase Order
+CREATE TABLE "tabPurchase Order" (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    
+    -- Supplier info
+    supplier VARCHAR(255),
+    supplier_name VARCHAR(500),
+    supplier_address TEXT,
+    
+    -- Dates
+    date DATE DEFAULT CURRENT_DATE,
+    schedule_date DATE,
+    
+    -- Status
+    docstatus INT DEFAULT 0,
+    status VARCHAR(50) DEFAULT 'Draft',
+    
+    -- Totals
+    net_total DECIMAL(18,6) DEFAULT 0,
+    total_taxes DECIMAL(18,6) DEFAULT 0,
+    discount_amount DECIMAL(18,6) DEFAULT 0,
+    grand_total DECIMAL(18,6) DEFAULT 0,
+    
+    -- Currency
+    currency VARCHAR(10) DEFAULT 'USD',
+    
+    -- Terms
+    terms TEXT,
+    notes TEXT,
+    
+    -- Metadata
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    owner VARCHAR(255),
+    modified_by VARCHAR(255),
+    
+    UNIQUE(tenant_id, name)
+);
+
+CREATE INDEX idx_purchase_order_tenant ON "tabPurchase Order"(tenant_id);
+CREATE INDEX idx_purchase_order_supplier ON "tabPurchase Order"(tenant_id, supplier);
+CREATE INDEX idx_purchase_order_date ON "tabPurchase Order"(tenant_id, date);
+CREATE INDEX idx_purchase_order_status ON "tabPurchase Order"(tenant_id, status);
+
+-- Purchase Order Item
+CREATE TABLE "tabPurchase Order Item" (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(255),
+    parent VARCHAR(255) NOT NULL,
+    parenttype VARCHAR(100) DEFAULT 'Purchase Order',
+    parentfield VARCHAR(100) DEFAULT 'items',
+    idx INT DEFAULT 0,
+    
+    item_code VARCHAR(255) NOT NULL,
+    item_name VARCHAR(500),
+    description TEXT,
+    qty DECIMAL(18,6) DEFAULT 1,
+    uom VARCHAR(50),
+    conversion_factor DECIMAL(18,6) DEFAULT 1,
+    rate DECIMAL(18,6) DEFAULT 0,
+    amount DECIMAL(18,6) DEFAULT 0,
+    
+    warehouse VARCHAR(255),
+    
+    -- Progress tracking
+    received_qty DECIMAL(18,6) DEFAULT 0,
+    billed_qty DECIMAL(18,6) DEFAULT 0,
+    
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_purchase_order_item_parent ON "tabPurchase Order Item"(parent, parenttype);
+CREATE INDEX idx_purchase_order_item_tenant ON "tabPurchase Order Item"(tenant_id);
+
+-- Purchase Receipt
+CREATE TABLE "tabPurchase Receipt" (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    
+    -- Supplier info
+    supplier VARCHAR(255),
+    supplier_name VARCHAR(500),
+    
+    -- Dates
+    posting_date DATE DEFAULT CURRENT_DATE,
+    posting_time TIME,
+    
+    -- Status
+    docstatus INT DEFAULT 0,
+    status VARCHAR(50) DEFAULT 'Draft',
+    
+    -- Totals
+    total_qty DECIMAL(18,6) DEFAULT 0,
+    total_amount DECIMAL(18,6) DEFAULT 0,
+    
+    -- References
+    purchase_order VARCHAR(255),
+    
+    -- Notes
+    notes TEXT,
+    
+    -- Metadata
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    owner VARCHAR(255),
+    modified_by VARCHAR(255),
+    
+    UNIQUE(tenant_id, name)
+);
+
+CREATE INDEX idx_purchase_receipt_tenant ON "tabPurchase Receipt"(tenant_id);
+CREATE INDEX idx_purchase_receipt_supplier ON "tabPurchase Receipt"(tenant_id, supplier);
+CREATE INDEX idx_purchase_receipt_date ON "tabPurchase Receipt"(tenant_id, posting_date);
+
+-- Purchase Receipt Item
+CREATE TABLE "tabPurchase Receipt Item" (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(255),
+    parent VARCHAR(255) NOT NULL,
+    parenttype VARCHAR(100) DEFAULT 'Purchase Receipt',
+    parentfield VARCHAR(100) DEFAULT 'items',
+    idx INT DEFAULT 0,
+    
+    item_code VARCHAR(255) NOT NULL,
+    item_name VARCHAR(500),
+    description TEXT,
+    qty DECIMAL(18,6) DEFAULT 1,
+    uom VARCHAR(50),
+    conversion_factor DECIMAL(18,6) DEFAULT 1,
+    rate DECIMAL(18,6) DEFAULT 0,
+    amount DECIMAL(18,6) DEFAULT 0,
+    
+    warehouse VARCHAR(255),
+    location VARCHAR(255),
+    batch_no VARCHAR(255),
+    expiry_date DATE,
+    serial_nos TEXT,
+    
+    purchase_order VARCHAR(255),
+    
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_purchase_receipt_item_parent ON "tabPurchase Receipt Item"(parent, parenttype);
+CREATE INDEX idx_purchase_receipt_item_tenant ON "tabPurchase Receipt Item"(tenant_id);
+
+-- Purchase Invoice
+CREATE TABLE "tabPurchase Invoice" (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    
+    -- Supplier info
+    supplier VARCHAR(255),
+    supplier_name VARCHAR(500),
+    supplier_address TEXT,
+    
+    -- Dates
+    posting_date DATE DEFAULT CURRENT_DATE,
+    due_date DATE,
+    
+    -- Status
+    docstatus INT DEFAULT 0,
+    status VARCHAR(50) DEFAULT 'Draft',
+    
+    -- Totals
+    net_total DECIMAL(18,6) DEFAULT 0,
+    total_taxes DECIMAL(18,6) DEFAULT 0,
+    discount_amount DECIMAL(18,6) DEFAULT 0,
+    grand_total DECIMAL(18,6) DEFAULT 0,
+    outstanding_amount DECIMAL(18,6) DEFAULT 0,
+    
+    -- Currency
+    currency VARCHAR(10) DEFAULT 'USD',
+    
+    -- Accounts
+    credit_to VARCHAR(255) DEFAULT 'Accounts Payable',
+    
+    -- References
+    purchase_order VARCHAR(255),
+    purchase_receipt VARCHAR(255),
+    bill_no VARCHAR(255),
+    bill_date DATE,
+    
+    -- Terms
+    terms TEXT,
+    notes TEXT,
+    
+    -- Metadata
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    owner VARCHAR(255),
+    modified_by VARCHAR(255),
+    
+    UNIQUE(tenant_id, name)
+);
+
+CREATE INDEX idx_purchase_invoice_tenant ON "tabPurchase Invoice"(tenant_id);
+CREATE INDEX idx_purchase_invoice_supplier ON "tabPurchase Invoice"(tenant_id, supplier);
+CREATE INDEX idx_purchase_invoice_date ON "tabPurchase Invoice"(tenant_id, posting_date);
+CREATE INDEX idx_purchase_invoice_status ON "tabPurchase Invoice"(tenant_id, status);
+
+-- Purchase Invoice Item
+CREATE TABLE "tabPurchase Invoice Item" (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(255),
+    parent VARCHAR(255) NOT NULL,
+    parenttype VARCHAR(100) DEFAULT 'Purchase Invoice',
+    parentfield VARCHAR(100) DEFAULT 'items',
+    idx INT DEFAULT 0,
+    
+    item_code VARCHAR(255) NOT NULL,
+    item_name VARCHAR(500),
+    description TEXT,
+    qty DECIMAL(18,6) DEFAULT 1,
+    uom VARCHAR(50),
+    conversion_factor DECIMAL(18,6) DEFAULT 1,
+    rate DECIMAL(18,6) DEFAULT 0,
+    amount DECIMAL(18,6) DEFAULT 0,
+    
+    expense_account VARCHAR(255) DEFAULT 'Expenses',
+    
+    purchase_order VARCHAR(255),
+    purchase_receipt VARCHAR(255),
+    
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_purchase_invoice_item_parent ON "tabPurchase Invoice Item"(parent, parenttype);
+CREATE INDEX idx_purchase_invoice_item_tenant ON "tabPurchase Invoice Item"(tenant_id);
+
+-- ==================== PAYMENT ====================
+
+-- Payment Entry
+CREATE TABLE "tabPayment Entry" (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    
+    -- Type
+    payment_type VARCHAR(50) NOT NULL, -- 'Receive' or 'Pay'
+    
+    -- Party
+    party_type VARCHAR(50), -- 'Customer' or 'Supplier'
+    party VARCHAR(255),
+    party_name VARCHAR(500),
+    
+    -- Dates
+    posting_date DATE DEFAULT CURRENT_DATE,
+    
+    -- Status
+    docstatus INT DEFAULT 0,
+    status VARCHAR(50) DEFAULT 'Draft',
+    
+    -- Accounts
+    paid_from VARCHAR(255), -- Source account
+    paid_to VARCHAR(255),   -- Destination account
+    paid_from_account_currency VARCHAR(10),
+    paid_to_account_currency VARCHAR(10),
+    
+    -- Amounts
+    paid_amount DECIMAL(18,6) DEFAULT 0,
+    received_amount DECIMAL(18,6) DEFAULT 0,
+    
+    -- Reference
+    reference_no VARCHAR(255),
+    reference_date DATE,
+    
+    -- Mode
+    mode_of_payment VARCHAR(100),
+    
+    -- Notes
+    remarks TEXT,
+    
+    -- Metadata
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    owner VARCHAR(255),
+    modified_by VARCHAR(255),
+    
+    UNIQUE(tenant_id, name)
+);
+
+CREATE INDEX idx_payment_entry_tenant ON "tabPayment Entry"(tenant_id);
+CREATE INDEX idx_payment_entry_party ON "tabPayment Entry"(tenant_id, party_type, party);
+CREATE INDEX idx_payment_entry_date ON "tabPayment Entry"(tenant_id, posting_date);
+
+-- Payment Entry Reference (child table for allocating to invoices)
+CREATE TABLE "tabPayment Entry Reference" (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(255),
+    parent VARCHAR(255) NOT NULL,
+    parenttype VARCHAR(100) DEFAULT 'Payment Entry',
+    parentfield VARCHAR(100) DEFAULT 'references',
+    idx INT DEFAULT 0,
+    
+    reference_doctype VARCHAR(100) NOT NULL, -- 'Invoice' or 'Purchase Invoice'
+    reference_name VARCHAR(255) NOT NULL,
+    total_amount DECIMAL(18,6) DEFAULT 0,
+    outstanding_amount DECIMAL(18,6) DEFAULT 0,
+    allocated_amount DECIMAL(18,6) DEFAULT 0,
+    
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_payment_entry_ref_parent ON "tabPayment Entry Reference"(parent, parenttype);
+CREATE INDEX idx_payment_entry_ref_tenant ON "tabPayment Entry Reference"(tenant_id);
+
+-- ==================== TAX ====================
+
+-- Tax child table (shared by multiple doctypes)
+CREATE TABLE "tabSales Taxes and Charges" (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(255),
+    parent VARCHAR(255) NOT NULL,
+    parenttype VARCHAR(100),
+    parentfield VARCHAR(100) DEFAULT 'taxes',
+    idx INT DEFAULT 0,
+    
+    charge_type VARCHAR(50) DEFAULT 'On Net Total',
+    account_head VARCHAR(255),
+    description VARCHAR(500),
+    rate DECIMAL(18,6) DEFAULT 0,
+    tax_amount DECIMAL(18,6) DEFAULT 0,
+    total DECIMAL(18,6) DEFAULT 0,
+    
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_sales_taxes_parent ON "tabSales Taxes and Charges"(parent, parenttype);
+CREATE INDEX idx_sales_taxes_tenant ON "tabSales Taxes and Charges"(tenant_id);
+
+-- Enable Row Level Security on all tables
+ALTER TABLE "tabQuotation" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "tabQuotation Item" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "tabSales Order" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "tabSales Order Item" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "tabDelivery Note" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "tabDelivery Note Item" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "tabInvoice" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "tabInvoice Item" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "tabPurchase Order" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "tabPurchase Order Item" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "tabPurchase Receipt" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "tabPurchase Receipt Item" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "tabPurchase Invoice" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "tabPurchase Invoice Item" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "tabPayment Entry" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "tabPayment Entry Reference" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "tabSales Taxes and Charges" ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies
+CREATE POLICY quotation_tenant_isolation ON "tabQuotation"
+    USING (tenant_id::text = current_setting('app.tenant', true));
+CREATE POLICY quotation_item_tenant_isolation ON "tabQuotation Item"
+    USING (tenant_id::text = current_setting('app.tenant', true));
+CREATE POLICY sales_order_tenant_isolation ON "tabSales Order"
+    USING (tenant_id::text = current_setting('app.tenant', true));
+CREATE POLICY sales_order_item_tenant_isolation ON "tabSales Order Item"
+    USING (tenant_id::text = current_setting('app.tenant', true));
+CREATE POLICY delivery_note_tenant_isolation ON "tabDelivery Note"
+    USING (tenant_id::text = current_setting('app.tenant', true));
+CREATE POLICY delivery_note_item_tenant_isolation ON "tabDelivery Note Item"
+    USING (tenant_id::text = current_setting('app.tenant', true));
+CREATE POLICY invoice_tenant_isolation ON "tabInvoice"
+    USING (tenant_id::text = current_setting('app.tenant', true));
+CREATE POLICY invoice_item_tenant_isolation ON "tabInvoice Item"
+    USING (tenant_id::text = current_setting('app.tenant', true));
+CREATE POLICY purchase_order_tenant_isolation ON "tabPurchase Order"
+    USING (tenant_id::text = current_setting('app.tenant', true));
+CREATE POLICY purchase_order_item_tenant_isolation ON "tabPurchase Order Item"
+    USING (tenant_id::text = current_setting('app.tenant', true));
+CREATE POLICY purchase_receipt_tenant_isolation ON "tabPurchase Receipt"
+    USING (tenant_id::text = current_setting('app.tenant', true));
+CREATE POLICY purchase_receipt_item_tenant_isolation ON "tabPurchase Receipt Item"
+    USING (tenant_id::text = current_setting('app.tenant', true));
+CREATE POLICY purchase_invoice_tenant_isolation ON "tabPurchase Invoice"
+    USING (tenant_id::text = current_setting('app.tenant', true));
+CREATE POLICY purchase_invoice_item_tenant_isolation ON "tabPurchase Invoice Item"
+    USING (tenant_id::text = current_setting('app.tenant', true));
+CREATE POLICY payment_entry_tenant_isolation ON "tabPayment Entry"
+    USING (tenant_id::text = current_setting('app.tenant', true));
+CREATE POLICY payment_entry_ref_tenant_isolation ON "tabPayment Entry Reference"
+    USING (tenant_id::text = current_setting('app.tenant', true));
+CREATE POLICY sales_taxes_tenant_isolation ON "tabSales Taxes and Charges"
+    USING (tenant_id::text = current_setting('app.tenant', true));
