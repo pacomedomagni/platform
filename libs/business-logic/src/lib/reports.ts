@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { toSafeTableName } from '@platform/meta';
 
 @Injectable()
 export class ReportsService {
@@ -243,6 +244,7 @@ export class ReportsService {
     async getReceivableAging(tenantId: string, asOfDate: string) {
         const invoices = await this.prisma.$transaction(async (tx) => {
             await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+            const invoiceTable = toSafeTableName('Invoice');
             return tx.$queryRawUnsafe<any[]>(`
                 SELECT 
                     name,
@@ -252,7 +254,7 @@ export class ReportsService {
                     grand_total,
                     outstanding_amount,
                     EXTRACT(DAY FROM ($1::date - due_date)) as days_overdue
-                FROM "Invoice"
+                FROM "${invoiceTable}"
                 WHERE "tenantId" = $2
                   AND docstatus = 1
                   AND outstanding_amount > 0
@@ -298,6 +300,7 @@ export class ReportsService {
     async getPayableAging(tenantId: string, asOfDate: string) {
         const invoices = await this.prisma.$transaction(async (tx) => {
             await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+            const invoiceTable = toSafeTableName('Purchase Invoice');
             return tx.$queryRawUnsafe<any[]>(`
                 SELECT 
                     name,
@@ -307,7 +310,7 @@ export class ReportsService {
                     grand_total,
                     outstanding_amount,
                     EXTRACT(DAY FROM ($1::date - due_date)) as days_overdue
-                FROM "Purchase Invoice"
+                FROM "${invoiceTable}"
                 WHERE "tenantId" = $2
                   AND docstatus = 1
                   AND outstanding_amount > 0

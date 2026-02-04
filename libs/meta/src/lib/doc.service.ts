@@ -136,6 +136,7 @@ export class DocService {
                      'parent',
                      'parenttype',
                      'parentfield',
+                     'parentId',
                      'idx',
                      'tenantId',
                      ...childMeta.filter((f) => f.type !== 'Table').map((f) => f.name),
@@ -153,6 +154,7 @@ export class DocService {
                      childPayload.parent = parentDoc.name || parentDoc.id;
                      childPayload.parenttype = docType;
                      childPayload.parentfield = field.name;
+                     childPayload.parentId = parentDoc.id;
                      childPayload.idx = idx++;
                      childPayload.tenantId = tenantId;
                      
@@ -221,9 +223,11 @@ export class DocService {
               await this.setTenant(tx, tenantId);
               return tx.$queryRawUnsafe(`
                   SELECT * FROM "${childTableName}" 
-                  WHERE parent = $1 AND parentfield = $2 AND parenttype = $3
+                  WHERE ( "parentId" = $1 OR "parent" = $2 )
+                    AND parentfield = $3
+                    AND parenttype = $4
                   ORDER BY idx ASC
-              `, name, field.name, docType);
+              `, doc.id, doc.name ?? name, field.name, docType);
             });
             
             doc[field.name] = children;
@@ -360,6 +364,7 @@ export class DocService {
                      'parent',
                      'parenttype',
                      'parentfield',
+                     'parentId',
                      'idx',
                      'tenantId',
                      ...childMeta.filter((f) => f.type !== 'Table').map((f) => f.name),
@@ -372,17 +377,20 @@ export class DocService {
                  // Delete existing for this field
                  await tx.$executeRawUnsafe(`
                     DELETE FROM "${childTableName}" 
-                    WHERE parent = $1 AND parentfield = $2 AND parenttype = $3
-                 `, name, field.name, docType);
+                    WHERE ( "parentId" = $1 OR "parent" = $2 )
+                      AND parentfield = $3
+                      AND parenttype = $4
+                 `, parentDoc.id, parentDoc.name ?? name, field.name, docType);
 
                  // Insert new
                  if (children.length > 0) {
                      let idx = 0;
                      for (const child of children) {
                          const { id: cid, ...childPayload } = child;
-                         childPayload.parent = name;
+                         childPayload.parent = parentDoc.name ?? name;
                          childPayload.parenttype = docType;
                          childPayload.parentfield = field.name;
+                         childPayload.parentId = parentDoc.id;
                          childPayload.idx = idx++;
                          childPayload.tenantId = tenantId;
                          

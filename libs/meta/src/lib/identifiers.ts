@@ -22,7 +22,7 @@ export function toSafeTableName(docTypeName: string): string {
 export function assertSafeColumnName(columnName: string): string {
   const name = (columnName ?? '').trim();
   if (!name) throw new BadRequestException('Column name is required');
-  if (!/^[a-z0-9_]+$/.test(name)) {
+  if (!/^[A-Za-z0-9_]+$/.test(name)) {
     throw new BadRequestException(`Invalid column name: ${columnName}`);
   }
   if (name.length > MAX_PG_IDENTIFIER_LEN) {
@@ -30,4 +30,3 @@ export function assertSafeColumnName(columnName: string): string {
   }
   return name;
 }
-

@@ -220,8 +220,6 @@ export class StockService {
         select: { stockConsumptionStrategy: true, allowNegativeStock: true },
       });
       if (!tenant) throw new BadRequestException('Invalid tenant');
-      if (tenant.allowNegativeStock)
-        throw new BadRequestException('Negative stock must be disabled for this operation');
 
       const { item, warehouse, batch } = await this.resolveItemWarehouseBatch(
         tx,
@@ -263,13 +261,13 @@ export class StockService {
       const warehouseReserved = new Prisma.Decimal(warehouseBalance?.reservedQty ?? 0);
       const allowReserved = Boolean(input.consumeReservation);
       const available = allowReserved ? warehouseActual : warehouseActual.sub(warehouseReserved);
-      if (available.lt(qtyToIssue)) {
+      if (!tenant.allowNegativeStock && available.lt(qtyToIssue)) {
         throw new BadRequestException(
           `Insufficient stock in warehouse ${warehouse.code} for item ${item.code}`,
         );
       }
 
-      if (preferredLocationId) {
+      if (preferredLocationId && !tenant.allowNegativeStock) {
         const locationAvailable = await this.getLocationAvailableQty(tx, {
           tenantId: input.tenantId,
           itemId: item.id,
@@ -406,7 +404,7 @@ export class StockService {
       if (item.hasSerial && serials.length > 0) {
         await tx.serial.updateMany({
           where: { tenantId: input.tenantId, serialNo: { in: serials } },
-          data: { status: 'ISSUED', warehouseId: null, locationId: null, batchId: null },
+          data: { status: 'ISSUED', warehouseId: null, locationId: null },
         });
       }
 
@@ -435,8 +433,6 @@ export class StockService {
         select: { stockConsumptionStrategy: true, allowNegativeStock: true },
       });
       if (!tenant) throw new BadRequestException('Invalid tenant');
-      if (tenant.allowNegativeStock)
-        throw new BadRequestException('Negative stock must be disabled for this operation');
 
       const [from, to] = await Promise.all([
         this.resolveItemWarehouseBatch(
@@ -521,13 +517,13 @@ export class StockService {
       const available = new Prisma.Decimal(warehouseBalance?.actualQty ?? 0).sub(
         warehouseBalance?.reservedQty ?? 0,
       );
-      if (available.lt(qtyToMove)) {
+      if (!tenant.allowNegativeStock && available.lt(qtyToMove)) {
         throw new BadRequestException(
           `Insufficient stock in warehouse ${from.warehouse.code} for item ${from.item.code}`,
         );
       }
 
-      if (fromLocationId) {
+      if (fromLocationId && !tenant.allowNegativeStock) {
         const locationAvailable = await this.getLocationAvailableQty(tx, {
           tenantId: input.tenantId,
           itemId: from.item.id,
@@ -663,7 +659,7 @@ export class StockService {
       if (from.item.hasSerial && serials.length > 0) {
         await tx.serial.updateMany({
           where: { tenantId: input.tenantId, serialNo: { in: serials } },
-          data: { warehouseId: to.warehouse.id, locationId: toLocation.id, batchId: from.batch?.id ?? null },
+          data: { warehouseId: to.warehouse.id, locationId: toLocation.id },
         });
       }
 
@@ -1370,8 +1366,6 @@ export class StockService {
         select: { stockConsumptionStrategy: true, allowNegativeStock: true },
       });
       if (!tenant) throw new BadRequestException('Invalid tenant');
-      if (tenant.allowNegativeStock)
-        throw new BadRequestException('Negative stock must be disabled for this operation');
 
       const { item, warehouse, batch } = await this.resolveItemWarehouseBatch(
         tx,
@@ -1530,30 +1524,32 @@ export class StockService {
       const available = new Prisma.Decimal(warehouseBalance?.actualQty ?? 0).sub(
         warehouseBalance?.reservedQty ?? 0,
       );
-      if (available.lt(qtyToReduce)) {
+      if (!tenant.allowNegativeStock && available.lt(qtyToReduce)) {
         throw new BadRequestException(
           `Insufficient available stock in warehouse ${warehouse.code} for item ${item.code}`,
         );
       }
 
       // Reconciliation is per-location; ensure location has enough quantity.
-      if (currentQty.lt(qtyToReduce)) {
+      if (!tenant.allowNegativeStock && currentQty.lt(qtyToReduce)) {
         throw new BadRequestException(
           `Insufficient stock in location ${input.locationCode} for item ${item.code}`,
         );
       }
 
-      const locationAvailable = await this.getLocationAvailableQty(tx, {
-        tenantId: input.tenantId,
-        itemId: item.id,
-        warehouseId: warehouse.id,
-        locationId: location.id,
-        batchId: batch?.id,
-      });
-      if (locationAvailable.lt(qtyToReduce)) {
-        throw new BadRequestException(
-          `Insufficient available stock in location ${input.locationCode} for item ${item.code}`,
-        );
+      if (!tenant.allowNegativeStock) {
+        const locationAvailable = await this.getLocationAvailableQty(tx, {
+          tenantId: input.tenantId,
+          itemId: item.id,
+          warehouseId: warehouse.id,
+          locationId: location.id,
+          batchId: batch?.id,
+        });
+        if (locationAvailable.lt(qtyToReduce)) {
+          throw new BadRequestException(
+            `Insufficient available stock in location ${input.locationCode} for item ${item.code}`,
+          );
+        }
       }
 
       if (item.hasSerial) {
@@ -1645,7 +1641,7 @@ export class StockService {
       if (item.hasSerial && serials.length > 0) {
         await tx.serial.updateMany({
           where: { tenantId: input.tenantId, serialNo: { in: serials } },
-          data: { status: 'ISSUED', warehouseId: null, locationId: null, batchId: null },
+          data: { status: 'ISSUED', warehouseId: null, locationId: null },
         });
       }
 

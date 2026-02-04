@@ -189,6 +189,7 @@ export class SchemaService implements OnModuleInit {
         for (const field of def.fields) {
             await this.ensureColumn(def.name, field);
         }
+        await this.ensureChildLinkColumns(def.name);
         await this.ensureTenantSecurity(def.name);
     }
   }
@@ -222,6 +223,7 @@ export class SchemaService implements OnModuleInit {
                 , "parent" VARCHAR(255)
                 , "parenttype" VARCHAR(255)
                 , "parentfield" VARCHAR(255)
+                , "parentId" UUID
             `;
         }
 
@@ -313,9 +315,47 @@ export class SchemaService implements OnModuleInit {
     `);
   }
 
+  private async ensureChildLinkColumns(docTypeName: string, isChildOverride?: boolean) {
+    const isChild =
+      isChildOverride ??
+      (await this.prisma.docType
+        .findUnique({ where: { name: docTypeName }, select: { isChild: true } })
+        .then((d) => d?.isChild));
+    if (!isChild) return;
+
+    const tableName = this.getTableName(docTypeName);
+    const columns = await this.prisma.$queryRaw<{ column_name: string }[]>`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_name = ${tableName};
+    `;
+    const existing = new Set(columns.map((c) => c.column_name));
+
+    if (!existing.has('parent')) {
+      await this.prisma.$executeRawUnsafe(
+        `ALTER TABLE "${tableName}" ADD COLUMN "parent" VARCHAR(255);`,
+      );
+    }
+    if (!existing.has('parenttype')) {
+      await this.prisma.$executeRawUnsafe(
+        `ALTER TABLE "${tableName}" ADD COLUMN "parenttype" VARCHAR(255);`,
+      );
+    }
+    if (!existing.has('parentfield')) {
+      await this.prisma.$executeRawUnsafe(
+        `ALTER TABLE "${tableName}" ADD COLUMN "parentfield" VARCHAR(255);`,
+      );
+    }
+    if (!existing.has('parentId')) {
+      await this.prisma.$executeRawUnsafe(
+        `ALTER TABLE "${tableName}" ADD COLUMN "parentId" UUID;`,
+      );
+    }
+  }
+
   private async ensureTenantSecurityForExistingDocTypes() {
     const docTypes = await this.prisma.docType.findMany({
-      select: { name: true, isSingle: true },
+      select: { name: true, isSingle: true, isChild: true },
     });
 
     if (!docTypes.length) return;
@@ -324,6 +364,7 @@ export class SchemaService implements OnModuleInit {
       if (docType.isSingle) continue;
       try {
         await this.ensureTable(docType.name);
+        await this.ensureChildLinkColumns(docType.name, docType.isChild);
         await this.ensureTenantSecurity(docType.name);
       } catch (error) {
         this.logger.warn(
@@ -333,9 +374,12 @@ export class SchemaService implements OnModuleInit {
     }
 
     await this.backfillTenantIdIfSingleTenant(docTypes);
+    await this.backfillChildParentIds(docTypes);
   }
 
-  private async backfillTenantIdIfSingleTenant(docTypes: Array<{ name: string; isSingle: boolean }>) {
+  private async backfillTenantIdIfSingleTenant(
+    docTypes: Array<{ name: string; isSingle: boolean; isChild?: boolean }>,
+  ) {
     const tenantCount = await this.prisma.tenant.count();
     if (tenantCount !== 1) {
       if (tenantCount > 1) {
@@ -361,6 +405,61 @@ export class SchemaService implements OnModuleInit {
         this.logger.warn(
           `Skipping tenantId backfill for ${docType.name}: ${String(error)}`,
         );
+      }
+    }
+  }
+
+  private async backfillChildParentIds(
+    docTypes: Array<{ name: string; isSingle: boolean; isChild?: boolean }>,
+  ) {
+    const childDocTypes = docTypes.filter((docType) => docType.isChild);
+    if (childDocTypes.length === 0) return;
+
+    const tenants = await this.prisma.tenant.findMany({ select: { id: true } });
+    if (tenants.length === 0) return;
+
+    for (const docType of childDocTypes) {
+      const childTableName = this.getTableName(docType.name);
+      for (const tenant of tenants) {
+        try {
+          await this.prisma.$executeRaw`SELECT set_config('app.tenant', ${tenant.id}, true)`;
+          const parentTypes = await this.prisma.$queryRawUnsafe<{ parenttype: string | null }[]>(
+            `SELECT DISTINCT parenttype FROM "${childTableName}"
+             WHERE "parentId" IS NULL AND "tenantId" = $1`,
+            tenant.id,
+          );
+
+          for (const row of parentTypes) {
+            const parentType = row.parenttype;
+            if (!parentType) continue;
+            let parentTableName: string;
+            try {
+              parentTableName = this.getTableName(parentType);
+            } catch (error) {
+              this.logger.warn(
+                `Skipping parentId backfill for ${docType.name}: invalid parenttype ${String(parentType)}`,
+              );
+              continue;
+            }
+
+            await this.prisma.$executeRawUnsafe(
+              `UPDATE "${childTableName}" c
+               SET "parentId" = p.id
+               FROM "${parentTableName}" p
+               WHERE c."parentId" IS NULL
+                 AND c."tenantId" = $1
+                 AND p."tenantId" = $1
+                 AND c."parenttype" = $2
+                 AND (c."parent" = p."name" OR c."parent" = p."id"::text)`,
+              tenant.id,
+              parentType,
+            );
+          }
+        } catch (error) {
+          this.logger.warn(
+            `Skipping parentId backfill for ${docType.name}: ${String(error)}`,
+          );
+        }
       }
     }
   }
