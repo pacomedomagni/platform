@@ -1,13 +1,17 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { DocTypeDefinition, DocFieldDefinition } from './types';
 import { assertSafeColumnName, toSafeTableName } from './identifiers';
 
 @Injectable()
-export class SchemaService {
+export class SchemaService implements OnModuleInit {
   private readonly logger = new Logger(SchemaService.name);
 
   constructor(private readonly prisma: PrismaService) {}
+
+  async onModuleInit() {
+    await this.ensureTenantSecurityForExistingDocTypes();
+  }
 
   async listDocTypes(): Promise<DocTypeDefinition[]> {
       const docTypes = await this.prisma.docType.findMany({
@@ -185,6 +189,7 @@ export class SchemaService {
         for (const field of def.fields) {
             await this.ensureColumn(def.name, field);
         }
+        await this.ensureTenantSecurity(def.name);
     }
   }
 
@@ -225,6 +230,7 @@ export class SchemaService {
         await this.prisma.$executeRawUnsafe(`
             CREATE TABLE "${tableName}" (
                 "id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                "tenantId" UUID,
                 "name" VARCHAR(255), 
                 "creation" TIMESTAMP DEFAULT NOW(),
                 "modified" TIMESTAMP DEFAULT NOW(),
@@ -269,6 +275,94 @@ export class SchemaService {
             `);
          }
      }
+  }
+
+  private async ensureTenantSecurity(docTypeName: string) {
+    const tableName = this.getTableName(docTypeName);
+
+    const column = await this.prisma.$queryRaw<{ column_name: string }[]>`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_name = ${tableName}
+        AND column_name = 'tenantId';
+    `;
+    if (column.length === 0) {
+      this.logger.log(`Adding tenantId column to ${tableName}`);
+      await this.prisma.$executeRawUnsafe(`
+        ALTER TABLE "${tableName}" ADD COLUMN "tenantId" UUID;
+      `);
+    }
+
+    await this.prisma.$executeRawUnsafe(`ALTER TABLE "${tableName}" ENABLE ROW LEVEL SECURITY;`);
+    await this.prisma.$executeRawUnsafe(`ALTER TABLE "${tableName}" FORCE ROW LEVEL SECURITY;`);
+
+    await this.prisma.$executeRawUnsafe(`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_policies
+          WHERE schemaname = 'public'
+            AND tablename = '${tableName}'
+            AND policyname = 'tenant_isolation_policy'
+        ) THEN
+          CREATE POLICY tenant_isolation_policy ON "${tableName}"
+            USING ("tenantId" = current_setting('app.tenant', true))
+            WITH CHECK ("tenantId" = current_setting('app.tenant', true));
+        END IF;
+      END $$;
+    `);
+  }
+
+  private async ensureTenantSecurityForExistingDocTypes() {
+    const docTypes = await this.prisma.docType.findMany({
+      select: { name: true, isSingle: true },
+    });
+
+    if (!docTypes.length) return;
+
+    for (const docType of docTypes) {
+      if (docType.isSingle) continue;
+      try {
+        await this.ensureTable(docType.name);
+        await this.ensureTenantSecurity(docType.name);
+      } catch (error) {
+        this.logger.warn(
+          `Skipping tenant security for ${docType.name}: ${String(error)}`,
+        );
+      }
+    }
+
+    await this.backfillTenantIdIfSingleTenant(docTypes);
+  }
+
+  private async backfillTenantIdIfSingleTenant(docTypes: Array<{ name: string; isSingle: boolean }>) {
+    const tenantCount = await this.prisma.tenant.count();
+    if (tenantCount !== 1) {
+      if (tenantCount > 1) {
+        this.logger.warn(
+          'Skipping tenantId backfill for DocType tables: multiple tenants detected.',
+        );
+      }
+      return;
+    }
+
+    const tenant = await this.prisma.tenant.findFirst({ select: { id: true } });
+    if (!tenant) return;
+
+    for (const docType of docTypes) {
+      if (docType.isSingle) continue;
+      const tableName = this.getTableName(docType.name);
+      try {
+        await this.prisma.$executeRawUnsafe(
+          `UPDATE "${tableName}" SET "tenantId" = $1 WHERE "tenantId" IS NULL`,
+          tenant.id,
+        );
+      } catch (error) {
+        this.logger.warn(
+          `Skipping tenantId backfill for ${docType.name}: ${String(error)}`,
+        );
+      }
+    }
   }
 
   private mapTypeToSQL(type: string): string | null {

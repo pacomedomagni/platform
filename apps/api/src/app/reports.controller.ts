@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Req, UseGuards, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Query, Req, UseGuards, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { ReportsService } from '@platform/business-logic';
 
@@ -7,10 +7,19 @@ import { ReportsService } from '@platform/business-logic';
 export class ReportsController {
   constructor(private readonly reports: ReportsService) {}
 
+  private ensureReportsAccess(user: any) {
+    const roles: string[] = user?.roles || [];
+    const allowed = new Set(['System Manager', 'Accounts Manager', 'admin']);
+    if (!roles.some((role) => allowed.has(role))) {
+      throw new ForbiddenException('Insufficient permissions for reports access');
+    }
+  }
+
   @Get('trial-balance')
   async trialBalance(@Req() req: any, @Query('asOfDate') asOfDate?: string) {
     const tenantId = req.user?.tenantId;
     if (!tenantId) throw new BadRequestException('Missing tenantId');
+    this.ensureReportsAccess(req.user);
     if (!asOfDate) throw new BadRequestException('asOfDate is required');
     return this.reports.getTrialBalance(tenantId, asOfDate);
   }
@@ -19,6 +28,7 @@ export class ReportsController {
   async balanceSheet(@Req() req: any, @Query('asOfDate') asOfDate?: string) {
     const tenantId = req.user?.tenantId;
     if (!tenantId) throw new BadRequestException('Missing tenantId');
+    this.ensureReportsAccess(req.user);
     if (!asOfDate) throw new BadRequestException('asOfDate is required');
     return this.reports.getBalanceSheet(tenantId, asOfDate);
   }
@@ -31,6 +41,7 @@ export class ReportsController {
   ) {
     const tenantId = req.user?.tenantId;
     if (!tenantId) throw new BadRequestException('Missing tenantId');
+    this.ensureReportsAccess(req.user);
     if (!fromDate || !toDate) throw new BadRequestException('fromDate and toDate are required');
     return this.reports.getProfitAndLoss(tenantId, fromDate, toDate);
   }
@@ -43,6 +54,7 @@ export class ReportsController {
   ) {
     const tenantId = req.user?.tenantId;
     if (!tenantId) throw new BadRequestException('Missing tenantId');
+    this.ensureReportsAccess(req.user);
     if (!fromDate || !toDate) throw new BadRequestException('fromDate and toDate are required');
     return this.reports.getCashFlow(tenantId, fromDate, toDate);
   }
@@ -56,6 +68,7 @@ export class ReportsController {
   ) {
     const tenantId = req.user?.tenantId;
     if (!tenantId) throw new BadRequestException('Missing tenantId');
+    this.ensureReportsAccess(req.user);
     if (!account || !fromDate || !toDate) {
       throw new BadRequestException('account, fromDate, and toDate are required');
     }
@@ -66,6 +79,7 @@ export class ReportsController {
   async receivableAging(@Req() req: any, @Query('asOfDate') asOfDate?: string) {
     const tenantId = req.user?.tenantId;
     if (!tenantId) throw new BadRequestException('Missing tenantId');
+    this.ensureReportsAccess(req.user);
     if (!asOfDate) throw new BadRequestException('asOfDate is required');
     return this.reports.getReceivableAging(tenantId, asOfDate);
   }
@@ -74,6 +88,7 @@ export class ReportsController {
   async payableAging(@Req() req: any, @Query('asOfDate') asOfDate?: string) {
     const tenantId = req.user?.tenantId;
     if (!tenantId) throw new BadRequestException('Missing tenantId');
+    this.ensureReportsAccess(req.user);
     if (!asOfDate) throw new BadRequestException('asOfDate is required');
     return this.reports.getPayableAging(tenantId, asOfDate);
   }

@@ -73,34 +73,38 @@ export class ReportsService {
      * Generate Cash Flow Statement
      */
     async getCashFlow(tenantId: string, fromDate: string, toDate: string) {
-        // Get all bank/cash accounts
-        const cashAccounts = await this.prisma.$queryRawUnsafe<any[]>(`
-            SELECT DISTINCT account
-            FROM "Account"
-            WHERE tenant_id = $1
-              AND (account_type = 'Bank' OR account_type = 'Cash')
-              AND docstatus = 1
-        `, tenantId);
+        const movements = await this.prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
 
-        const accountNames = cashAccounts.map(a => a.account);
+            const cashAccounts = await tx.account.findMany({
+                where: {
+                    tenantId,
+                    accountType: { in: ['Bank', 'Cash'] },
+                    isActive: true,
+                },
+                select: { id: true, code: true },
+            });
 
-        // Get cash movements
-        const movements = await this.prisma.$queryRawUnsafe<any[]>(`
-            SELECT 
-                posting_date,
-                voucher_type,
-                voucher_no,
-                account,
-                debit,
-                credit,
-                (debit - credit) as net_change
-            FROM "GL Entry"
-            WHERE tenant_id = $1
-              AND account = ANY($2::text[])
-              AND posting_date BETWEEN $3 AND $4
-              AND docstatus = 1
-            ORDER BY posting_date, creation
-        `, tenantId, accountNames, fromDate, toDate);
+            const accountIds = cashAccounts.map(a => a.id);
+            if (!accountIds.length) return [];
+
+            return tx.$queryRawUnsafe<any[]>(`
+                SELECT 
+                    gl."postingDate" as posting_date,
+                    gl."voucherType" as voucher_type,
+                    gl."voucherNo" as voucher_no,
+                    a."code" as account,
+                    gl."debitBc" as debit,
+                    gl."creditBc" as credit,
+                    (gl."debitBc" - gl."creditBc") as net_change
+                FROM "gl_entries" gl
+                JOIN "accounts" a ON a."id" = gl."accountId"
+                WHERE gl."tenantId" = $1
+                  AND gl."accountId" = ANY($2::uuid[])
+                  AND gl."postingDate" BETWEEN $3 AND $4
+                ORDER BY gl."postingDate", gl."postingTs"
+            `, tenantId, accountIds, new Date(`${fromDate}T00:00:00.000Z`), new Date(`${toDate}T00:00:00.000Z`));
+        });
 
         const totalInflow = movements.reduce((sum, m) => sum + (m.debit || 0), 0);
         const totalOutflow = movements.reduce((sum, m) => sum + (m.credit || 0), 0);
@@ -120,24 +124,29 @@ export class ReportsService {
      * Generate General Ledger Report for an account
      */
     async getGeneralLedger(tenantId: string, account: string, fromDate: string, toDate: string) {
-        const entries = await this.prisma.$queryRawUnsafe<any[]>(`
-            SELECT 
-                posting_date,
-                voucher_type,
-                voucher_no,
-                party_type,
-                party,
-                against,
-                debit,
-                credit,
-                remarks
-            FROM "GL Entry"
-            WHERE tenant_id = $1
-              AND account = $2
-              AND posting_date BETWEEN $3 AND $4
-              AND docstatus = 1
-            ORDER BY posting_date, creation
-        `, tenantId, account, fromDate, toDate);
+        const entries = await this.prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+            const accountRow = await tx.account.findUnique({
+                where: { tenantId_code: { tenantId, code: account } },
+                select: { id: true },
+            });
+            if (!accountRow) return [];
+
+            return tx.$queryRawUnsafe<any[]>(`
+                SELECT 
+                    gl."postingDate" as posting_date,
+                    gl."voucherType" as voucher_type,
+                    gl."voucherNo" as voucher_no,
+                    gl."debitBc" as debit,
+                    gl."creditBc" as credit,
+                    gl."remarks" as remarks
+                FROM "gl_entries" gl
+                WHERE gl."tenantId" = $1
+                  AND gl."accountId" = $2
+                  AND gl."postingDate" BETWEEN $3 AND $4
+                ORDER BY gl."postingDate", gl."postingTs"
+            `, tenantId, accountRow.id, new Date(`${fromDate}T00:00:00.000Z`), new Date(`${toDate}T00:00:00.000Z`));
+        });
 
         let runningBalance = 0;
         const entriesWithBalance = entries.map(entry => {
@@ -166,32 +175,38 @@ export class ReportsService {
      * Get account balances as of a date
      */
     private async getAccountBalances(tenantId: string, asOfDate: string, fromDate?: string) {
-        const dateFilter = fromDate 
-            ? `AND posting_date BETWEEN '${fromDate}' AND '${asOfDate}'`
-            : `AND posting_date <= '${asOfDate}'`;
+        const params: any[] = [tenantId];
+        let dateFilter = '';
+        if (fromDate) {
+            dateFilter = 'AND gl."postingDate" BETWEEN $2 AND $3';
+            params.push(new Date(`${fromDate}T00:00:00.000Z`));
+            params.push(new Date(`${asOfDate}T00:00:00.000Z`));
+        } else {
+            dateFilter = 'AND gl."postingDate" <= $2';
+            params.push(new Date(`${asOfDate}T00:00:00.000Z`));
+        }
 
-        const balances = await this.prisma.$queryRawUnsafe<any[]>(`
-            SELECT 
-                a.account,
-                a.root_type,
-                a.account_type,
-                COALESCE(SUM(gl.debit), 0) as total_debit,
-                COALESCE(SUM(gl.credit), 0) as total_credit,
-                COALESCE(SUM(gl.debit - gl.credit), 0) as balance
-            FROM "Account" a
-            LEFT JOIN "GL Entry" gl ON gl.account = a.account 
-                AND gl.tenant_id = a.tenant_id 
-                AND gl.docstatus = 1
-                ${dateFilter}
-            WHERE a.tenant_id = $1
-              AND a.docstatus = 1
-              AND a.is_group = false
-            GROUP BY a.account, a.root_type, a.account_type
-            HAVING COALESCE(SUM(gl.debit - gl.credit), 0) != 0
-            ORDER BY a.root_type, a.account
-        `, tenantId);
-
-        return balances;
+        return this.prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+            return tx.$queryRawUnsafe<any[]>(`
+                SELECT 
+                    a."code" as account,
+                    a."rootType" as root_type,
+                    a."accountType" as account_type,
+                    COALESCE(SUM(gl."debitBc"), 0) as total_debit,
+                    COALESCE(SUM(gl."creditBc"), 0) as total_credit,
+                    COALESCE(SUM(gl."debitBc" - gl."creditBc"), 0) as balance
+                FROM "accounts" a
+                LEFT JOIN "gl_entries" gl ON gl."accountId" = a."id"
+                    AND gl."tenantId" = a."tenantId"
+                    ${dateFilter}
+                WHERE a."tenantId" = $1
+                  AND a."isGroup" = false
+                GROUP BY a."code", a."rootType", a."accountType"
+                HAVING COALESCE(SUM(gl."debitBc" - gl."creditBc"), 0) != 0
+                ORDER BY a."rootType", a."code"
+            `, ...params);
+        });
     }
 
     private sumBalances(accounts: any[]): number {
@@ -226,22 +241,25 @@ export class ReportsService {
      * Get Accounts Receivable Aging Report
      */
     async getReceivableAging(tenantId: string, asOfDate: string) {
-        const invoices = await this.prisma.$queryRawUnsafe<any[]>(`
-            SELECT 
-                name,
-                customer,
-                posting_date,
-                due_date,
-                grand_total,
-                outstanding_amount,
-                EXTRACT(DAY FROM ($1::date - due_date)) as days_overdue
-            FROM "Invoice"
-            WHERE tenant_id = $2
-              AND docstatus = 1
-              AND outstanding_amount > 0
-              AND posting_date <= $1
-            ORDER BY due_date
-        `, asOfDate, tenantId);
+        const invoices = await this.prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+            return tx.$queryRawUnsafe<any[]>(`
+                SELECT 
+                    name,
+                    customer,
+                    posting_date,
+                    due_date,
+                    grand_total,
+                    outstanding_amount,
+                    EXTRACT(DAY FROM ($1::date - due_date)) as days_overdue
+                FROM "Invoice"
+                WHERE "tenantId" = $2
+                  AND docstatus = 1
+                  AND outstanding_amount > 0
+                  AND posting_date <= $1
+                ORDER BY due_date
+            `, asOfDate, tenantId);
+        });
 
         const aged = {
             current: [] as any[],
@@ -278,22 +296,25 @@ export class ReportsService {
      * Get Accounts Payable Aging Report
      */
     async getPayableAging(tenantId: string, asOfDate: string) {
-        const invoices = await this.prisma.$queryRawUnsafe<any[]>(`
-            SELECT 
-                name,
-                supplier,
-                posting_date,
-                due_date,
-                grand_total,
-                outstanding_amount,
-                EXTRACT(DAY FROM ($1::date - due_date)) as days_overdue
-            FROM "Purchase Invoice"
-            WHERE tenant_id = $2
-              AND docstatus = 1
-              AND outstanding_amount > 0
-              AND posting_date <= $1
-            ORDER BY due_date
-        `, asOfDate, tenantId);
+        const invoices = await this.prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+            return tx.$queryRawUnsafe<any[]>(`
+                SELECT 
+                    name,
+                    supplier,
+                    posting_date,
+                    due_date,
+                    grand_total,
+                    outstanding_amount,
+                    EXTRACT(DAY FROM ($1::date - due_date)) as days_overdue
+                FROM "Purchase Invoice"
+                WHERE "tenantId" = $2
+                  AND docstatus = 1
+                  AND outstanding_amount > 0
+                  AND posting_date <= $1
+                ORDER BY due_date
+            `, asOfDate, tenantId);
+        });
 
         const aged = {
             current: [] as any[],

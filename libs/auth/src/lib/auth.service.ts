@@ -21,7 +21,8 @@ export class AuthService {
             throw new Error('JWT_SECRET must be set when ENABLE_DEV_PASSWORD_LOGIN=true');
         }
         const payload = { 
-            username: user.email, 
+            username: user.email,
+            email: user.email,
             sub: user.id,
             tenant_id: user.tenantId,
             roles: user.roles 

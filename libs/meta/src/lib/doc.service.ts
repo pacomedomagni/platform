@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, Logger, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { Prisma } from '@prisma/client';
 import { ValidationService } from './validation.service';
 import { PermissionService } from './permission.service';
 import { HookService } from './hook.service';
@@ -20,6 +21,10 @@ export class DocService {
     return toSafeTableName(docType);
   }
 
+  private async setTenant(tx: Prisma.TransactionClient, tenantId: string) {
+    await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+  }
+
   private async assertDocTypeExists(docType: string) {
     const exists = await this.prisma.docType.findUnique({
       where: { name: docType },
@@ -38,6 +43,8 @@ export class DocService {
   async create(docType: string, data: any, user: any) {
     await this.permissionService.ensurePermission(docType, user.roles, 'create');
     await this.assertDocTypeExists(docType);
+    const tenantId = user?.tenantId;
+    if (!tenantId) throw new BadRequestException('Missing tenantId');
     
     const tableName = this.getTableName(docType);
     
@@ -86,10 +93,12 @@ export class DocService {
     >();
 
     const result = await this.prisma.$transaction(async (tx) => {
+        await this.setTenant(tx, tenantId);
         // ... (transaction existing logic, wait no I need to capture the variable first to return it but also run afterSave)
         // Refactoring to keep transaction logic inside but result outside
         
         // 2. Insert Parent
+        standardFields.tenantId = tenantId;
         const columns = Object.keys(standardFields);
         const values = Object.values(standardFields);
         
@@ -128,6 +137,7 @@ export class DocService {
                      'parenttype',
                      'parentfield',
                      'idx',
+                     'tenantId',
                      ...childMeta.filter((f) => f.type !== 'Table').map((f) => f.name),
                    ]);
                    cached = { allowed, tableName: this.getTableName(childDocType) };
@@ -144,6 +154,7 @@ export class DocService {
                      childPayload.parenttype = docType;
                      childPayload.parentfield = field.name;
                      childPayload.idx = idx++;
+                     childPayload.tenantId = tenantId;
                      
                      const childCols = Object.keys(childPayload);
                      for (const col of childCols) {
@@ -183,11 +194,16 @@ export class DocService {
   async findOne(docType: string, name: string, user: any) {
     await this.permissionService.ensurePermission(docType, user.roles, 'read');
     await this.assertDocTypeExists(docType);
+    const tenantId = user?.tenantId;
+    if (!tenantId) throw new BadRequestException('Missing tenantId');
 
     const tableName = this.getTableName(docType);
-    const result = await this.prisma.$queryRawUnsafe(`
-        SELECT * FROM "${tableName}" WHERE name = $1 LIMIT 1;
-    `, name);
+    const result = await this.prisma.$transaction(async (tx) => {
+      await this.setTenant(tx, tenantId);
+      return tx.$queryRawUnsafe(`
+          SELECT * FROM "${tableName}" WHERE name = $1 LIMIT 1;
+      `, name);
+    });
     
     const doc = (result as any[])[0];
     if (!doc) throw new NotFoundException(`${docType} ${name} not found`);
@@ -201,11 +217,14 @@ export class DocService {
         if (field.options) {
             await this.assertDocTypeExists(field.options);
             const childTableName = this.getTableName(field.options);
-            const children = await this.prisma.$queryRawUnsafe(`
-                SELECT * FROM "${childTableName}" 
-                WHERE parent = $1 AND parentfield = $2 AND parenttype = $3
-                ORDER BY idx ASC
-            `, name, field.name, docType);
+            const children = await this.prisma.$transaction(async (tx) => {
+              await this.setTenant(tx, tenantId);
+              return tx.$queryRawUnsafe(`
+                  SELECT * FROM "${childTableName}" 
+                  WHERE parent = $1 AND parentfield = $2 AND parenttype = $3
+                  ORDER BY idx ASC
+              `, name, field.name, docType);
+            });
             
             doc[field.name] = children;
         }
@@ -220,13 +239,20 @@ export class DocService {
   async findAll(docType: string, user: any) {
       await this.permissionService.ensurePermission(docType, user.roles, 'read');
       await this.assertDocTypeExists(docType);
+      const tenantId = user?.tenantId;
+      if (!tenantId) throw new BadRequestException('Missing tenantId');
       const tableName = this.getTableName(docType);
-      return this.prisma.$queryRawUnsafe(`SELECT * FROM "${tableName}" LIMIT 100`);
+      return this.prisma.$transaction(async (tx) => {
+        await this.setTenant(tx, tenantId);
+        return tx.$queryRawUnsafe(`SELECT * FROM "${tableName}" LIMIT 100`);
+      });
   }
 
   async update(docType: string, name: string, data: any, user: any) {
     await this.permissionService.ensurePermission(docType, user.roles, 'write');
     await this.assertDocTypeExists(docType);
+    const tenantId = user?.tenantId;
+    if (!tenantId) throw new BadRequestException('Missing tenantId');
     
     const tableName = this.getTableName(docType);
 
@@ -281,9 +307,11 @@ export class DocService {
       { allowed: Set<string>; tableName: string }
     >();
 
-    const result = await this.prisma.$transaction(async (tx) => {
+        const result = await this.prisma.$transaction(async (tx) => {
+            await this.setTenant(tx, tenantId);
         // 1. Update Parent
         let parentDoc: any;
+        standardFields.tenantId = tenantId;
         const columns = Object.keys(standardFields);
         
         if (columns.length > 0) {
@@ -333,6 +361,7 @@ export class DocService {
                      'parenttype',
                      'parentfield',
                      'idx',
+                     'tenantId',
                      ...childMeta.filter((f) => f.type !== 'Table').map((f) => f.name),
                    ]);
                    cached = { allowed, tableName: this.getTableName(childDocType) };
@@ -355,6 +384,7 @@ export class DocService {
                          childPayload.parenttype = docType;
                          childPayload.parentfield = field.name;
                          childPayload.idx = idx++;
+                         childPayload.tenantId = tenantId;
                          
                          const childCols = Object.keys(childPayload);
                          for (const col of childCols) {
@@ -394,8 +424,13 @@ export class DocService {
   async delete(docType: string, name: string, user: any) {
       await this.permissionService.ensurePermission(docType, user.roles, 'delete');
       await this.assertDocTypeExists(docType);
+      const tenantId = user?.tenantId;
+      if (!tenantId) throw new BadRequestException('Missing tenantId');
       const tableName = this.getTableName(docType);
-      await this.prisma.$executeRawUnsafe(`DELETE FROM "${tableName}" WHERE name = $1`, name);
+      await this.prisma.$transaction(async (tx) => {
+        await this.setTenant(tx, tenantId);
+        await tx.$executeRawUnsafe(`DELETE FROM "${tableName}" WHERE name = $1`, name);
+      });
       await this.logAudit('DELETE', docType, name, user);
       return { status: 'deleted', name };
   }
@@ -403,6 +438,8 @@ export class DocService {
   async submit(docType: string, name: string, user: any) {
       await this.permissionService.ensurePermission(docType, user.roles, 'submit');
       await this.assertDocTypeExists(docType);
+      const tenantId = user?.tenantId;
+      if (!tenantId) throw new BadRequestException('Missing tenantId');
       const tableName = this.getTableName(docType);
 
       // Check current state
@@ -413,7 +450,10 @@ export class DocService {
       // We assume docstatus column exists if they have submit permission? 
       // Or we try/catch to valid "docstatus" column missing error.
       try {
-          await this.prisma.$executeRawUnsafe(`UPDATE "${tableName}" SET docstatus = 1, modified = NOW() WHERE name = $1`, name);
+          await this.prisma.$transaction(async (tx) => {
+            await this.setTenant(tx, tenantId);
+            await tx.$executeRawUnsafe(`UPDATE "${tableName}" SET docstatus = 1, modified = NOW() WHERE name = $1`, name);
+          });
       } catch (e) {
           this.logger.error(e);
           throw new BadRequestException('Failed to submit. Does the DocType have a docstatus field?');
@@ -428,13 +468,18 @@ export class DocService {
   async cancel(docType: string, name: string, user: any) {
       await this.permissionService.ensurePermission(docType, user.roles, 'cancel');
       await this.assertDocTypeExists(docType);
+      const tenantId = user?.tenantId;
+      if (!tenantId) throw new BadRequestException('Missing tenantId');
       const tableName = this.getTableName(docType);
 
       const existing = await this.findOne(docType, name, user);
       if (existing.docstatus !== 1) throw new BadRequestException('Document must be submitted to cancel');
 
       try {
-          await this.prisma.$executeRawUnsafe(`UPDATE "${tableName}" SET docstatus = 2, modified = NOW() WHERE name = $1`, name);
+          await this.prisma.$transaction(async (tx) => {
+            await this.setTenant(tx, tenantId);
+            await tx.$executeRawUnsafe(`UPDATE "${tableName}" SET docstatus = 2, modified = NOW() WHERE name = $1`, name);
+          });
       } catch (e) {
          throw new BadRequestException('Failed to cancel.');
       }

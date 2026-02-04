@@ -1,12 +1,19 @@
-import { Controller, Get, Query, Req, UseGuards, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Query, Req, UseGuards, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { PrismaService } from '@platform/db';
-import { Prisma } from '@prisma/client';
 
 @Controller('v1/inventory')
 @UseGuards(AuthGuard('jwt'))
 export class InventoryController {
   constructor(private readonly prisma: PrismaService) {}
+
+  private ensureInventoryAccess(user: any) {
+    const roles: string[] = user?.roles || [];
+    const allowed = new Set(['System Manager', 'Stock Manager', 'Accounts Manager', 'user', 'admin']);
+    if (!roles.some((role) => allowed.has(role))) {
+      throw new ForbiddenException('Insufficient permissions for inventory access');
+    }
+  }
 
   @Get('stock-balance')
   async getStockBalance(
@@ -18,6 +25,7 @@ export class InventoryController {
   ) {
     const tenantId = req.user?.tenantId;
     if (!tenantId) throw new BadRequestException('Missing tenantId');
+    this.ensureInventoryAccess(req.user);
 
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
@@ -110,6 +118,7 @@ export class InventoryController {
   ) {
     const tenantId = req.user?.tenantId;
     if (!tenantId) throw new BadRequestException('Missing tenantId');
+    this.ensureInventoryAccess(req.user);
 
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
@@ -184,6 +193,7 @@ export class InventoryController {
   async listLocations(@Req() req: any, @Query('warehouseCode') warehouseCode?: string) {
     const tenantId = req.user?.tenantId;
     if (!tenantId) throw new BadRequestException('Missing tenantId');
+    this.ensureInventoryAccess(req.user);
 
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
@@ -225,6 +235,7 @@ export class InventoryController {
   ) {
     const tenantId = req.user?.tenantId;
     if (!tenantId) throw new BadRequestException('Missing tenantId');
+    this.ensureInventoryAccess(req.user);
 
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;

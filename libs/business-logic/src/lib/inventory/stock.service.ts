@@ -194,6 +194,13 @@ export class StockService {
           })),
         });
       }
+
+      await this.logAudit(tx, input.tenantId, 'STOCK_RECEIVE', input.voucherType, input.voucherNo, {
+        itemCode: input.itemCode,
+        warehouseCode: input.warehouseCode,
+        locationCode: input.locationCode,
+        qty: stockQty.toString(),
+      });
     });
   }
 
@@ -402,6 +409,13 @@ export class StockService {
           data: { status: 'ISSUED', warehouseId: null, locationId: null, batchId: null },
         });
       }
+
+      await this.logAudit(tx, input.tenantId, 'STOCK_ISSUE', input.voucherType, input.voucherNo, {
+        itemCode: input.itemCode,
+        warehouseCode: input.warehouseCode,
+        locationCode: input.locationCode,
+        qty: qtyToIssue.toString(),
+      });
     });
   }
 
@@ -652,6 +666,13 @@ export class StockService {
           data: { warehouseId: to.warehouse.id, locationId: toLocation.id, batchId: from.batch?.id ?? null },
         });
       }
+
+      await this.logAudit(tx, input.tenantId, 'STOCK_TRANSFER', input.voucherType, input.voucherNo, {
+        itemCode: input.itemCode,
+        fromWarehouse: input.fromWarehouseCode,
+        toWarehouse: input.toWarehouseCode,
+        qty: qtyToMove.toString(),
+      });
     });
   }
 
@@ -776,6 +797,8 @@ export class StockService {
           where: { id: { in: serialLinks.map((s) => s.serialId) } },
         });
       }
+
+      await this.logAudit(tx, input.tenantId, 'STOCK_CANCEL_RECEIPT', 'Purchase Receipt', input.voucherNo);
     });
   }
 
@@ -900,6 +923,8 @@ export class StockService {
           });
         }
       }
+
+      await this.logAudit(tx, input.tenantId, 'STOCK_CANCEL_DELIVERY', 'Delivery Note', input.voucherNo);
     });
   }
 
@@ -1105,6 +1130,8 @@ export class StockService {
           });
         }
       }
+
+      await this.logAudit(tx, input.tenantId, 'STOCK_CANCEL_TRANSFER', voucherType, input.voucherNo);
     });
   }
 
@@ -1201,6 +1228,12 @@ export class StockService {
           deltaQty: qty,
         });
       }
+
+      await this.logAudit(tx, input.tenantId, 'STOCK_RESERVE', input.voucherType, input.voucherNo, {
+        itemCode: input.itemCode,
+        warehouseCode: input.warehouseCode,
+        qty: qty.toString(),
+      });
     });
   }
 
@@ -1299,6 +1332,12 @@ export class StockService {
           deltaQty: qty.neg(),
         });
       }
+
+      await this.logAudit(tx, input.tenantId, 'STOCK_UNRESERVE', input.voucherType, input.voucherNo, {
+        itemCode: input.itemCode,
+        warehouseCode: input.warehouseCode,
+        qty: qty.toString(),
+      });
     });
   }
 
@@ -1468,6 +1507,12 @@ export class StockService {
             })),
           });
         }
+        await this.logAudit(tx, input.tenantId, 'STOCK_RECONCILE_INCREASE', input.voucherType, input.voucherNo, {
+          itemCode: input.itemCode,
+          warehouseCode: input.warehouseCode,
+          locationCode: input.locationCode,
+          qty: delta.toString(),
+        });
         return;
       }
 
@@ -1603,11 +1648,38 @@ export class StockService {
           data: { status: 'ISSUED', warehouseId: null, locationId: null, batchId: null },
         });
       }
+
+      await this.logAudit(tx, input.tenantId, 'STOCK_RECONCILE_DECREASE', input.voucherType, input.voucherNo, {
+        itemCode: input.itemCode,
+        warehouseCode: input.warehouseCode,
+        locationCode: input.locationCode,
+        qty: qtyToReduce.toString(),
+      });
     });
   }
 
   private async setTenant(tx: PrismaClient, tenantId: string) {
     await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+  }
+
+  private async logAudit(
+    tx: PrismaClient,
+    tenantId: string,
+    action: string,
+    docType: string,
+    docName: string,
+    meta?: Record<string, any>,
+  ) {
+    if (!docName) return;
+    await tx.auditLog.create({
+      data: {
+        tenantId,
+        action,
+        docType,
+        docName,
+        meta: meta ?? undefined,
+      },
+    });
   }
 
   private async lockStock(tx: PrismaClient, tenantId: string, warehouseId: string, itemId: string) {

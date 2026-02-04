@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { HookService } from '@platform/meta';
 import { PrismaService } from '@platform/db';
-import { StockConsumptionStrategy } from '@prisma/client';
+import { Prisma, StockConsumptionStrategy } from '@prisma/client';
 import { StockService } from './inventory/stock.service';
 
 @Injectable()
@@ -22,6 +22,7 @@ export class BusinessLogicService {
         this.registerItemMasterHooks();
         this.registerWarehouseMasterHooks();
         this.registerLocationMasterHooks();
+        this.registerAccountMasterHooks();
 
         // Stock Management
         this.registerPurchaseReceiptHooks();
@@ -396,6 +397,43 @@ export class BusinessLogicService {
         });
     }
 
+    private registerAccountMasterHooks() {
+        this.hookService.register('Account', {
+            afterSave: async (doc, user) => {
+                const tenantId = user?.tenantId;
+                if (!tenantId) return;
+                if (!doc?.name) return;
+
+                await this.prisma.$transaction(async (tx) => {
+                    await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+                    await tx.account.upsert({
+                        where: { tenantId_code: { tenantId, code: doc.name } },
+                        update: {
+                            name: doc.name,
+                            rootType: doc.root_type ?? null,
+                            accountType: doc.account_type ?? null,
+                            isGroup: Boolean(doc.is_group ?? false),
+                            parentAccountCode: doc.parent_account ?? null,
+                            currency: doc.account_currency ?? null,
+                            isActive: !doc.frozen,
+                        },
+                        create: {
+                            tenantId,
+                            code: doc.name,
+                            name: doc.name,
+                            rootType: doc.root_type ?? null,
+                            accountType: doc.account_type ?? null,
+                            isGroup: Boolean(doc.is_group ?? false),
+                            parentAccountCode: doc.parent_account ?? null,
+                            currency: doc.account_currency ?? null,
+                            isActive: !doc.frozen,
+                        },
+                    });
+                });
+            },
+        });
+    }
+
     private registerSalesOrderHooks() {
         this.hookService.register('Sales Order', {
             beforeSave: async (doc, user) => {
@@ -439,7 +477,7 @@ export class BusinessLogicService {
                         });
                     }
                 }
-                await this.updateDocStatus('Sales Order', doc.name, 'To Deliver');
+                await this.updateDocStatus('Sales Order', doc.name, 'To Deliver', tenantId);
             },
             onCancel: async (doc, user) => {
                 const tenantId = user?.tenantId;
@@ -491,9 +529,9 @@ export class BusinessLogicService {
 	                const tenantId = user?.tenantId;
 	                if (!tenantId) throw new Error('Missing tenantId in user context');
 	                // Post to GL when invoice is submitted (docstatus = 1)
-	                await this.postInvoiceToGL(doc);
-                    await this.applyInvoiceToSalesOrders(doc);
-                    await this.updateInvoiceOutstandingStatus('Invoice', doc.name);
+	                await this.postInvoiceToGL(doc, user);
+                    await this.applyInvoiceToSalesOrders(doc, tenantId);
+                    await this.updateInvoiceOutstandingStatus('Invoice', doc.name, tenantId);
 	            }
 	         });
 	    }
@@ -510,7 +548,7 @@ export class BusinessLogicService {
 	            onSubmit: async (doc, user) => {
 	                const tenantId = user?.tenantId;
 	                if (!tenantId) throw new Error('Missing tenantId in user context');
-                    await this.updateDocStatus('Purchase Order', doc.name, 'To Receive');
+                    await this.updateDocStatus('Purchase Order', doc.name, 'To Receive', tenantId);
 	            },
             onCancel: async (doc, user) => {
                 const tenantId = user?.tenantId;
@@ -531,9 +569,9 @@ export class BusinessLogicService {
 	            onSubmit: async (doc, user) => {
 	                const tenantId = user?.tenantId;
 	                if (!tenantId) throw new Error('Missing tenantId in user context');
-	                await this.postPurchaseInvoiceToGL(doc);
-                    await this.applyPurchaseInvoiceToPurchaseOrders(doc);
-                    await this.updateInvoiceOutstandingStatus('Purchase Invoice', doc.name);
+	                await this.postPurchaseInvoiceToGL(doc, user);
+                    await this.applyPurchaseInvoiceToPurchaseOrders(doc, tenantId);
+                    await this.updateInvoiceOutstandingStatus('Purchase Invoice', doc.name, tenantId);
 	            },
 	        });
 	    }
@@ -588,8 +626,8 @@ export class BusinessLogicService {
                         incomingRate: item.rate ?? 0,
                     });
                 }
-                await this.postPurchaseReceiptToGL(doc);
-                await this.applyPurchaseReceiptToPurchaseOrders(doc);
+                await this.postPurchaseReceiptToGL(doc, user);
+                await this.applyPurchaseReceiptToPurchaseOrders(doc, tenantId);
             },
             onCancel: async (doc, user) => {
                 const tenantId = user?.tenantId;
@@ -661,8 +699,8 @@ export class BusinessLogicService {
                         consumeReservation: true,
                     });
                 }
-                await this.postDeliveryNoteToCOGS(doc);
-                await this.applyDeliveryNoteToSalesOrders(doc);
+                await this.postDeliveryNoteToCOGS(doc, user);
+                await this.applyDeliveryNoteToSalesOrders(doc, tenantId);
             },
             onCancel: async (doc, user) => {
                 const tenantId = user?.tenantId;
@@ -850,14 +888,16 @@ export class BusinessLogicService {
         return `tab${compact}`;
     }
 
-    private async updateDocStatus(docType: string, docName: string, status: string) {
+    private async updateDocStatus(docType: string, docName: string, status: string, tenantId: string) {
         if (!docName) return;
         const tableName = this.toTableName(docType);
-        await this.prisma.$executeRawUnsafe(
-            `UPDATE "${tableName}" SET status = $1 WHERE name = $2`,
-            status,
-            docName,
-        );
+        await this.withTenant(tenantId, async (tx) => {
+            await tx.$executeRawUnsafe(
+                `UPDATE "${tableName}" SET status = $1 WHERE name = $2`,
+                status,
+                docName,
+            );
+        });
     }
 
     private async incrementSalesOrderItemQty(
@@ -865,17 +905,20 @@ export class BusinessLogicService {
         itemCode: string,
         field: 'delivered_qty' | 'billed_qty',
         qty: number,
+        tenantId: string,
     ) {
         if (!salesOrder || !itemCode || !qty) return;
         const itemTable = this.toTableName('Sales Order Item');
         const safeField = field === 'delivered_qty' ? 'delivered_qty' : 'billed_qty';
-        await this.prisma.$executeRawUnsafe(
-            `UPDATE "${itemTable}" SET ${safeField} = COALESCE(${safeField}, 0) + $1
-             WHERE parent = $2 AND parenttype = 'Sales Order' AND item_code = $3`,
-            qty,
-            salesOrder,
-            itemCode,
-        );
+        await this.withTenant(tenantId, async (tx) => {
+            await tx.$executeRawUnsafe(
+                `UPDATE "${itemTable}" SET ${safeField} = COALESCE(${safeField}, 0) + $1
+                 WHERE parent = $2 AND parenttype = 'Sales Order' AND item_code = $3`,
+                qty,
+                salesOrder,
+                itemCode,
+            );
+        });
     }
 
     private async incrementPurchaseOrderItemQty(
@@ -883,27 +926,32 @@ export class BusinessLogicService {
         itemCode: string,
         field: 'received_qty' | 'billed_qty',
         qty: number,
+        tenantId: string,
     ) {
         if (!purchaseOrder || !itemCode || !qty) return;
         const itemTable = this.toTableName('Purchase Order Item');
         const safeField = field === 'received_qty' ? 'received_qty' : 'billed_qty';
-        await this.prisma.$executeRawUnsafe(
-            `UPDATE "${itemTable}" SET ${safeField} = COALESCE(${safeField}, 0) + $1
-             WHERE parent = $2 AND parenttype = 'Purchase Order' AND item_code = $3`,
-            qty,
-            purchaseOrder,
-            itemCode,
-        );
+        await this.withTenant(tenantId, async (tx) => {
+            await tx.$executeRawUnsafe(
+                `UPDATE "${itemTable}" SET ${safeField} = COALESCE(${safeField}, 0) + $1
+                 WHERE parent = $2 AND parenttype = 'Purchase Order' AND item_code = $3`,
+                qty,
+                purchaseOrder,
+                itemCode,
+            );
+        });
     }
 
-    private async updateSalesOrderStatus(salesOrder: string) {
+    private async updateSalesOrderStatus(salesOrder: string, tenantId: string) {
         if (!salesOrder) return;
         const itemTable = this.toTableName('Sales Order Item');
-        const rows = await this.prisma.$queryRawUnsafe(
-            `SELECT qty, delivered_qty, billed_qty FROM "${itemTable}"
-             WHERE parent = $1 AND parenttype = 'Sales Order'`,
-            salesOrder,
-        );
+        const rows = await this.withTenant(tenantId, async (tx) => {
+            return tx.$queryRawUnsafe(
+                `SELECT qty, delivered_qty, billed_qty FROM "${itemTable}"
+                 WHERE parent = $1 AND parenttype = 'Sales Order'`,
+                salesOrder,
+            );
+        });
         const items = rows as Array<{ qty: any; delivered_qty: any; billed_qty: any }>;
         if (!items.length) return;
 
@@ -927,17 +975,19 @@ export class BusinessLogicService {
             status = 'To Bill';
         }
 
-        await this.updateDocStatus('Sales Order', salesOrder, status);
+        await this.updateDocStatus('Sales Order', salesOrder, status, tenantId);
     }
 
-    private async updatePurchaseOrderStatus(purchaseOrder: string) {
+    private async updatePurchaseOrderStatus(purchaseOrder: string, tenantId: string) {
         if (!purchaseOrder) return;
         const itemTable = this.toTableName('Purchase Order Item');
-        const rows = await this.prisma.$queryRawUnsafe(
-            `SELECT qty, received_qty, billed_qty FROM "${itemTable}"
-             WHERE parent = $1 AND parenttype = 'Purchase Order'`,
-            purchaseOrder,
-        );
+        const rows = await this.withTenant(tenantId, async (tx) => {
+            return tx.$queryRawUnsafe(
+                `SELECT qty, received_qty, billed_qty FROM "${itemTable}"
+                 WHERE parent = $1 AND parenttype = 'Purchase Order'`,
+                purchaseOrder,
+            );
+        });
         const items = rows as Array<{ qty: any; received_qty: any; billed_qty: any }>;
         if (!items.length) return;
 
@@ -961,10 +1011,10 @@ export class BusinessLogicService {
             status = 'To Bill';
         }
 
-        await this.updateDocStatus('Purchase Order', purchaseOrder, status);
+        await this.updateDocStatus('Purchase Order', purchaseOrder, status, tenantId);
     }
 
-    private async applyDeliveryNoteToSalesOrders(doc: any) {
+    private async applyDeliveryNoteToSalesOrders(doc: any, tenantId: string) {
         const items = Array.isArray(doc.items) ? doc.items : [];
         const salesOrders = new Set<string>();
         for (const item of items) {
@@ -972,15 +1022,15 @@ export class BusinessLogicService {
             if (!salesOrder) continue;
             const qty = Number(item.qty || 0);
             if (!qty) continue;
-            await this.incrementSalesOrderItemQty(salesOrder, item.item_code, 'delivered_qty', qty);
+            await this.incrementSalesOrderItemQty(salesOrder, item.item_code, 'delivered_qty', qty, tenantId);
             salesOrders.add(salesOrder);
         }
         for (const salesOrder of salesOrders) {
-            await this.updateSalesOrderStatus(salesOrder);
+            await this.updateSalesOrderStatus(salesOrder, tenantId);
         }
     }
 
-    private async applyInvoiceToSalesOrders(doc: any) {
+    private async applyInvoiceToSalesOrders(doc: any, tenantId: string) {
         const items = Array.isArray(doc.items) ? doc.items : [];
         const salesOrders = new Set<string>();
         for (const item of items) {
@@ -988,15 +1038,15 @@ export class BusinessLogicService {
             if (!salesOrder) continue;
             const qty = Number(item.qty || 0);
             if (!qty) continue;
-            await this.incrementSalesOrderItemQty(salesOrder, item.item_code, 'billed_qty', qty);
+            await this.incrementSalesOrderItemQty(salesOrder, item.item_code, 'billed_qty', qty, tenantId);
             salesOrders.add(salesOrder);
         }
         for (const salesOrder of salesOrders) {
-            await this.updateSalesOrderStatus(salesOrder);
+            await this.updateSalesOrderStatus(salesOrder, tenantId);
         }
     }
 
-    private async applyPurchaseReceiptToPurchaseOrders(doc: any) {
+    private async applyPurchaseReceiptToPurchaseOrders(doc: any, tenantId: string) {
         const items = Array.isArray(doc.items) ? doc.items : [];
         const purchaseOrders = new Set<string>();
         for (const item of items) {
@@ -1004,15 +1054,15 @@ export class BusinessLogicService {
             if (!purchaseOrder) continue;
             const qty = Number(item.qty || 0);
             if (!qty) continue;
-            await this.incrementPurchaseOrderItemQty(purchaseOrder, item.item_code, 'received_qty', qty);
+            await this.incrementPurchaseOrderItemQty(purchaseOrder, item.item_code, 'received_qty', qty, tenantId);
             purchaseOrders.add(purchaseOrder);
         }
         for (const purchaseOrder of purchaseOrders) {
-            await this.updatePurchaseOrderStatus(purchaseOrder);
+            await this.updatePurchaseOrderStatus(purchaseOrder, tenantId);
         }
     }
 
-    private async applyPurchaseInvoiceToPurchaseOrders(doc: any) {
+    private async applyPurchaseInvoiceToPurchaseOrders(doc: any, tenantId: string) {
         const items = Array.isArray(doc.items) ? doc.items : [];
         const purchaseOrders = new Set<string>();
         for (const item of items) {
@@ -1020,15 +1070,15 @@ export class BusinessLogicService {
             if (!purchaseOrder) continue;
             const qty = Number(item.qty || 0);
             if (!qty) continue;
-            await this.incrementPurchaseOrderItemQty(purchaseOrder, item.item_code, 'billed_qty', qty);
+            await this.incrementPurchaseOrderItemQty(purchaseOrder, item.item_code, 'billed_qty', qty, tenantId);
             purchaseOrders.add(purchaseOrder);
         }
         for (const purchaseOrder of purchaseOrders) {
-            await this.updatePurchaseOrderStatus(purchaseOrder);
+            await this.updatePurchaseOrderStatus(purchaseOrder, tenantId);
         }
     }
 
-    private async applyPaymentEntryToReferences(doc: any, direction: -1 | 1) {
+    private async applyPaymentEntryToReferences(doc: any, direction: -1 | 1, tenantId: string) {
         const references = Array.isArray(doc.references) ? doc.references : [];
         for (const ref of references) {
             const refType = ref.reference_doctype;
@@ -1037,7 +1087,7 @@ export class BusinessLogicService {
             if (!refName) continue;
             const allocated = Number(ref.allocated_amount || 0);
             if (!allocated) continue;
-            await this.updateInvoiceOutstandingStatus(refType, refName, allocated * direction);
+            await this.updateInvoiceOutstandingStatus(refType, refName, tenantId, allocated * direction);
         }
     }
 
@@ -1053,14 +1103,17 @@ export class BusinessLogicService {
     private async updateInvoiceOutstandingStatus(
         docType: 'Invoice' | 'Purchase Invoice',
         docName: string,
+        tenantId: string,
         delta = 0,
     ) {
         if (!docName) return;
         const tableName = this.toTableName(docType);
-        const rows = await this.prisma.$queryRawUnsafe(
-            `SELECT outstanding_amount, grand_total, due_date FROM "${tableName}" WHERE name = $1`,
-            docName,
-        );
+        const rows = await this.withTenant(tenantId, async (tx) => {
+            return tx.$queryRawUnsafe(
+                `SELECT outstanding_amount, grand_total, due_date FROM "${tableName}" WHERE name = $1`,
+                docName,
+            );
+        });
         const doc = (rows as Array<{ outstanding_amount: any; grand_total: any; due_date: any }>)[0];
         if (!doc) return;
 
@@ -1069,12 +1122,122 @@ export class BusinessLogicService {
         const nextOutstanding = Math.max(0, currentOutstanding + delta);
         const status = this.resolveOutstandingStatus(nextOutstanding, grandTotal, doc.due_date);
 
-        await this.prisma.$executeRawUnsafe(
-            `UPDATE "${tableName}" SET outstanding_amount = $1, status = $2 WHERE name = $3`,
-            nextOutstanding,
-            status,
-            docName,
-        );
+        await this.withTenant(tenantId, async (tx) => {
+            await tx.$executeRawUnsafe(
+                `UPDATE "${tableName}" SET outstanding_amount = $1, status = $2 WHERE name = $3`,
+                nextOutstanding,
+                status,
+                docName,
+            );
+        });
+    }
+
+    private async withTenant<T>(
+        tenantId: string,
+        fn: (tx: Prisma.TransactionClient) => Promise<T>,
+    ) {
+        return this.prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+            return fn(tx);
+        });
+    }
+
+    private resolveAccountDefaults(code: string) {
+        const normalized = (code || '').toLowerCase();
+        if (['accounts receivable', 'receivables', 'debtors'].includes(normalized)) {
+            return { rootType: 'Asset', accountType: 'Receivable' };
+        }
+        if (['accounts payable', 'creditors', 'payables'].includes(normalized)) {
+            return { rootType: 'Liability', accountType: 'Payable' };
+        }
+        if (['stock asset', 'inventory'].includes(normalized)) {
+            return { rootType: 'Asset', accountType: 'Stock' };
+        }
+        if (['sales', 'revenue'].includes(normalized)) {
+            return { rootType: 'Income', accountType: 'Income Account' };
+        }
+        if (['cost of goods sold', 'cogs'].includes(normalized)) {
+            return { rootType: 'Expense', accountType: 'Cost of Goods Sold' };
+        }
+        if (['expenses'].includes(normalized)) {
+            return { rootType: 'Expense', accountType: 'Expense Account' };
+        }
+        return null;
+    }
+
+    private async ensureAccount(
+        tx: Prisma.TransactionClient,
+        tenantId: string,
+        code: string,
+    ) {
+        if (!code) {
+            throw new Error('Account code is required for GL posting');
+        }
+        const existing = await tx.account.findUnique({
+            where: { tenantId_code: { tenantId, code } },
+        });
+        if (existing) return existing;
+
+        const defaults = this.resolveAccountDefaults(code);
+        if (!defaults) {
+            throw new Error(`Account not found: ${code}`);
+        }
+
+        return tx.account.create({
+            data: {
+                tenantId,
+                code,
+                name: code,
+                rootType: defaults.rootType,
+                accountType: defaults.accountType,
+                isGroup: false,
+                isActive: true,
+            },
+        });
+    }
+
+    private async createGlEntries(
+        tenantId: string,
+        postingDate: string,
+        postingTs: Date,
+        entries: Array<{ accountCode: string; debit: number; credit: number; remarks?: string }>,
+        voucherType: string,
+        voucherNo: string,
+    ) {
+        await this.prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+            const tenant = await tx.tenant.findUnique({
+                where: { id: tenantId },
+                select: { baseCurrency: true },
+            });
+            const currency = tenant?.baseCurrency ?? 'USD';
+            const postingDateValue = new Date(`${postingDate}T00:00:00.000Z`);
+
+            for (const entry of entries) {
+                const debit = new Prisma.Decimal(entry.debit || 0);
+                const credit = new Prisma.Decimal(entry.credit || 0);
+                if (debit.eq(0) && credit.eq(0)) continue;
+
+                const account = await this.ensureAccount(tx, tenantId, entry.accountCode);
+                await tx.glEntry.create({
+                    data: {
+                        tenantId,
+                        postingDate: postingDateValue,
+                        postingTs,
+                        accountId: account.id,
+                        currency,
+                        exchangeRate: new Prisma.Decimal(1),
+                        debitBc: debit,
+                        creditBc: credit,
+                        debitFc: debit,
+                        creditFc: credit,
+                        voucherType,
+                        voucherNo,
+                        remarks: entry.remarks ?? null,
+                    },
+                });
+            }
+        });
     }
 
     // ==================== ACCOUNTING HOOKS ====================
@@ -1111,7 +1274,7 @@ export class BusinessLogicService {
             },
             onSubmit: async (doc, user) => {
                 if (doc.accounts && Array.isArray(doc.accounts)) {
-                    await this.postJournalEntryToGL(doc);
+                    await this.postJournalEntryToGL(doc, user);
                 }
             },
         });
@@ -1236,11 +1399,15 @@ export class BusinessLogicService {
                 return doc;
             },
             onSubmit: async (doc, user) => {
-                await this.postPaymentEntryToGL(doc);
-                await this.applyPaymentEntryToReferences(doc, -1);
+                const tenantId = user?.tenantId;
+                if (!tenantId) throw new Error('Missing tenantId in user context');
+                await this.postPaymentEntryToGL(doc, user);
+                await this.applyPaymentEntryToReferences(doc, -1, tenantId);
             },
             onCancel: async (doc, user) => {
-                await this.applyPaymentEntryToReferences(doc, 1);
+                const tenantId = user?.tenantId;
+                if (!tenantId) throw new Error('Missing tenantId in user context');
+                await this.applyPaymentEntryToReferences(doc, 1, tenantId);
             },
         });
     }
@@ -1248,36 +1415,28 @@ export class BusinessLogicService {
     /**
      * Post Journal Entry to GL
      */
-    private async postJournalEntryToGL(doc: any) {
-        for (const account of doc.accounts) {
-            const glEntry = {
-                name: `GLE-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-                posting_date: doc.posting_date,
-                account: account.account,
-                debit: Number(account.debit || 0),
-                credit: Number(account.credit || 0),
-                against: this.getAgainstAccounts(doc.accounts, account.account),
-                voucher_type: 'Journal Entry',
-                voucher_no: doc.name,
-                remarks: doc.user_remark || `Journal Entry: ${doc.name}`,
-                is_cancelled: false
-            };
+    private async postJournalEntryToGL(doc: any, user: any) {
+        const tenantId = user?.tenantId ?? doc.tenant_id ?? doc.tenantId;
+        if (!tenantId) throw new Error('Missing tenantId for GL posting');
+        const postingDate = doc.posting_date || new Date().toISOString().slice(0, 10);
+        const postingTs = this.resolveDateFieldTs(postingDate);
 
-            await this.prisma.$queryRawUnsafe(
-                `INSERT INTO "tabGLEntry" 
-                (name, posting_date, account, debit, credit, against, voucher_type, voucher_no, remarks, is_cancelled)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-                glEntry.name, glEntry.posting_date, glEntry.account,
-                glEntry.debit, glEntry.credit, glEntry.against,
-                glEntry.voucher_type, glEntry.voucher_no, glEntry.remarks, glEntry.is_cancelled
-            );
-        }
+        const entries = (doc.accounts || []).map((account: any) => ({
+            accountCode: account.account,
+            debit: Number(account.debit || 0),
+            credit: Number(account.credit || 0),
+            remarks: doc.user_remark || `Journal Entry: ${doc.name}`,
+        }));
+
+        await this.createGlEntries(tenantId, postingDate, postingTs, entries, 'Journal Entry', doc.name);
     }
 
     /**
      * Post Payment Entry to GL
      */
-    private async postPaymentEntryToGL(doc: any) {
+    private async postPaymentEntryToGL(doc: any, user: any) {
+        const tenantId = user?.tenantId ?? doc.tenant_id ?? doc.tenantId;
+        if (!tenantId) throw new Error('Missing tenantId for GL posting');
         const glEntries = [];
 
         if (doc.payment_type === 'Receive') {
@@ -1315,32 +1474,16 @@ export class BusinessLogicService {
             });
         }
 
-        for (const entry of glEntries) {
-            const glEntry = {
-                name: `GLE-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-                posting_date: doc.posting_date,
-                account: entry.account,
-                debit: entry.debit,
-                credit: entry.credit,
-                against: entry.against,
-                voucher_type: 'Payment Entry',
-                voucher_no: doc.name,
-                remarks: `Payment ${doc.payment_type} - ${doc.party}`,
-                is_cancelled: false,
-                party_type: doc.party_type,
-                party: doc.party
-            };
+        const postingDate = doc.posting_date || new Date().toISOString().slice(0, 10);
+        const postingTs = this.resolveDateFieldTs(postingDate);
+        const entries = glEntries.map((entry) => ({
+            accountCode: entry.account,
+            debit: Number(entry.debit || 0),
+            credit: Number(entry.credit || 0),
+            remarks: `Payment ${doc.payment_type} - ${doc.party}`,
+        }));
 
-            await this.prisma.$queryRawUnsafe(
-                `INSERT INTO "tabGLEntry" 
-                (name, posting_date, account, debit, credit, against, voucher_type, voucher_no, remarks, is_cancelled, party_type, party)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-                glEntry.name, glEntry.posting_date, glEntry.account,
-                glEntry.debit, glEntry.credit, glEntry.against,
-                glEntry.voucher_type, glEntry.voucher_no, glEntry.remarks,
-                glEntry.is_cancelled, glEntry.party_type, glEntry.party
-            );
-        }
+        await this.createGlEntries(tenantId, postingDate, postingTs, entries, 'Payment Entry', doc.name);
     }
 
 	    /**
@@ -1392,212 +1535,249 @@ export class BusinessLogicService {
         doc.outstanding_amount = doc.grand_total; // For invoices
     }
 
-    private async postInvoiceToGL(doc: any) {
-        const tenantId = doc.tenant_id ?? doc.tenantId;
+    private async postInvoiceToGL(doc: any, user: any) {
+        const tenantId = user?.tenantId ?? doc.tenant_id ?? doc.tenantId;
+        if (!tenantId) throw new Error('Missing tenantId for GL posting');
         const voucherType = 'Invoice';
         const voucherNo = doc.name;
-        const postingDate = doc.posting_date || new Date().toISOString().split('T')[0];
+        const postingDate = doc.posting_date || new Date().toISOString().slice(0, 10);
+        const postingTs = this.resolveDateFieldTs(postingDate);
 
-        // Debit: Accounts Receivable (debit_to)
-        await this.prisma.$executeRawUnsafe(`
-            INSERT INTO "GL Entry" (tenant_id, name, posting_date, account, debit, credit, 
-                                    voucher_type, voucher_no, party_type, party, against, docstatus)
-            VALUES ($1, gen_random_uuid()::text, $2, $3, $4, 0, $5, $6, 'Customer', $7, $8, 1)
-        `, tenantId, postingDate, doc.debit_to, doc.grand_total, voucherType, voucherNo, doc.customer, 'Sales');
-
-        // Credit: Sales (Revenue)
         const items = doc.items || [];
         const itemAccountCache = new Map<string, { incomeAccount?: string | null }>();
-        for (const item of items) {
-            let incomeAccount = 'Sales';
-            if (item?.item_code && tenantId) {
-                const cached = itemAccountCache.get(item.item_code);
-                if (cached) {
-                    incomeAccount = cached.incomeAccount ?? incomeAccount;
-                } else {
-                    const itemRow = await this.prisma.item.findUnique({
-                        where: { tenantId_code: { tenantId, code: item.item_code } },
-                        select: { incomeAccount: true },
+
+        const entries: Array<{ accountCode: string; debit: number; credit: number; remarks?: string }> = [];
+        const debitAccount = doc.debit_to || 'Accounts Receivable';
+        entries.push({
+            accountCode: debitAccount,
+            debit: Number(doc.grand_total || 0),
+            credit: 0,
+            remarks: `Invoice ${voucherNo}`,
+        });
+
+        await this.prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+
+            for (const item of items) {
+                let incomeAccount = 'Sales';
+                if (item?.item_code) {
+                    const cached = itemAccountCache.get(item.item_code);
+                    if (cached) {
+                        incomeAccount = cached.incomeAccount ?? incomeAccount;
+                    } else {
+                        const itemRow = await tx.item.findUnique({
+                            where: { tenantId_code: { tenantId, code: item.item_code } },
+                            select: { incomeAccount: true },
+                        });
+                        itemAccountCache.set(item.item_code, { incomeAccount: itemRow?.incomeAccount });
+                        incomeAccount = itemRow?.incomeAccount ?? incomeAccount;
+                    }
+                }
+                entries.push({
+                    accountCode: incomeAccount,
+                    debit: 0,
+                    credit: Number(item.amount || 0),
+                    remarks: `Invoice ${voucherNo}`,
+                });
+            }
+
+            const taxes = doc.taxes || [];
+            for (const tax of taxes) {
+                const taxAmount = Number(tax.tax_amount || 0);
+                if (taxAmount > 0) {
+                    entries.push({
+                        accountCode: tax.account_head,
+                        debit: 0,
+                        credit: taxAmount,
+                        remarks: `Invoice ${voucherNo}`,
                     });
-                    itemAccountCache.set(item.item_code, { incomeAccount: itemRow?.incomeAccount });
-                    incomeAccount = itemRow?.incomeAccount ?? incomeAccount;
                 }
             }
-            await this.prisma.$executeRawUnsafe(`
-                INSERT INTO "GL Entry" (tenant_id, name, posting_date, account, debit, credit,
-                                        voucher_type, voucher_no, against, docstatus)
-                VALUES ($1, gen_random_uuid()::text, $2, $3, 0, $4, $5, $6, $7, 1)
-            `, tenantId, postingDate, incomeAccount, item.amount, voucherType, voucherNo, doc.customer);
-        }
+        });
 
-        // Credit: Tax accounts
-        const taxes = doc.taxes || [];
-        for (const tax of taxes) {
-            if (tax.tax_amount > 0) {
-                await this.prisma.$executeRawUnsafe(`
-                    INSERT INTO "GL Entry" (tenant_id, name, posting_date, account, debit, credit,
-                                            voucher_type, voucher_no, against, docstatus)
-                    VALUES ($1, gen_random_uuid()::text, $2, $3, 0, $4, $5, $6, $7, 1)
-                `, tenantId, postingDate, tax.account_head, tax.tax_amount, voucherType, voucherNo, doc.customer);
-            }
-        }
+        await this.createGlEntries(tenantId, postingDate, postingTs, entries, voucherType, voucherNo);
     }
 
-    private async postPurchaseInvoiceToGL(doc: any) {
-        const tenantId = doc.tenant_id ?? doc.tenantId;
+    private async postPurchaseInvoiceToGL(doc: any, user: any) {
+        const tenantId = user?.tenantId ?? doc.tenant_id ?? doc.tenantId;
+        if (!tenantId) throw new Error('Missing tenantId for GL posting');
         const voucherType = 'Purchase Invoice';
         const voucherNo = doc.name;
-        const postingDate = doc.posting_date || new Date().toISOString().split('T')[0];
+        const postingDate = doc.posting_date || new Date().toISOString().slice(0, 10);
+        const postingTs = this.resolveDateFieldTs(postingDate);
 
-        // Debit: Expenses (or Stock/Expense by item in future)
         const items = doc.items || [];
         const itemAccountCache = new Map<string, { expenseAccount?: string | null; stockAccount?: string | null; isStockItem?: boolean }>();
-        for (const item of items) {
-            let debitAccount = 'Expenses';
-            if (item?.item_code && tenantId) {
-                const cached = itemAccountCache.get(item.item_code);
-                if (cached) {
-                    if (cached.isStockItem) {
-                        debitAccount = cached.stockAccount ?? 'Stock Asset';
+        const entries: Array<{ accountCode: string; debit: number; credit: number; remarks?: string }> = [];
+
+        await this.prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+            for (const item of items) {
+                let debitAccount = 'Expenses';
+                if (item?.item_code) {
+                    const cached = itemAccountCache.get(item.item_code);
+                    if (cached) {
+                        if (cached.isStockItem) {
+                            debitAccount = cached.stockAccount ?? 'Stock Asset';
+                        } else {
+                            debitAccount = cached.expenseAccount ?? debitAccount;
+                        }
                     } else {
-                        debitAccount = cached.expenseAccount ?? debitAccount;
-                    }
-                } else {
-                    const itemRow = await this.prisma.item.findUnique({
-                        where: { tenantId_code: { tenantId, code: item.item_code } },
-                        select: { expenseAccount: true, stockAccount: true, isStockItem: true },
-                    });
-                    itemAccountCache.set(item.item_code, {
-                        expenseAccount: itemRow?.expenseAccount,
-                        stockAccount: itemRow?.stockAccount,
-                        isStockItem: itemRow?.isStockItem,
-                    });
-                    if (itemRow?.isStockItem) {
-                        debitAccount = itemRow.stockAccount ?? 'Stock Asset';
-                    } else {
-                        debitAccount = itemRow?.expenseAccount ?? debitAccount;
+                        const itemRow = await tx.item.findUnique({
+                            where: { tenantId_code: { tenantId, code: item.item_code } },
+                            select: { expenseAccount: true, stockAccount: true, isStockItem: true },
+                        });
+                        itemAccountCache.set(item.item_code, {
+                            expenseAccount: itemRow?.expenseAccount,
+                            stockAccount: itemRow?.stockAccount,
+                            isStockItem: itemRow?.isStockItem,
+                        });
+                        if (itemRow?.isStockItem) {
+                            debitAccount = itemRow.stockAccount ?? 'Stock Asset';
+                        } else {
+                            debitAccount = itemRow?.expenseAccount ?? debitAccount;
+                        }
                     }
                 }
+                entries.push({
+                    accountCode: debitAccount,
+                    debit: Number(item.amount || 0),
+                    credit: 0,
+                    remarks: `Purchase Invoice ${voucherNo}`,
+                });
             }
-            await this.prisma.$executeRawUnsafe(`
-                INSERT INTO "GL Entry" (tenant_id, name, posting_date, account, debit, credit,
-                                        voucher_type, voucher_no, against, docstatus)
-                VALUES ($1, gen_random_uuid()::text, $2, $3, $4, 0, $5, $6, $7, 1)
-            `, tenantId, postingDate, debitAccount, item.amount, voucherType, voucherNo, doc.supplier);
-        }
+        });
 
-        // Credit: Accounts Payable (credit_to)
-        const creditTo = doc.credit_to || 'Creditors';
-        await this.prisma.$executeRawUnsafe(`
-            INSERT INTO "GL Entry" (tenant_id, name, posting_date, account, debit, credit,
-                                    voucher_type, voucher_no, party_type, party, against, docstatus)
-            VALUES ($1, gen_random_uuid()::text, $2, $3, 0, $4, $5, $6, 'Supplier', $7, 'Expenses', 1)
-        `, tenantId, postingDate, creditTo, doc.grand_total, voucherType, voucherNo, doc.supplier);
+        const creditTo = doc.credit_to || 'Accounts Payable';
+        entries.push({
+            accountCode: creditTo,
+            debit: 0,
+            credit: Number(doc.grand_total || 0),
+            remarks: `Purchase Invoice ${voucherNo}`,
+        });
 
-        // Credit: Tax accounts
         const taxes = doc.taxes || [];
         for (const tax of taxes) {
-            if (tax.tax_amount > 0) {
-                await this.prisma.$executeRawUnsafe(`
-                    INSERT INTO "GL Entry" (tenant_id, name, posting_date, account, debit, credit,
-                                            voucher_type, voucher_no, against, docstatus)
-                    VALUES ($1, gen_random_uuid()::text, $2, $3, 0, $4, $5, $6, $7, 1)
-                `, tenantId, postingDate, tax.account_head, tax.tax_amount, voucherType, voucherNo, doc.supplier);
+            const taxAmount = Number(tax.tax_amount || 0);
+            if (taxAmount > 0) {
+                entries.push({
+                    accountCode: tax.account_head,
+                    debit: 0,
+                    credit: taxAmount,
+                    remarks: `Purchase Invoice ${voucherNo}`,
+                });
             }
         }
+
+        await this.createGlEntries(tenantId, postingDate, postingTs, entries, voucherType, voucherNo);
     }
 
-	    private async postPurchaseReceiptToGL(doc: any) {
-        const tenantId = doc.tenant_id ?? doc.tenantId;
+    private async postPurchaseReceiptToGL(doc: any, user: any) {
+        const tenantId = user?.tenantId ?? doc.tenant_id ?? doc.tenantId;
+        if (!tenantId) throw new Error('Missing tenantId for GL posting');
         const voucherType = 'Purchase Receipt';
         const voucherNo = doc.name;
-        const postingDate = doc.posting_date || new Date().toISOString().split('T')[0];
+        const postingDate = doc.posting_date || new Date().toISOString().slice(0, 10);
+        const postingTs = this.resolveDateFieldTs(postingDate);
 
         const items = doc.items || [];
         let totalAmount = 0;
         const itemAccountCache = new Map<string, { stockAccount?: string | null }>();
+        const entries: Array<{ accountCode: string; debit: number; credit: number; remarks?: string }> = [];
 
-        // Debit: Stock Asset
-        for (const item of items) {
-            const amount = (item.qty || 0) * (item.rate || 0);
-            totalAmount += amount;
-            let stockAccount = 'Stock Asset';
-            if (item?.item_code && tenantId) {
-                const cached = itemAccountCache.get(item.item_code);
-                if (cached) {
-                    stockAccount = cached.stockAccount ?? stockAccount;
-                } else {
-                    const itemRow = await this.prisma.item.findUnique({
-                        where: { tenantId_code: { tenantId, code: item.item_code } },
-                        select: { stockAccount: true },
-                    });
-                    itemAccountCache.set(item.item_code, { stockAccount: itemRow?.stockAccount });
-                    stockAccount = itemRow?.stockAccount ?? stockAccount;
+        await this.prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+            for (const item of items) {
+                const amount = Number(item.qty || 0) * Number(item.rate || 0);
+                totalAmount += amount;
+                let stockAccount = 'Stock Asset';
+                if (item?.item_code) {
+                    const cached = itemAccountCache.get(item.item_code);
+                    if (cached) {
+                        stockAccount = cached.stockAccount ?? stockAccount;
+                    } else {
+                        const itemRow = await tx.item.findUnique({
+                            where: { tenantId_code: { tenantId, code: item.item_code } },
+                            select: { stockAccount: true },
+                        });
+                        itemAccountCache.set(item.item_code, { stockAccount: itemRow?.stockAccount });
+                        stockAccount = itemRow?.stockAccount ?? stockAccount;
+                    }
                 }
+                entries.push({
+                    accountCode: stockAccount,
+                    debit: amount,
+                    credit: 0,
+                    remarks: `Purchase Receipt ${voucherNo}`,
+                });
             }
+        });
 
-            await this.prisma.$executeRawUnsafe(`
-                INSERT INTO "GL Entry" (tenant_id, name, posting_date, account, debit, credit,
-                                        voucher_type, voucher_no, against, docstatus)
-                VALUES ($1, gen_random_uuid()::text, $2, $3, $4, 0, $5, $6, 'Creditors', 1)
-            `, tenantId, postingDate, stockAccount, amount, voucherType, voucherNo);
-        }
+        entries.push({
+            accountCode: 'Creditors',
+            debit: 0,
+            credit: totalAmount,
+            remarks: `Purchase Receipt ${voucherNo}`,
+        });
 
-        // Credit: Accounts Payable
-        const supplier = doc.supplier || 'Supplier';
-        await this.prisma.$executeRawUnsafe(`
-            INSERT INTO "GL Entry" (tenant_id, name, posting_date, account, debit, credit,
-                                    voucher_type, voucher_no, party_type, party, against, docstatus)
-            VALUES ($1, gen_random_uuid()::text, $2, 'Creditors', 0, $3, $4, $5, 'Supplier', $6, 'Stock Asset', 1)
-        `, tenantId, postingDate, totalAmount, voucherType, voucherNo, supplier);
+        await this.createGlEntries(tenantId, postingDate, postingTs, entries, voucherType, voucherNo);
     }
 
-	    private async postDeliveryNoteToCOGS(doc: any) {
-        const tenantId = doc.tenant_id ?? doc.tenantId;
+    private async postDeliveryNoteToCOGS(doc: any, user: any) {
+        const tenantId = user?.tenantId ?? doc.tenant_id ?? doc.tenantId;
+        if (!tenantId) throw new Error('Missing tenantId for GL posting');
         const voucherType = 'Delivery Note';
         const voucherNo = doc.name;
-        const postingDate = doc.posting_date || new Date().toISOString().split('T')[0];
+        const postingDate = doc.posting_date || new Date().toISOString().slice(0, 10);
+        const postingTs = this.resolveDateFieldTs(postingDate);
 
         const items = doc.items || [];
         const itemAccountCache = new Map<string, { stockAccount?: string | null; cogsAccount?: string | null }>();
+        const entries: Array<{ accountCode: string; debit: number; credit: number; remarks?: string }> = [];
 
-        for (const item of items) {
-            // Get FIFO valuation (already calculated in stock hooks)
-            const valuationAmount = item.valuation_amount || 0;
-            let stockAccount = 'Stock Asset';
-            let cogsAccount = 'Cost of Goods Sold';
-            if (item?.item_code && tenantId) {
-                const cached = itemAccountCache.get(item.item_code);
-                if (cached) {
-                    stockAccount = cached.stockAccount ?? stockAccount;
-                    cogsAccount = cached.cogsAccount ?? cogsAccount;
-                } else {
-                    const itemRow = await this.prisma.item.findUnique({
-                        where: { tenantId_code: { tenantId, code: item.item_code } },
-                        select: { stockAccount: true, cogsAccount: true },
-                    });
-                    itemAccountCache.set(item.item_code, {
-                        stockAccount: itemRow?.stockAccount,
-                        cogsAccount: itemRow?.cogsAccount,
-                    });
-                    stockAccount = itemRow?.stockAccount ?? stockAccount;
-                    cogsAccount = itemRow?.cogsAccount ?? cogsAccount;
+        await this.prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+            for (const item of items) {
+                const valuationAmount = Number(item.valuation_amount || item.amount || 0);
+                if (!valuationAmount) continue;
+                let stockAccount = 'Stock Asset';
+                let cogsAccount = 'Cost of Goods Sold';
+                if (item?.item_code) {
+                    const cached = itemAccountCache.get(item.item_code);
+                    if (cached) {
+                        stockAccount = cached.stockAccount ?? stockAccount;
+                        cogsAccount = cached.cogsAccount ?? cogsAccount;
+                    } else {
+                        const itemRow = await tx.item.findUnique({
+                            where: { tenantId_code: { tenantId, code: item.item_code } },
+                            select: { stockAccount: true, cogsAccount: true },
+                        });
+                        itemAccountCache.set(item.item_code, {
+                            stockAccount: itemRow?.stockAccount,
+                            cogsAccount: itemRow?.cogsAccount,
+                        });
+                        stockAccount = itemRow?.stockAccount ?? stockAccount;
+                        cogsAccount = itemRow?.cogsAccount ?? cogsAccount;
+                    }
                 }
+
+                entries.push({
+                    accountCode: cogsAccount,
+                    debit: valuationAmount,
+                    credit: 0,
+                    remarks: `Delivery Note ${voucherNo}`,
+                });
+                entries.push({
+                    accountCode: stockAccount,
+                    debit: 0,
+                    credit: valuationAmount,
+                    remarks: `Delivery Note ${voucherNo}`,
+                });
             }
+        });
 
-            // Debit: Cost of Goods Sold
-            await this.prisma.$executeRawUnsafe(`
-                INSERT INTO "GL Entry" (tenant_id, name, posting_date, account, debit, credit,
-                                        voucher_type, voucher_no, against, docstatus)
-                VALUES ($1, gen_random_uuid()::text, $2, $3, $4, 0, $5, $6, $7, 1)
-            `, tenantId, postingDate, cogsAccount, valuationAmount, voucherType, voucherNo, stockAccount);
-
-            // Credit: Stock Asset
-            await this.prisma.$executeRawUnsafe(`
-                INSERT INTO "GL Entry" (tenant_id, name, posting_date, account, debit, credit,
-                                        voucher_type, voucher_no, against, docstatus)
-                VALUES ($1, gen_random_uuid()::text, $2, $3, 0, $4, $5, $6, $7, 1)
-            `, tenantId, postingDate, stockAccount, valuationAmount, voucherType, voucherNo, cogsAccount);
-	    }
-}
+        if (entries.length) {
+            await this.createGlEntries(tenantId, postingDate, postingTs, entries, voucherType, voucherNo);
+        }
+    }
 }

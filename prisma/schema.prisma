@@ -561,6 +561,10 @@ model Account {
 
   code     String
   name     String
+  rootType    String?
+  accountType String?
+  isGroup     Boolean @default(false)
+  parentAccountCode String?
   currency String? // null means tenant base currency
   isActive Boolean @default(true)
 
