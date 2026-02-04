@@ -1,3 +1,4 @@
+'use client';
 import React, { useEffect, useState } from 'react';
 import { DocFieldDefinition, DocTypeDefinition } from './types';
 import { DataField, IntField, DateField, SelectField, TextEditorField, CheckField } from './fields';
@@ -11,12 +12,15 @@ interface FormViewProps {
     docType: DocTypeDefinition;
     initialData?: any;
     onSave: (data: any) => Promise<void>;
+    onSubmitDoc?: () => Promise<void>;
+    onCancelDoc?: () => Promise<void>;
     onNavigateBack?: () => void;
 }
 
-export const FormView = ({ docType, initialData, onSave, onNavigateBack }: FormViewProps) => {
+export const FormView = ({ docType, initialData, onSave, onSubmitDoc, onCancelDoc, onNavigateBack }: FormViewProps) => {
     const [data, setData] = useState(initialData || {});
     const [loading, setLoading] = useState(false);
+    const [actionLoading, setActionLoading] = useState(false);
     const [isDirty, setIsDirty] = useState(false);
 
     const isNew = !data.name;
@@ -41,6 +45,32 @@ export const FormView = ({ docType, initialData, onSave, onNavigateBack }: FormV
             alert('Failed to save');
         } finally {
             setLoading(false);
+        }
+    }
+
+    const handleSubmit = async () => {
+        if (!onSubmitDoc) return;
+        setActionLoading(true);
+        try {
+            await onSubmitDoc();
+        } catch (e) {
+            console.error(e);
+            alert('Failed to submit');
+        } finally {
+            setActionLoading(false);
+        }
+    }
+
+    const handleCancel = async () => {
+        if (!onCancelDoc) return;
+        setActionLoading(true);
+        try {
+            await onCancelDoc();
+        } catch (e) {
+            console.error(e);
+            alert('Failed to cancel');
+        } finally {
+            setActionLoading(false);
         }
     }
 
@@ -88,9 +118,9 @@ export const FormView = ({ docType, initialData, onSave, onNavigateBack }: FormV
     }
 
     return (
-        <div className="flex flex-col h-full bg-slate-50/50 dark:bg-slate-900/20 py-6 px-4 sm:px-8 min-h-screen">
+        <div className="flex flex-col h-full bg-slate-50/30 dark:bg-slate-900/20 py-6 px-4 sm:px-8 min-h-screen">
             {/* Header */}
-            <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4 sticky top-0 z-10 bg-slate-50/95 dark:bg-slate-900/95 backdrop-blur py-2 border-b sm:border-b-0">
+            <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4 sticky top-0 z-10 bg-white/70 dark:bg-slate-950/70 backdrop-blur py-3 border-b border-border/60 sm:border-b-0 rounded-2xl px-3 sm:px-4">
                 <div className="flex items-center gap-2">
                     {onNavigateBack && (
                         <Button variant="ghost" size="icon" onClick={onNavigateBack} className="-ml-2">
@@ -113,25 +143,25 @@ export const FormView = ({ docType, initialData, onSave, onNavigateBack }: FormV
                 <div className="flex gap-2 w-full sm:w-auto">
                      {/* Workflow Actions */}
                      {data.docstatus === 0 && !isNew && (
-                         <Button variant="secondary" size="sm">
+                         <Button variant="secondary" size="sm" onClick={handleSubmit} disabled={actionLoading || !onSubmitDoc}>
                             <CheckCircle className="mr-2 h-4 w-4" /> Submit
                          </Button>
                      )}
                      {data.docstatus === 1 && (
-                         <Button variant="destructive" size="sm">
+                         <Button variant="destructive" size="sm" onClick={handleCancel} disabled={actionLoading || !onCancelDoc}>
                              <Ban className="mr-2 h-4 w-4" /> Cancel
                          </Button>
                      )}
                      
                      <div className="flex-1 sm:flex-none"></div>
 
-                     <Button onClick={handleSave} disabled={loading || (data.docstatus === 1)} size="sm">
+                     <Button onClick={handleSave} disabled={loading || actionLoading || (data.docstatus === 1)} size="sm">
                         {loading ? 'Saving...' : (
                             <>
                                 <Save className="mr-2 h-4 w-4" /> Save
                             </>
                         )}
-                     </Button>
+                    </Button>
 
                      <Button variant="ghost" size="icon">
                          <MoreHorizontal className="h-4 w-4" />
@@ -141,7 +171,7 @@ export const FormView = ({ docType, initialData, onSave, onNavigateBack }: FormV
             
             {/* Form Layout */}
             <div className="mx-auto w-full max-w-5xl">
-                <Card className="p-6 md:p-8 bg-white dark:bg-slate-950">
+                <Card className="p-6 md:p-8 bg-white/90 dark:bg-slate-950/80 backdrop-blur">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
                         {docType.fields.length === 0 && (
                             <div className="col-span-2 py-10 text-center text-slate-500">

@@ -175,6 +175,7 @@ export class DocService {
 
     // 4. Hook: afterSave
     await this.hookService.trigger(docType, 'afterSave', result, user);
+    await this.logAudit('CREATE', docType, result?.name ?? result?.id ?? '', user);
 
     return result;
   }
@@ -385,6 +386,7 @@ export class DocService {
 
     // 4. Hook: afterSave
     await this.hookService.trigger(docType, 'afterSave', result, user);
+    await this.logAudit('UPDATE', docType, name, user);
 
     return result;
   }
@@ -394,6 +396,7 @@ export class DocService {
       await this.assertDocTypeExists(docType);
       const tableName = this.getTableName(docType);
       await this.prisma.$executeRawUnsafe(`DELETE FROM "${tableName}" WHERE name = $1`, name);
+      await this.logAudit('DELETE', docType, name, user);
       return { status: 'deleted', name };
   }
 
@@ -418,6 +421,7 @@ export class DocService {
 
       const updated = await this.findOne(docType, name, user);
       await this.hookService.trigger(docType, 'onSubmit', updated, user);
+      await this.logAudit('SUBMIT', docType, name, user);
       return { status: 'submitted', name };
   }
 
@@ -437,6 +441,22 @@ export class DocService {
 
       const updated = await this.findOne(docType, name, user);
       await this.hookService.trigger(docType, 'onCancel', updated, user);
+      await this.logAudit('CANCEL', docType, name, user);
       return { status: 'cancelled', name };
+  }
+
+  private async logAudit(action: string, docType: string, docName: string, user: any) {
+    const tenantId = user?.tenantId;
+    if (!tenantId || !docName) return;
+    const userId = user?.id ?? user?.userId ?? null;
+    await this.prisma.auditLog.create({
+      data: {
+        tenantId,
+        userId: userId ?? undefined,
+        action,
+        docType,
+        docName,
+      },
+    });
   }
 }

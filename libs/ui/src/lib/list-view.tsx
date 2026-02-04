@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+'use client';
+import React, { useState } from 'react';
 import { DocFieldDefinition, DocTypeDefinition } from './types';
 import { Button, Input, Badge, Skeleton } from './atoms';
 import { Plus, Search, ChevronRight, Filter, Download, MoreHorizontal, ArrowUpDown } from 'lucide-react';
@@ -35,7 +36,7 @@ export const ListView = ({ docType, data = [], loading = false, onRowClick, onCr
     );
 
     return (
-        <div className="flex flex-col h-full bg-slate-50/50 dark:bg-slate-900/20 py-6 px-8 min-h-screen">
+        <div className="flex flex-col h-full bg-slate-50/30 dark:bg-slate-900/20 py-6 px-6 lg:px-8 min-h-screen">
             {/* Header Section */}
             <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
                 <div>
@@ -48,14 +49,14 @@ export const ListView = ({ docType, data = [], loading = false, onRowClick, onCr
                     <Button variant="outline" size="sm" className="hidden sm:flex">
                         <Download className="mr-2 h-4 w-4" /> Export
                     </Button>
-                    <Button onClick={() => onNavigate(`/desk/${docType.name}/new`)} size="sm">
+                    <Button onClick={() => onCreateClick?.()} size="sm">
                         <Plus className="mr-2 h-4 w-4" /> Create {docType.name}
                     </Button>
                 </div>
             </header>
 
             {/* Filter Toolbar */}
-            <div className="flex items-center space-x-2 bg-white dark:bg-slate-900 p-2 rounded-lg border shadow-sm mb-4">
+            <div className="flex items-center space-x-2 bg-white/90 dark:bg-slate-950/70 p-2 rounded-xl border border-border/70 shadow-sm mb-4 backdrop-blur">
                 <Search className="h-4 w-4 text-slate-400 ml-2" />
                 <Input 
                     className="border-none shadow-none focus-visible:ring-0 h-8 bg-transparent" 
@@ -73,11 +74,11 @@ export const ListView = ({ docType, data = [], loading = false, onRowClick, onCr
             </div>
 
             {/* Data Grid */}
-            <div className="rounded-lg border bg-white dark:bg-slate-950 shadow-sm overflow-hidden flex-1">
+            <div className="rounded-2xl border border-border/70 bg-white dark:bg-slate-950 shadow-sm overflow-hidden flex-1">
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm text-left">
                         <thead>
-                            <tr className="bg-slate-50/50 dark:bg-slate-900/50 border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted">
+                            <tr className="bg-slate-50/50 dark:bg-slate-900/50 border-b transition-colors">
                                 {columns.map(c => (
                                     <th key={c.name} className="h-10 px-4 font-medium text-slate-500 dark:text-slate-400 align-middle whitespace-nowrap">
                                         {c.label}
@@ -104,6 +105,9 @@ export const ListView = ({ docType, data = [], loading = false, onRowClick, onCr
                                         <div className="flex flex-col items-center justify-center space-y-2">
                                             <Search className="h-8 w-8 opacity-20" />
                                             <p>No records found.</p>
+                                            <Button size="sm" variant="outline" onClick={() => onCreateClick?.()}>
+                                                <Plus className="mr-2 h-4 w-4" /> New {docType.name}
+                                            </Button>
                                         </div>
                                     </td>
                                 </tr>
@@ -113,7 +117,7 @@ export const ListView = ({ docType, data = [], loading = false, onRowClick, onCr
                                 <tr 
                                     key={row.name || i} 
                                     className="group hover:bg-slate-50 dark:hover:bg-slate-900 transition-colors cursor-pointer border-b last:border-0"
-                                    onClick={() => onNavigate(`/desk/${docType.name}/${row.name}`)}
+                                    onClick={() => onRowClick?.(row)}
                                 >
                                     {columns.map(c => (
                                         <td key={c.name} className="p-4 align-middle text-slate-700 dark:text-slate-300">

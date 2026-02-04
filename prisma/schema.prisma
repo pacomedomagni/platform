@@ -27,13 +27,18 @@ model Tenant {
   warehouses            Warehouse[]
   locations             Location[]
   items                 Item[]
+  itemUoms              ItemUom[]
   batches               Batch[]
+  serials               Serial[]
   warehouseItemBalances WarehouseItemBalance[]
   binBalances           BinBalance[]
   stockFifoLayers       StockFifoLayer[]
+  stockPostings         StockPosting[]
   stockLedgerEntries    StockLedgerEntry[]
+  stockLedgerEntrySerials StockLedgerEntrySerial[]
   accounts              Account[]
   glEntries             GlEntry[]
+  auditLogs             AuditLog[]
 
   @@map("tenants")
 }
@@ -179,6 +184,7 @@ model Warehouse {
   binBalances           BinBalance[]
   stockFifoLayers       StockFifoLayer[]
   stockLedgerEntries    StockLedgerEntry[]
+  serials               Serial[]
 
   @@unique([tenantId, code])
   @@unique([tenantId, name])
@@ -213,6 +219,7 @@ model Location {
   stockToEntries   StockLedgerEntry[] @relation("StockToLocation")
   binBalances      BinBalance[]
   stockFifoLayers  StockFifoLayer[]
+  serials          Serial[]
 
   @@unique([tenantId, warehouseId, code])
   @@unique([tenantId, warehouseId, path])
@@ -232,11 +239,27 @@ model Item {
 
   hasBatch  Boolean @default(false)
   hasSerial Boolean @default(false)
+  reorderLevel Decimal? @db.Decimal(18, 6)
+  reorderQty   Decimal? @db.Decimal(18, 6)
+
+  incomeAccount  String?
+  expenseAccount String?
+  stockAccount   String?
+  cogsAccount    String?
+
+  stockUomCode    String?
+  stockUom        Uom?     @relation("ItemStockUom", fields: [stockUomCode], references: [code], onDelete: SetNull)
+  purchaseUomCode String?
+  purchaseUom     Uom?     @relation("ItemPurchaseUom", fields: [purchaseUomCode], references: [code], onDelete: SetNull)
+  salesUomCode    String?
+  salesUom        Uom?     @relation("ItemSalesUom", fields: [salesUomCode], references: [code], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   batches               Batch[]
+  serials               Serial[]
+  itemUoms              ItemUom[]
   warehouseItemBalances WarehouseItemBalance[]
   binBalances           BinBalance[]
   stockFifoLayers       StockFifoLayer[]
@@ -244,6 +267,80 @@ model Item {
 
   @@unique([tenantId, code])
   @@map("items")
+}
+
+model Uom {
+  code     String @id
+  name     String?
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  itemsStock    Item[]    @relation("ItemStockUom")
+  itemsPurchase Item[]    @relation("ItemPurchaseUom")
+  itemsSales    Item[]    @relation("ItemSalesUom")
+  itemUoms      ItemUom[]
+
+  @@map("uoms")
+}
+
+model ItemUom {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  itemId String
+  item   Item   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  uomCode String
+  uom     Uom    @relation(fields: [uomCode], references: [code], onDelete: Cascade)
+
+  conversionFactor Decimal @db.Decimal(18, 6)
+  isActive         Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, itemId, uomCode])
+  @@index([itemId])
+  @@map("item_uoms")
+}
+
+enum SerialStatus {
+  AVAILABLE
+  ISSUED
+}
+
+model Serial {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  itemId String
+  item   Item   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  serialNo String
+  status   SerialStatus @default(AVAILABLE)
+
+  warehouseId String?
+  warehouse   Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+
+  locationId String?
+  location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  batchId String?
+  batch   Batch?  @relation(fields: [batchId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ledgerEntries StockLedgerEntrySerial[]
+
+  @@unique([tenantId, serialNo])
+  @@index([itemId])
+  @@index([warehouseId])
+  @@map("serials")
 }
 
 model Batch {
@@ -264,6 +361,7 @@ model Batch {
   binBalances        BinBalance[]
   stockFifoLayers    StockFifoLayer[]
   stockLedgerEntries StockLedgerEntry[]
+  serials            Serial[]
 
   @@unique([tenantId, itemId, batchNo])
   @@index([itemId])
@@ -310,6 +408,7 @@ model BinBalance {
   batch   Batch?  @relation(fields: [batchId], references: [id], onDelete: SetNull)
 
   actualQty Decimal @default(0) @db.Decimal(18, 6)
+  reservedQty Decimal @default(0) @db.Decimal(18, 6)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -337,8 +436,15 @@ model StockFifoLayer {
   batch   Batch?  @relation(fields: [batchId], references: [id], onDelete: SetNull)
 
   postingTs    DateTime
+  qtyOriginal  Decimal  @db.Decimal(18, 6)
   qtyRemaining Decimal  @db.Decimal(18, 6)
   incomingRate Decimal  @db.Decimal(18, 6)
+  isCancelled  Boolean  @default(false)
+
+  // For derived layers (e.g. stock transfer), keep lineage to support safe reversals.
+  sourceLayerId String?
+  sourceLayer   StockFifoLayer? @relation("LayerSource", fields: [sourceLayerId], references: [id], onDelete: SetNull)
+  derivedLayers StockFifoLayer[] @relation("LayerSource")
 
   voucherType String
   voucherNo   String
@@ -346,9 +452,46 @@ model StockFifoLayer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  stockLedgerEntries StockLedgerEntry[]
+
   @@index([tenantId, itemId, warehouseId, postingTs])
   @@index([batchId])
+  @@index([sourceLayerId])
   @@map("stock_fifo_layers")
+}
+
+model StockPosting {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  postingKey  String
+  voucherType String
+  voucherNo   String
+
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, postingKey])
+  @@index([tenantId, voucherType, voucherNo])
+  @@map("stock_postings")
+}
+
+model AuditLog {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  userId  String?
+  action  String
+  docType String
+  docName String
+  meta    Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, docType])
+  @@index([docName])
+  @@map("audit_logs")
 }
 
 model StockLedgerEntry {
@@ -373,6 +516,9 @@ model StockLedgerEntry {
   batchId String?
   batch   Batch?  @relation(fields: [batchId], references: [id], onDelete: SetNull)
 
+  fifoLayerId String?
+  fifoLayer   StockFifoLayer? @relation(fields: [fifoLayerId], references: [id], onDelete: SetNull)
+
   qty                  Decimal @db.Decimal(18, 6)
   valuationRate        Decimal @db.Decimal(18, 6)
   stockValueDifference Decimal @db.Decimal(18, 6)
@@ -382,9 +528,30 @@ model StockLedgerEntry {
 
   createdAt DateTime @default(now())
 
+  serials StockLedgerEntrySerial[]
+
   @@index([tenantId, postingDate])
   @@index([tenantId, itemId, warehouseId])
+  @@index([tenantId, voucherType, voucherNo])
   @@map("stock_ledger_entries")
+}
+
+model StockLedgerEntrySerial {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  ledgerEntryId String
+  ledgerEntry   StockLedgerEntry @relation(fields: [ledgerEntryId], references: [id], onDelete: Cascade)
+
+  serialId String
+  serial   Serial @relation(fields: [serialId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([ledgerEntryId])
+  @@index([serialId])
+  @@map("stock_ledger_entry_serials")
 }
 
 model Account {

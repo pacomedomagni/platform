@@ -102,7 +102,7 @@ export const CheckField = ({ field, value, onChange }: FieldProps) => {
                 id={field.name}
                 checked={!!value} 
                 onChange={e => onChange(e.target.checked)}
-                className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                className="h-4 w-4 rounded border-input text-primary focus:ring-primary/30"
                 disabled={field.readonly}
             />
             <Label htmlFor={field.name} className="leading-none cursor-pointer">

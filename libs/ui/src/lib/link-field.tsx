@@ -88,13 +88,13 @@ export const LinkField = ({ field, value, onChange }: LinkFieldProps) => {
             variant="outline"
             role="combobox"
             aria-expanded={open}
-            className="w-full justify-between bg-transparent border border-input h-9 px-3 font-normal"
+            className="w-full justify-between bg-transparent border border-input/80 h-10 px-3 font-normal"
           >
             {value ? value : "Select..."}
             <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-[300px] p-0" align="start">
+        <PopoverContent className="w-[320px] p-0" align="start">
           <Command>
             <CommandInput placeholder={`Search ${field.target}...`} />
             <CommandList>

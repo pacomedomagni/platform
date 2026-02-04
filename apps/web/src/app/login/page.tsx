@@ -38,7 +38,7 @@ export default function LoginPage() {
                 
                 {/* Logo / Brand */}
                 <div className="flex flex-col items-center justify-center text-center space-y-2">
-                    <div className="h-12 w-12 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-lg shadow-indigo-600/20">
+                    <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-indigo-600 via-blue-500 to-amber-400 flex items-center justify-center text-white shadow-lg shadow-indigo-600/20">
                          <ShieldCheck className="h-7 w-7" />
                     </div>
                     <div>
@@ -87,7 +87,7 @@ export default function LoginPage() {
                             />
                         </div>
 
-                        <Button type="submit" className="w-full h-11 text-base" disabled={loading}>
+                        <Button type="submit" className="w-full h-11 text-base bg-gradient-to-r from-indigo-600 via-blue-600 to-amber-400 text-white shadow-lg shadow-indigo-600/20 hover:shadow-indigo-600/30" disabled={loading}>
                             {loading ? (
                                 <>
                                     <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Signing in...

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { FormView, DocTypeDefinition } from '@noslag/ui';
+import { Loader2 } from 'lucide-react';
 import api from '../../../lib/api';
 
 export default function DocTypeFormPage() {
@@ -57,6 +58,18 @@ export default function DocTypeFormPage() {
         }
     };
 
+    const handleSubmit = async () => {
+        await api.put(`/v1/${docTypeName}/${docName}/submit`);
+        const dataRes = await api.get(`/v1/${docTypeName}/${docName}`);
+        setData(dataRes.data);
+    };
+
+    const handleCancel = async () => {
+        await api.put(`/v1/${docTypeName}/${docName}/cancel`);
+        const dataRes = await api.get(`/v1/${docTypeName}/${docName}`);
+        setData(dataRes.data);
+    };
+
     if (loading || !docType) {
         return (
             <div className="flex items-center justify-center h-full">
@@ -70,6 +83,8 @@ export default function DocTypeFormPage() {
             docType={docType}
             initialData={data}
             onSave={handleSave}
+            onSubmitDoc={docName !== 'new' ? handleSubmit : undefined}
+            onCancelDoc={docName !== 'new' ? handleCancel : undefined}
             onNavigateBack={() => router.back()}
         />
     );

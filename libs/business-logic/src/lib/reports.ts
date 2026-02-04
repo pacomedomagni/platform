@@ -274,6 +274,58 @@ export class ReportsService {
         };
     }
 
+    /**
+     * Get Accounts Payable Aging Report
+     */
+    async getPayableAging(tenantId: string, asOfDate: string) {
+        const invoices = await this.prisma.$queryRawUnsafe<any[]>(`
+            SELECT 
+                name,
+                supplier,
+                posting_date,
+                due_date,
+                grand_total,
+                outstanding_amount,
+                EXTRACT(DAY FROM ($1::date - due_date)) as days_overdue
+            FROM "Purchase Invoice"
+            WHERE tenant_id = $2
+              AND docstatus = 1
+              AND outstanding_amount > 0
+              AND posting_date <= $1
+            ORDER BY due_date
+        `, asOfDate, tenantId);
+
+        const aged = {
+            current: [] as any[],
+            '1-30': [] as any[],
+            '31-60': [] as any[],
+            '61-90': [] as any[],
+            '90+': [] as any[]
+        };
+
+        invoices.forEach(inv => {
+            const days = inv.days_overdue;
+            if (days <= 0) aged.current.push(inv);
+            else if (days <= 30) aged['1-30'].push(inv);
+            else if (days <= 60) aged['31-60'].push(inv);
+            else if (days <= 90) aged['61-90'].push(inv);
+            else aged['90+'].push(inv);
+        });
+
+        return {
+            as_of_date: asOfDate,
+            aged,
+            totals: {
+                current: this.sumOutstanding(aged.current),
+                '1-30': this.sumOutstanding(aged['1-30']),
+                '31-60': this.sumOutstanding(aged['31-60']),
+                '61-90': this.sumOutstanding(aged['61-90']),
+                '90+': this.sumOutstanding(aged['90+']),
+                total: this.sumOutstanding(invoices)
+            }
+        };
+    }
+
     private sumOutstanding(invoices: any[]): number {
         return invoices.reduce((sum, inv) => sum + (inv.outstanding_amount || 0), 0);
     }

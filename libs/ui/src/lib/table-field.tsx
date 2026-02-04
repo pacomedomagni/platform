@@ -38,20 +38,20 @@ export const TableField = ({ field, value, onChange }: TableFieldProps) => {
         onChange(rows.filter((_, i) => i !== idx));
     };
 
-    if (!meta) return <div className="text-sm text-gray-500 py-2">Loading Table Schema...</div>;
+    if (!meta) return <div className="text-sm text-muted-foreground py-2">Loading Table Schema...</div>;
 
     const columns = meta.fields.filter(f => !f.hidden);
 
     return (
-        <div className="border rounded-md p-4 bg-white/50 space-y-3">
+        <div className="border border-border/70 rounded-xl p-4 bg-white/70 dark:bg-slate-950/60 space-y-3">
              <div className="flex items-center justify-between">
                 <label className="text-sm font-semibold">{field.label}</label>
              </div>
              
-             <div className="border rounded-md overflow-hidden">
+             <div className="border border-border/70 rounded-xl overflow-hidden">
                  <div className="overflow-x-auto">
                      <table className="w-full text-sm">
-                        <thead className="bg-muted text-muted-foreground">
+                        <thead className="bg-muted/60 text-muted-foreground">
                             <tr>
                                 <th className="p-2 w-10 text-center font-medium">#</th>
                                 {columns.map(c => (
@@ -62,7 +62,7 @@ export const TableField = ({ field, value, onChange }: TableFieldProps) => {
                                 <th className="p-2 w-10"></th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-border bg-background">
+                        <tbody className="divide-y divide-border/70 bg-background">
                             {rows.length === 0 && (
                                 <tr>
                                     <td colSpan={columns.length + 2} className="p-4 text-center text-muted-foreground">
@@ -71,7 +71,7 @@ export const TableField = ({ field, value, onChange }: TableFieldProps) => {
                                 </tr>
                             )}
                             {rows.map((row, idx) => (
-                                <tr key={idx} className="hover:bg-muted/50">
+                                <tr key={idx} className="hover:bg-muted/40">
                                     <td className="p-2 text-center text-xs text-muted-foreground">{idx + 1}</td>
                                     {columns.map(col => (
                                         <td key={col.name} className="p-2">
@@ -130,11 +130,11 @@ const Cell = ({ field, value, onChange }: { field: DocFieldDefinition, value: an
 
     if (field.type === 'Check') {
         return (
-             <input 
+            <input 
                 type="checkbox" 
                 checked={!!value} 
                 onChange={e => onChange(e.target.checked ? 1 : 0)} 
-                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                className="h-4 w-4 rounded border-input text-primary focus:ring-primary/30"
             />
         )
     }

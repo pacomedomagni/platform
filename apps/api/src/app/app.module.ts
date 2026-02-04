@@ -5,6 +5,8 @@ import { AuthModule } from '@platform/auth';
 import { MetaModule } from '@platform/meta';
 import { BusinessLogicModule } from '@platform/business-logic';
 import { AppController } from './app.controller';
+import { InventoryController } from './inventory.controller';
+import { ReportsController } from './reports.controller';
 import { AppService } from './app.service';
 import { TenantMiddleware } from './tenant.middleware';
 
@@ -19,7 +21,7 @@ import { TenantMiddleware } from './tenant.middleware';
     MetaModule,
     BusinessLogicModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, InventoryController, ReportsController],
   providers: [AppService],
 })
 export class AppModule implements NestModule {
