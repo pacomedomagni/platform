@@ -139,12 +139,29 @@ const Cell = ({ field, value, onChange }: { field: DocFieldDefinition, value: an
         )
     }
 
+    const isNumericField = field.type === 'Int' || field.type === 'Currency' || field.type === 'Float';
+    
+    const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const val = e.target.value;
+        if (isNumericField) {
+            // Handle empty string and invalid input gracefully
+            if (val === '' || val === '-') {
+                onChange(null);
+            } else {
+                const parsed = field.type === 'Int' ? parseInt(val, 10) : parseFloat(val);
+                onChange(Number.isNaN(parsed) ? null : parsed);
+            }
+        } else {
+            onChange(val);
+        }
+    };
+    
     return (
         <Input 
             className="h-8 text-sm" 
-            value={value || ''} 
-            onChange={e => onChange(field.type === 'Int' || field.type === 'Currency' || field.type === 'Float' ? parseFloat(e.target.value) : e.target.value)} 
-            type={field.type === 'Int' || field.type === 'Currency' || field.type === 'Float' ? 'number' : 'text'}
+            value={value ?? ''} 
+            onChange={handleChange} 
+            type={isNumericField ? 'number' : 'text'}
             placeholder={field.label}
         />
     )

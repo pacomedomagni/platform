@@ -1307,6 +1307,16 @@ export class BusinessLogicService {
 	                await this.postInvoiceToGL(doc, user);
                     await this.applyInvoiceToSalesOrders(doc, tenantId);
                     await this.updateInvoiceOutstandingStatus('Invoice', doc.name, tenantId);
+	            },
+	            onCancel: async (doc, user) => {
+	                const tenantId = user?.tenantId;
+	                if (!tenantId) throw new Error('Missing tenantId in user context');
+	                // Reverse GL entries by posting opposite entries
+	                await this.reverseGlEntries(tenantId, 'Invoice', doc.name);
+	                // Reverse sales order applications
+	                await this.reverseInvoiceFromSalesOrders(doc, tenantId);
+	                // Reset outstanding amount
+	                await this.updateInvoiceOutstandingStatus('Invoice', doc.name, tenantId);
 	            }
 	         });
 	    }
@@ -1971,6 +1981,95 @@ export class BusinessLogicService {
         });
     }
 
+    /**
+     * Reverse GL entries for a voucher by creating opposite entries
+     * This is used when canceling submitted documents like Invoices, Payment Entries
+     */
+    private async reverseGlEntries(
+        tenantId: string,
+        voucherType: string,
+        voucherNo: string,
+    ) {
+        await this.prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+            
+            // Find all GL entries for this voucher
+            const existingEntries = await tx.glEntry.findMany({
+                where: {
+                    tenantId,
+                    voucherType,
+                    voucherNo,
+                },
+                include: {
+                    account: true,
+                },
+            });
+
+            if (existingEntries.length === 0) {
+                return; // No entries to reverse
+            }
+
+            const cancelPostingTs = new Date();
+            const cancelPostingDate = new Date(cancelPostingTs.toISOString().slice(0, 10) + 'T00:00:00.000Z');
+
+            // Create reversing entries (swap debit and credit)
+            for (const entry of existingEntries) {
+                await tx.glEntry.create({
+                    data: {
+                        tenantId,
+                        postingDate: cancelPostingDate,
+                        postingTs: cancelPostingTs,
+                        accountId: entry.accountId,
+                        currency: entry.currency,
+                        exchangeRate: entry.exchangeRate,
+                        // Swap debit and credit
+                        debitBc: entry.creditBc,
+                        creditBc: entry.debitBc,
+                        debitFc: entry.creditFc,
+                        creditFc: entry.debitFc,
+                        voucherType: `${voucherType} (Cancel)`,
+                        voucherNo,
+                        remarks: `Reversal of ${voucherType} ${voucherNo}`,
+                    },
+                });
+            }
+        });
+    }
+
+    /**
+     * Reverse invoice applications from sales orders
+     */
+    private async reverseInvoiceFromSalesOrders(doc: any, tenantId: string) {
+        // This reverses the billing status updates made during invoice submission
+        // Implementation depends on how sales order billing is tracked
+        // For now, we just log the reversal - implement based on your SO tracking logic
+        await this.prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+            
+            // If invoice items have sales_order references, reverse the billing
+            const items = doc.items || [];
+            for (const item of items) {
+                if (item.sales_order) {
+                    // Update sales order billing status
+                    // This is a simplified version - adjust based on actual SO billing tracking
+                    await tx.auditLog.create({
+                        data: {
+                            tenantId,
+                            action: 'INVOICE_CANCEL_REVERSE_SO',
+                            docType: 'Invoice',
+                            docName: doc.name,
+                            meta: {
+                                salesOrder: item.sales_order,
+                                itemCode: item.item_code,
+                                qty: item.qty,
+                            },
+                        },
+                    });
+                }
+            }
+        });
+    }
+
     private async createGlEntries(
         tenantId: string,
         postingDate: string,
@@ -1979,6 +2078,22 @@ export class BusinessLogicService {
         voucherType: string,
         voucherNo: string,
     ) {
+        // Validate double-entry: total debits must equal total credits
+        let totalDebit = new Prisma.Decimal(0);
+        let totalCredit = new Prisma.Decimal(0);
+        for (const entry of entries) {
+            totalDebit = totalDebit.add(new Prisma.Decimal(entry.debit || 0));
+            totalCredit = totalCredit.add(new Prisma.Decimal(entry.credit || 0));
+        }
+        const difference = totalDebit.sub(totalCredit).abs();
+        if (difference.gt(new Prisma.Decimal('0.01'))) {
+            throw new Error(
+                `GL entries for ${voucherType} ${voucherNo} are not balanced. ` +
+                `Total Debit: ${totalDebit.toString()}, Total Credit: ${totalCredit.toString()}, ` +
+                `Difference: ${difference.toString()}`
+            );
+        }
+
         await this.prisma.$transaction(async (tx) => {
             await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
             const tenant = await tx.tenant.findUnique({
@@ -1992,6 +2107,11 @@ export class BusinessLogicService {
                 const debit = new Prisma.Decimal(entry.debit || 0);
                 const credit = new Prisma.Decimal(entry.credit || 0);
                 if (debit.eq(0) && credit.eq(0)) continue;
+
+                // Validate account code is provided
+                if (!entry.accountCode) {
+                    throw new Error(`Missing account code in GL entry for ${voucherType} ${voucherNo}`);
+                }
 
                 const account = await this.ensureAccount(tx, tenantId, entry.accountCode);
                 await tx.glEntry.create({
@@ -2182,6 +2302,9 @@ export class BusinessLogicService {
             onCancel: async (doc, user) => {
                 const tenantId = user?.tenantId;
                 if (!tenantId) throw new Error('Missing tenantId in user context');
+                // Reverse GL entries
+                await this.reverseGlEntries(tenantId, 'Payment Entry', doc.name);
+                // Reverse payment allocations to invoices
                 await this.applyPaymentEntryToReferences(doc, 1, tenantId);
             },
         });

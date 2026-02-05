@@ -294,7 +294,10 @@ export class StockService {
         strategy,
       });
 
-      const valuationRate = consumption.totalCost.div(qtyToIssue);
+      // Calculate valuation rate safely to avoid division by zero
+      const valuationRate = qtyToIssue.gt(0) 
+        ? consumption.totalCost.div(qtyToIssue)
+        : new Prisma.Decimal(0);
 
       await this.updateWarehouseBalance(tx, input.tenantId, item.id, warehouse.id, qtyToIssue.neg());
       if (allowReserved && warehouseReserved.gt(0)) {
@@ -1578,7 +1581,10 @@ export class StockService {
         strategy,
       });
 
-      const valuationRate = consumption.totalCost.div(qtyToReduce);
+      // Calculate valuation rate safely to avoid division by zero
+      const valuationRate = qtyToReduce.gt(0)
+        ? consumption.totalCost.div(qtyToReduce)
+        : new Prisma.Decimal(0);
       await this.updateWarehouseBalance(
         tx,
         input.tenantId,
@@ -2103,46 +2109,89 @@ export class StockService {
     let remaining = new Prisma.Decimal(input.qty);
     let totalCost = new Prisma.Decimal(0);
 
-    while (remaining.gt(0)) {
-      const layer = await tx.stockFifoLayer.findFirst({
-        where: {
-          tenantId: input.tenantId,
-          itemId: input.itemId,
-          warehouseId: input.warehouseId,
-          ...(input.locationId ? { locationId: input.locationId } : {}),
-          ...(input.batchId ? { batchId: input.batchId } : {}),
-          qtyRemaining: { gt: 0 },
-        },
-        include: { batch: true },
-        orderBy:
-          input.strategy === StockConsumptionStrategy.FEFO
-            ? [
-                { batch: { expDate: { sort: 'asc', nulls: 'last' } } },
-                { postingTs: 'asc' },
-              ]
-            : [{ postingTs: 'asc' }],
-      });
+    // Build ORDER BY clause based on strategy
+    const orderByClause = input.strategy === StockConsumptionStrategy.FEFO
+      ? Prisma.sql`ORDER BY b."expDate" ASC NULLS LAST, l."postingTs" ASC`
+      : Prisma.sql`ORDER BY l."postingTs" ASC`;
 
-      if (!layer) {
+    // Build WHERE conditions
+    const locationCondition = input.locationId 
+      ? Prisma.sql`AND l."locationId" = ${input.locationId}` 
+      : Prisma.sql``;
+    const batchCondition = input.batchId 
+      ? Prisma.sql`AND l."batchId" = ${input.batchId}` 
+      : Prisma.sql``;
+
+    while (remaining.gt(0)) {
+      // Use SELECT FOR UPDATE to lock the row atomically
+      // This prevents race conditions where multiple transactions try to consume the same layer
+      const layers = await tx.$queryRaw<Array<{
+        id: string;
+        locationId: string;
+        batchId: string | null;
+        qtyRemaining: Prisma.Decimal;
+        incomingRate: Prisma.Decimal;
+      }>>`
+        SELECT l."id", l."locationId", l."batchId", l."qtyRemaining", l."incomingRate"
+        FROM "StockFifoLayer" l
+        LEFT JOIN "Batch" b ON l."batchId" = b."id"
+        WHERE l."tenantId" = ${input.tenantId}
+          AND l."itemId" = ${input.itemId}
+          AND l."warehouseId" = ${input.warehouseId}
+          AND l."qtyRemaining" > 0
+          AND l."isCancelled" = false
+          ${locationCondition}
+          ${batchCondition}
+        ${orderByClause}
+        LIMIT 1
+        FOR UPDATE OF l SKIP LOCKED
+      `;
+
+      if (layers.length === 0) {
+        // No unlocked layers available - check if any layers exist at all
+        const anyLayers = await tx.stockFifoLayer.findFirst({
+          where: {
+            tenantId: input.tenantId,
+            itemId: input.itemId,
+            warehouseId: input.warehouseId,
+            ...(input.locationId ? { locationId: input.locationId } : {}),
+            ...(input.batchId ? { batchId: input.batchId } : {}),
+            qtyRemaining: { gt: 0 },
+            isCancelled: false,
+          },
+        });
+        
+        if (anyLayers) {
+          // Layers exist but are locked - retry after a small delay
+          // This is a simple retry mechanism; in production you might want exponential backoff
+          await new Promise(resolve => setTimeout(resolve, 50));
+          continue;
+        }
+        
         throw new BadRequestException('Insufficient FIFO layers for issue');
       }
 
-      const take = Prisma.Decimal.min(layer.qtyRemaining, remaining);
+      const layer = layers[0];
+      const qtyRemaining = new Prisma.Decimal(layer.qtyRemaining);
+      const take = Prisma.Decimal.min(qtyRemaining, remaining);
 
+      // Now we have exclusive lock on this layer, safe to update
       await tx.stockFifoLayer.update({
         where: { id: layer.id },
         data: { qtyRemaining: { decrement: take } },
       });
 
+      const incomingRate = new Prisma.Decimal(layer.incomingRate);
+      
       legs.push({
         layerId: layer.id,
         locationId: layer.locationId,
         batchId: layer.batchId,
         qty: take,
-        rate: layer.incomingRate,
+        rate: incomingRate,
       });
 
-      totalCost = totalCost.add(take.mul(layer.incomingRate));
+      totalCost = totalCost.add(take.mul(incomingRate));
       remaining = remaining.sub(take);
     }
 

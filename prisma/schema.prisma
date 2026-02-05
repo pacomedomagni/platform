@@ -50,6 +50,19 @@ model Tenant {
   bankReconciliations   BankReconciliation[]
   bankReconciliationDetails BankReconciliationDetail[]
   bankMatchingRules     BankMatchingRule[]
+  
+  // Storefront relations
+  productCategories     ProductCategory[]
+  productListings       ProductListing[]
+  storeCustomers        StoreCustomer[]
+  storeAddresses        StoreAddress[]
+  passwordResets        PasswordReset[]
+  carts                 Cart[]
+  cartItems             CartItem[]
+  orders                Order[]
+  orderItems            OrderItem[]
+  payments              Payment[]
+  coupons               Coupon[]
 
   @@map("tenants")
 }
@@ -275,6 +288,7 @@ model Item {
   binBalances           BinBalance[]
   stockFifoLayers       StockFifoLayer[]
   stockLedgerEntries    StockLedgerEntry[]
+  productListing        ProductListing?
 
   @@unique([tenantId, code])
   @@map("items")
@@ -654,6 +668,8 @@ model Customer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  storeCustomers StoreCustomer[]
+
   @@unique([tenantId, code])
   @@index([tenantId, customerName])
   @@index([tenantId, customerGroup])
@@ -972,4 +988,456 @@ model BankMatchingRule {
   @@unique([tenantId, name])
   @@index([tenantId])
   @@map("bank_matching_rules")
+}
+
+// ==================== STOREFRONT ====================
+
+model ProductCategory {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name        String
+  slug        String
+  description String?
+  imageUrl    String?
+
+  parentId String?
+  parent   ProductCategory?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children ProductCategory[] @relation("CategoryTree")
+
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products ProductListing[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId, isActive])
+  @@map("product_categories")
+}
+
+model ProductListing {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  itemId String @unique
+  item   Item   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  categoryId String?
+  category   ProductCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  slug             String
+  displayName      String
+  shortDescription String?
+  longDescription  String?
+
+  price         Decimal  @db.Decimal(18, 2)
+  compareAtPrice Decimal? @db.Decimal(18, 2)
+  costPrice      Decimal? @db.Decimal(18, 2)
+
+  images     String[] // Array of image URLs
+  badge      String?  // "Best Seller", "New Arrival", "Limited", etc.
+  
+  metaTitle       String?
+  metaDescription String?
+  
+  isFeatured    Boolean @default(false)
+  isPublished   Boolean @default(false)
+  publishedAt   DateTime?
+
+  sortOrder Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cartItems     CartItem[]
+  orderItems    OrderItem[]
+
+  @@unique([tenantId, slug])
+  @@unique([tenantId, itemId])
+  @@index([tenantId, isPublished])
+  @@index([tenantId, categoryId])
+  @@index([tenantId, isFeatured])
+  @@map("product_listings")
+}
+
+// Storefront Customer (separate from B2B Customer)
+model StoreCustomer {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  email         String
+  passwordHash  String?
+  firstName     String?
+  lastName      String?
+  phone         String?
+
+  // Link to B2B customer record if applicable
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  // Email verification
+  emailVerified   Boolean   @default(false)
+  emailVerifiedAt DateTime?
+
+  // Password reset
+  resetToken      String?
+  resetTokenExp   DateTime?
+
+  // Marketing preferences
+  acceptsMarketing Boolean @default(false)
+
+  lastLoginAt DateTime?
+  isActive    Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  carts           Cart[]
+  orders          Order[]
+  addresses       StoreAddress[]
+  passwordResets  PasswordReset[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId, isActive])
+  @@map("store_customers")
+}
+
+model StoreAddress {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  customerId String
+  customer   StoreCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  label        String  @default("Home")
+  firstName    String?
+  lastName     String?
+  company      String?
+  addressLine1 String
+  addressLine2 String?
+  city         String
+  state        String?
+  postalCode   String
+  country      String  @default("US")
+  phone        String?
+
+  isDefault Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([customerId])
+  @@map("store_addresses")
+}
+
+model PasswordReset {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  customerId String
+  customer   StoreCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  token     String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([customerId])
+  @@index([token])
+  @@map("password_resets")
+}
+
+model Cart {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Can be anonymous (no customer) or linked to customer
+  customerId String?
+  customer   StoreCustomer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Anonymous cart token
+  sessionToken String? @unique
+
+  // Cart status
+  status String @default("active") // active, converted, abandoned
+
+  // Shipping address (snapshot at checkout)
+  shippingAddressId String?
+
+  // Coupon/discount
+  couponCode String?
+  discountAmount Decimal @default(0) @db.Decimal(18, 2)
+
+  // Calculated totals (updated on cart changes)
+  subtotal      Decimal @default(0) @db.Decimal(18, 2)
+  shippingTotal Decimal @default(0) @db.Decimal(18, 2)
+  taxTotal      Decimal @default(0) @db.Decimal(18, 2)
+  grandTotal    Decimal @default(0) @db.Decimal(18, 2)
+
+  // Cart recovery
+  abandonedAt   DateTime?
+  recoveredAt   DateTime?
+  lastActivityAt DateTime @default(now())
+
+  expiresAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items CartItem[]
+  order Order?
+
+  @@index([tenantId, customerId])
+  @@index([tenantId, sessionToken])
+  @@index([tenantId, status])
+  @@map("carts")
+}
+
+model CartItem {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  cartId String
+  cart   Cart   @relation(fields: [cartId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   ProductListing @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  quantity Int     @default(1)
+  price    Decimal @db.Decimal(18, 2) // Price at time of adding to cart
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([cartId, productId])
+  @@index([cartId])
+  @@map("cart_items")
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  AUTHORIZED
+  CAPTURED
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+model Order {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  orderNumber String
+
+  customerId String?
+  customer   StoreCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  // Link to original cart
+  cartId String? @unique
+  cart   Cart?   @relation(fields: [cartId], references: [id], onDelete: SetNull)
+
+  // Contact info (may differ from customer)
+  email String
+  phone String?
+
+  // Billing address (snapshot)
+  billingFirstName    String?
+  billingLastName     String?
+  billingCompany      String?
+  billingAddressLine1 String?
+  billingAddressLine2 String?
+  billingCity         String?
+  billingState        String?
+  billingPostalCode   String?
+  billingCountry      String?
+
+  // Shipping address (snapshot)
+  shippingFirstName    String?
+  shippingLastName     String?
+  shippingCompany      String?
+  shippingAddressLine1 String?
+  shippingAddressLine2 String?
+  shippingCity         String?
+  shippingState        String?
+  shippingPostalCode   String?
+  shippingCountry      String?
+
+  // Order totals
+  subtotal       Decimal @db.Decimal(18, 2)
+  shippingTotal  Decimal @db.Decimal(18, 2)
+  taxTotal       Decimal @db.Decimal(18, 2)
+  discountTotal  Decimal @default(0) @db.Decimal(18, 2)
+  grandTotal     Decimal @db.Decimal(18, 2)
+
+  currency String @default("USD")
+
+  // Status tracking
+  status        OrderStatus   @default(PENDING)
+  paymentStatus PaymentStatus @default(PENDING)
+
+  // Stripe integration
+  stripePaymentIntentId String?
+  stripeChargeId        String?
+
+  // Shipping tracking
+  shippingMethod   String?
+  shippingCarrier  String?
+  trackingNumber   String?
+  shippedAt        DateTime?
+  deliveredAt      DateTime?
+
+  // Notes
+  customerNotes String?
+  internalNotes String?
+
+  // Timestamps
+  confirmedAt DateTime?
+  cancelledAt DateTime?
+  refundedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items    OrderItem[]
+  payments Payment[]
+
+  @@unique([tenantId, orderNumber])
+  @@index([tenantId, customerId])
+  @@index([tenantId, status])
+  @@index([tenantId, createdAt])
+  @@index([stripePaymentIntentId])
+  @@map("orders")
+}
+
+model OrderItem {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  productId String?
+  product   ProductListing? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  // Snapshot of product at time of order
+  sku         String?
+  name        String
+  description String?
+  imageUrl    String?
+
+  quantity   Int
+  unitPrice  Decimal @db.Decimal(18, 2)
+  totalPrice Decimal @db.Decimal(18, 2)
+
+  // Fulfillment tracking
+  quantityFulfilled Int @default(0)
+  quantityRefunded  Int @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+model Payment {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  // Payment details
+  amount   Decimal @db.Decimal(18, 2)
+  currency String  @default("USD")
+  method   String  @default("card") // card, paypal, bank_transfer, etc.
+
+  // Status
+  status PaymentStatus @default(PENDING)
+
+  // Stripe references
+  stripePaymentIntentId String?
+  stripeChargeId        String?
+  stripeRefundId        String?
+
+  // Card details (last 4 digits only for display)
+  cardBrand   String?
+  cardLast4   String?
+  cardExpiry  String?
+
+  // Error tracking
+  errorCode    String?
+  errorMessage String?
+
+  // Timestamps
+  authorizedAt DateTime?
+  capturedAt   DateTime?
+  failedAt     DateTime?
+  refundedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([stripePaymentIntentId])
+  @@map("payments")
+}
+
+// Coupon/discount codes
+model Coupon {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  code        String
+  description String?
+
+  // Discount type
+  discountType String  @default("percentage") // percentage, fixed_amount
+  discountValue Decimal @db.Decimal(18, 2)
+
+  // Constraints
+  minimumOrderAmount Decimal? @db.Decimal(18, 2)
+  maximumDiscount    Decimal? @db.Decimal(18, 2)
+
+  // Usage limits
+  usageLimit     Int? // Total times this coupon can be used
+  usageLimitPerCustomer Int? @default(1)
+  timesUsed      Int  @default(0)
+
+  // Validity
+  startsAt  DateTime?
+  expiresAt DateTime?
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("coupons")
 }

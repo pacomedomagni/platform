@@ -1,0 +1,311 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '@platform/db';
+import { Prisma } from '@prisma/client';
+import { ListOrdersDto } from './dto';
+
+@Injectable()
+export class OrdersService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * List orders for a customer
+   */
+  async listOrders(tenantId: string, customerId: string, dto: ListOrdersDto) {
+    const { status, limit = 20, offset = 0 } = dto;
+
+    const where: Prisma.OrderWhereInput = {
+      tenantId,
+      customerId,
+    };
+
+    if (status) {
+      where.status = status as any;
+    }
+
+    const [orders, total] = await Promise.all([
+      this.prisma.order.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        skip: offset,
+        include: {
+          _count: {
+            select: { items: true },
+          },
+        },
+      }),
+      this.prisma.order.count({ where }),
+    ]);
+
+    return {
+      data: orders.map((order) => ({
+        id: order.id,
+        orderNumber: order.orderNumber,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        grandTotal: Number(order.grandTotal),
+        itemCount: order._count.items,
+        createdAt: order.createdAt,
+      })),
+      pagination: {
+        total,
+        limit,
+        offset,
+        hasMore: offset + orders.length < total,
+      },
+    };
+  }
+
+  /**
+   * Get order detail
+   */
+  async getOrder(tenantId: string, orderId: string, customerId?: string) {
+    const where: Prisma.OrderWhereInput = {
+      id: orderId,
+      tenantId,
+    };
+
+    // If customerId provided, verify ownership
+    if (customerId) {
+      where.customerId = customerId;
+    }
+
+    const order = await this.prisma.order.findFirst({
+      where,
+      include: {
+        items: true,
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    return this.mapOrderToDetail(order);
+  }
+
+  /**
+   * Get order by order number (for guest checkout)
+   */
+  async getOrderByNumber(tenantId: string, orderNumber: string, email: string) {
+    const order = await this.prisma.order.findFirst({
+      where: {
+        tenantId,
+        orderNumber,
+        email: email.toLowerCase(),
+      },
+      include: {
+        items: true,
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    return this.mapOrderToDetail(order);
+  }
+
+  /**
+   * Get recent orders for a customer
+   */
+  async getRecentOrders(tenantId: string, customerId: string, limit = 5) {
+    const orders = await this.prisma.order.findMany({
+      where: {
+        tenantId,
+        customerId,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      include: {
+        _count: {
+          select: { items: true },
+        },
+      },
+    });
+
+    return orders.map((order) => ({
+      id: order.id,
+      orderNumber: order.orderNumber,
+      status: order.status,
+      paymentStatus: order.paymentStatus,
+      grandTotal: Number(order.grandTotal),
+      itemCount: order._count.items,
+      createdAt: order.createdAt,
+    }));
+  }
+
+  // ============ ADMIN METHODS ============
+
+  /**
+   * List all orders (admin)
+   */
+  async listAllOrders(tenantId: string, dto: ListOrdersDto & { search?: string }) {
+    const { status, search, limit = 20, offset = 0 } = dto;
+
+    const where: Prisma.OrderWhereInput = {
+      tenantId,
+    };
+
+    if (status) {
+      where.status = status as any;
+    }
+
+    if (search) {
+      where.OR = [
+        { orderNumber: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const [orders, total] = await Promise.all([
+      this.prisma.order.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        skip: offset,
+        include: {
+          _count: {
+            select: { items: true },
+          },
+          customer: {
+            select: {
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
+        },
+      }),
+      this.prisma.order.count({ where }),
+    ]);
+
+    return {
+      data: orders.map((order) => ({
+        id: order.id,
+        orderNumber: order.orderNumber,
+        customer: order.customer
+          ? {
+              name: [order.customer.firstName, order.customer.lastName]
+                .filter(Boolean)
+                .join(' ') || order.customer.email,
+              email: order.customer.email,
+            }
+          : { name: order.email, email: order.email },
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        grandTotal: Number(order.grandTotal),
+        itemCount: order._count.items,
+        createdAt: order.createdAt,
+      })),
+      pagination: {
+        total,
+        limit,
+        offset,
+        hasMore: offset + orders.length < total,
+      },
+    };
+  }
+
+  /**
+   * Update order status (admin)
+   */
+  async updateOrderStatus(
+    tenantId: string,
+    orderId: string,
+    status: string,
+    trackingInfo?: { carrier?: string; trackingNumber?: string }
+  ) {
+    const order = await this.prisma.order.findFirst({
+      where: { id: orderId, tenantId },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    const updateData: any = { status };
+
+    if (status === 'SHIPPED') {
+      updateData.shippedAt = new Date();
+      if (trackingInfo?.carrier) updateData.shippingCarrier = trackingInfo.carrier;
+      if (trackingInfo?.trackingNumber) updateData.trackingNumber = trackingInfo.trackingNumber;
+    }
+
+    if (status === 'DELIVERED') {
+      updateData.deliveredAt = new Date();
+    }
+
+    if (status === 'CANCELLED') {
+      updateData.cancelledAt = new Date();
+    }
+
+    await this.prisma.order.update({
+      where: { id: orderId },
+      data: updateData,
+    });
+
+    return this.getOrder(tenantId, orderId);
+  }
+
+  // ============ HELPERS ============
+
+  private mapOrderToDetail(order: any) {
+    return {
+      id: order.id,
+      orderNumber: order.orderNumber,
+      email: order.email,
+      phone: order.phone,
+      status: order.status,
+      paymentStatus: order.paymentStatus,
+      shippingAddress: order.shippingAddressLine1
+        ? {
+            firstName: order.shippingFirstName,
+            lastName: order.shippingLastName,
+            company: order.shippingCompany,
+            addressLine1: order.shippingAddressLine1,
+            addressLine2: order.shippingAddressLine2,
+            city: order.shippingCity,
+            state: order.shippingState,
+            postalCode: order.shippingPostalCode,
+            country: order.shippingCountry,
+          }
+        : null,
+      billingAddress: order.billingAddressLine1
+        ? {
+            firstName: order.billingFirstName,
+            lastName: order.billingLastName,
+            company: order.billingCompany,
+            addressLine1: order.billingAddressLine1,
+            addressLine2: order.billingAddressLine2,
+            city: order.billingCity,
+            state: order.billingState,
+            postalCode: order.billingPostalCode,
+            country: order.billingCountry,
+          }
+        : null,
+      items: order.items.map((item: any) => ({
+        id: item.id,
+        name: item.name,
+        quantity: item.quantity,
+        unitPrice: Number(item.unitPrice),
+        totalPrice: Number(item.totalPrice),
+        imageUrl: item.imageUrl,
+      })),
+      subtotal: Number(order.subtotal),
+      shippingTotal: Number(order.shippingTotal),
+      taxTotal: Number(order.taxTotal),
+      discountTotal: Number(order.discountTotal),
+      grandTotal: Number(order.grandTotal),
+      shippingMethod: order.shippingMethod,
+      shippingCarrier: order.shippingCarrier,
+      trackingNumber: order.trackingNumber,
+      customerNotes: order.customerNotes,
+      createdAt: order.createdAt,
+      confirmedAt: order.confirmedAt,
+      shippedAt: order.shippedAt,
+      deliveredAt: order.deliveredAt,
+    };
+  }
+}

@@ -1,0 +1,78 @@
+# Dynamic Routing Configuration
+# Define routes for services
+
+http:
+  routers:
+    # API Router
+    api-router:
+      rule: "Host(`api.${DOMAIN}`) || (Host(`${DOMAIN}`) && PathPrefix(`/api`))"
+      entryPoints:
+        - websecure
+      service: api-service
+      middlewares:
+        - security-headers
+        - rate-limit
+        - cors
+        - compress
+      tls:
+        certResolver: letsencrypt
+    
+    # Web/Storefront Router
+    web-router:
+      rule: "Host(`${DOMAIN}`) && !PathPrefix(`/api`)"
+      entryPoints:
+        - websecure
+      service: web-service
+      middlewares:
+        - security-headers
+        - compress
+        - redirect-www
+      tls:
+        certResolver: letsencrypt
+    
+    # Tenant Subdomain Router (wildcard)
+    tenant-router:
+      rule: "HostRegexp(`{subdomain:[a-z0-9-]+}.${DOMAIN}`)"
+      entryPoints:
+        - websecure
+      service: web-service
+      middlewares:
+        - security-headers
+        - compress
+      tls:
+        certResolver: letsencrypt
+        domains:
+          - main: "${DOMAIN}"
+            sans:
+              - "*.${DOMAIN}"
+    
+    # Dashboard (should be protected in production)
+    traefik-dashboard:
+      rule: "Host(`traefik.${DOMAIN}`)"
+      entryPoints:
+        - websecure
+      service: api@internal
+      middlewares:
+        - security-headers
+        # Add basic auth or IP whitelist in production
+      tls:
+        certResolver: letsencrypt
+
+  services:
+    api-service:
+      loadBalancer:
+        servers:
+          - url: "http://noslag_api:3000"
+        healthCheck:
+          path: /api/health
+          interval: 10s
+          timeout: 3s
+    
+    web-service:
+      loadBalancer:
+        servers:
+          - url: "http://noslag_web:3000"
+        healthCheck:
+          path: /
+          interval: 10s
+          timeout: 3s

@@ -49,15 +49,23 @@ interface LinkFieldProps {
 // OR assume a default API location if we want to be opinionated.
 // Better: Add a prop `fetchList: (doctype) => Promise<any[]>`
 
+// Cache expiry time in milliseconds (5 minutes)
+const CACHE_TTL = 5 * 60 * 1000;
+
 export const LinkField = ({ field, value, onChange }: LinkFieldProps) => {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [lastFetchTime, setLastFetchTime] = useState<number>(0);
 
-  // Fetch logic
+  // Fetch logic with cache expiry
   useEffect(() => {
     if (!open) return; // Only fetch when opened
-    if (items.length > 0) return; // Cache locally
+    
+    // Check if cache is still valid
+    const now = Date.now();
+    const cacheExpired = now - lastFetchTime > CACHE_TTL;
+    if (items.length > 0 && !cacheExpired) return; // Use cached data if still valid
 
     const load = async () => {
         setLoading(true);
@@ -68,6 +76,7 @@ export const LinkField = ({ field, value, onChange }: LinkFieldProps) => {
             if (res.ok) {
                 const json = await res.json();
                 setItems(json);
+                setLastFetchTime(Date.now());
             }
         } catch (e) {
             console.error("Link fetch failed", e);
@@ -76,12 +85,21 @@ export const LinkField = ({ field, value, onChange }: LinkFieldProps) => {
         }
     };
     load();
-  }, [open, field.target, items.length]);
+  }, [open, field.target, items.length, lastFetchTime]);
+  
+  // Force refresh when dropdown opens after being closed for a while
+  const handleOpenChange = (isOpen: boolean) => {
+    setOpen(isOpen);
+    // If opening and cache is expired, clear items to trigger refetch
+    if (isOpen && Date.now() - lastFetchTime > CACHE_TTL) {
+      setItems([]);
+    }
+  };
 
   return (
     <div className="space-y-2">
       <Label>{field.label}</Label>
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover open={open} onOpenChange={handleOpenChange}>
         <PopoverTrigger asChild>
           <Button
             type="button" // prevent form submit

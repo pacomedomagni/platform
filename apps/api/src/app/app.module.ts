@@ -1,4 +1,6 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
+import { APP_INTERCEPTOR, APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ClsModule } from 'nestjs-cls';
 import { DbModule } from '@platform/db';
 import { AuthModule } from '@platform/auth';
@@ -9,9 +11,32 @@ import { InventoryController } from './inventory.controller';
 import { ReportsController } from './reports.controller';
 import { AppService } from './app.service';
 import { TenantMiddleware } from './tenant.middleware';
+import { HealthModule } from './health/health.module';
+import { ProvisioningModule } from './provisioning/provisioning.module';
+import { StorefrontModule } from './storefront/storefront.module';
+import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { SentryInterceptor } from './sentry/sentry.interceptor';
 
 @Module({
   imports: [
+    // Rate limiting - 100 requests per minute per IP
+    ThrottlerModule.forRoot([
+      {
+        name: 'short',
+        ttl: 1000, // 1 second
+        limit: 10, // 10 requests per second
+      },
+      {
+        name: 'medium',
+        ttl: 60000, // 1 minute
+        limit: 100, // 100 requests per minute
+      },
+      {
+        name: 'long',
+        ttl: 3600000, // 1 hour
+        limit: 1000, // 1000 requests per hour
+      },
+    ]),
     ClsModule.forRoot({
       global: true,
       middleware: { mount: true },
@@ -20,9 +45,29 @@ import { TenantMiddleware } from './tenant.middleware';
     AuthModule,
     MetaModule,
     BusinessLogicModule,
+    HealthModule,
+    ProvisioningModule,
+    StorefrontModule,
   ],
   controllers: [AppController, InventoryController, ReportsController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    // Global rate limiting guard
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+    // Global request logging
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: LoggingInterceptor,
+    },
+    // Sentry context interceptor
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: SentryInterceptor,
+    },
+  ],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
