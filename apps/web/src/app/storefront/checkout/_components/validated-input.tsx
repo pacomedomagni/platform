@@ -3,7 +3,7 @@
 import { forwardRef } from 'react';
 import { Input } from '@platform/ui';
 import { Check, AlertCircle } from 'lucide-react';
-import { cn } from '@platform/ui/lib/utils';
+import { cn } from '@platform/ui';
 
 interface ValidatedInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   error?: string;

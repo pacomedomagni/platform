@@ -20,8 +20,8 @@ export class QueueModule {
   }
 
   static forRootAsync(options: {
-    useFactory: (...args: unknown[]) => Promise<QueueModuleOptions> | QueueModuleOptions;
-    inject?: unknown[];
+    useFactory: (...args: any[]) => Promise<QueueModuleOptions> | QueueModuleOptions;
+    inject?: any[];
   }): DynamicModule {
     return {
       module: QueueModule,
@@ -29,7 +29,7 @@ export class QueueModule {
         {
           provide: QUEUE_MODULE_OPTIONS,
           useFactory: options.useFactory,
-          inject: options.inject || [],
+          inject: (options.inject || []) as any[],
         },
         QueueService,
       ],

@@ -163,15 +163,15 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     paused: number;
   }> {
     const queue = await this.getOrCreateQueue(queueName);
-    const [waiting, active, completed, failed, delayed, paused] = await Promise.all([
+    const [waiting, active, completed, failed, delayed] = await Promise.all([
       queue.getWaitingCount(),
       queue.getActiveCount(),
       queue.getCompletedCount(),
       queue.getFailedCount(),
       queue.getDelayedCount(),
-      queue.getPausedCount(),
     ]);
-    return { waiting, active, completed, failed, delayed, paused };
+    // Note: BullMQ v5 doesn't have getPausedCount() - paused jobs are included in waiting count
+    return { waiting, active, completed, failed, delayed, paused: 0 };
   }
 
   /**

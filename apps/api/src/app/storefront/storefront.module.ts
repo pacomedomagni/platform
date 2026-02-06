@@ -20,6 +20,7 @@ import { EmailPreferencesService } from './email/email-preferences.service';
 import { SendGridWebhookController } from './email/sendgrid-webhook.controller';
 import { OnboardingController } from './onboarding/onboarding.controller';
 import { OnboardingService } from './onboarding/onboarding.service';
+import { ThemesModule } from './themes/themes.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { OnboardingService } from './onboarding/onboarding.service';
     CustomerAuthModule,
     EcommerceModule,
     I18nModule,
+    ThemesModule,
     EmailModule.forRoot({
       smtp: {
         host: process.env['SMTP_HOST'] || 'localhost',

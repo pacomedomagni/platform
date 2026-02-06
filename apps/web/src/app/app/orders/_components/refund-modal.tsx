@@ -8,7 +8,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@platform/ui/dialog';
+} from '@platform/ui';
 import { Button, Input, Label, Textarea, NativeSelect } from '@platform/ui';
 
 interface RefundModalProps {

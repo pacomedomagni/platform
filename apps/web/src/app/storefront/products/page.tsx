@@ -107,7 +107,7 @@ export default function ProductsPage() {
         actions={
           <Link
             href="/storefront/cart"
-            className="text-sm font-semibold text-blue-600 hover:text-blue-500 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded"
+            className="text-sm font-semibold text-primary hover:opacity-80 hover:underline focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded"
           >
             View cart
           </Link>
@@ -115,14 +115,14 @@ export default function ProductsPage() {
       />
 
       <Card
-        className="flex flex-col gap-4 border-slate-200/70 bg-white p-5 shadow-sm md:flex-row md:items-center md:justify-between"
+        className="flex flex-col gap-4 border-border bg-card p-5 shadow-sm md:flex-row md:items-center md:justify-between"
         role="search"
         aria-label="Product filters and search"
       >
         <nav aria-label="Product category filters">
           <div className="flex flex-wrap items-center gap-3 text-sm">
-            <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-slate-600">
-              <Filter className="h-4 w-4 text-slate-400" aria-hidden="true" />
+            <div className="flex items-center gap-2 rounded-full border border-border bg-muted px-3 py-1.5 text-muted-foreground">
+              <Filter className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
               <span>Filters</span>
             </div>
             {filters.map((filter) => (
@@ -131,8 +131,8 @@ export default function ProductsPage() {
                 variant="outline"
                 className={`cursor-pointer ${
                   selectedCategory === filter.value
-                    ? 'bg-blue-50 text-blue-600 border-blue-200'
-                    : 'bg-white text-slate-600 hover:bg-slate-100'
+                    ? 'bg-primary/10 text-primary border-primary/20'
+                    : 'bg-card text-muted-foreground hover:bg-muted'
                 }`}
                 onClick={() => setSelectedCategory(filter.value)}
                 role="button"
@@ -166,7 +166,7 @@ export default function ProductsPage() {
               aria-label="Search products"
             />
           </div>
-          <div className="flex items-center gap-2 text-sm text-slate-500">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
             <label htmlFor="sort-by" className="sr-only">
               Sort products by
@@ -194,18 +194,18 @@ export default function ProductsPage() {
           aria-live="polite"
         >
           <Spinner className="h-8 w-8" aria-hidden="true" />
-          <span className="ml-3 text-slate-600">Loading products...</span>
+          <span className="ml-3 text-muted-foreground">Loading products...</span>
         </div>
       ) : error ? (
         <Card
           className="flex flex-col items-center justify-center p-10 text-center"
           role="alert"
         >
-          <AlertCircle className="h-12 w-12 text-red-500 mb-4" aria-hidden="true" />
-          <p className="text-slate-700 font-medium">{error}</p>
+          <AlertCircle className="h-12 w-12 text-destructive mb-4" aria-hidden="true" />
+          <p className="text-foreground font-medium">{error}</p>
           <Button
             variant="outline"
-            className="mt-4 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            className="mt-4 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
             onClick={() => window.location.reload()}
           >
             Try Again
@@ -216,11 +216,11 @@ export default function ProductsPage() {
           className="flex flex-col items-center justify-center p-10 text-center"
           role="status"
         >
-          <p className="text-slate-600">No products found.</p>
+          <p className="text-muted-foreground">No products found.</p>
           {(searchQuery || selectedCategory !== 'all') && (
             <Button
               variant="outline"
-              className="mt-4 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              className="mt-4 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
               onClick={() => {
                 setSearchQuery('');
                 setSelectedCategory('all');
@@ -248,7 +248,7 @@ export default function ProductsPage() {
       )}
 
       <Card
-        className="flex flex-col items-start justify-between gap-4 border-slate-200/70 bg-gradient-to-r from-blue-600 via-indigo-600 to-amber-400 p-6 text-white shadow-lg md:flex-row md:items-center"
+        className="flex flex-col items-start justify-between gap-4 border-border bg-gradient-to-r from-primary via-secondary to-accent p-6 text-primary-foreground shadow-lg md:flex-row md:items-center"
         role="region"
         aria-labelledby="cta-heading"
       >
@@ -256,10 +256,10 @@ export default function ProductsPage() {
           <h2 id="cta-heading" className="text-xl font-semibold">
             Need a full-storefront rollout?
           </h2>
-          <p className="text-sm text-white/80">We build the merchandising, inventory, and fulfillment flows for you.</p>
+          <p className="text-sm text-primary-foreground/80">We build the merchandising, inventory, and fulfillment flows for you.</p>
         </div>
         <Button
-          className="bg-white text-slate-900 hover:bg-white/90 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-blue-600"
+          className="bg-background text-foreground hover:bg-background/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
         >
           Talk to sales
         </Button>

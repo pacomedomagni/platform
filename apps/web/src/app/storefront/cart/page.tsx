@@ -68,7 +68,7 @@ export default function CartPage() {
         aria-live="polite"
       >
         <Spinner className="h-8 w-8" aria-hidden="true" />
-        <span className="ml-3 text-slate-600">Loading cart...</span>
+        <span className="ml-3 text-muted-foreground">Loading cart...</span>
       </div>
     );
   }
@@ -80,12 +80,12 @@ export default function CartPage() {
           className="flex flex-col items-center justify-center p-16 text-center"
           role="status"
         >
-          <ShoppingBag className="h-16 w-16 text-slate-300 mb-6" aria-hidden="true" />
-          <h1 className="text-2xl font-semibold text-slate-900 mb-2">Your cart is empty</h1>
-          <p className="text-slate-500 mb-6">Looks like you haven&apos;t added any items to your cart yet.</p>
+          <ShoppingBag className="h-16 w-16 text-muted mb-6" aria-hidden="true" />
+          <h1 className="text-2xl font-semibold text-foreground mb-2">Your cart is empty</h1>
+          <p className="text-muted-foreground mb-6">Looks like you haven&apos;t added any items to your cart yet.</p>
           <ButtonLink
             href="/storefront/products"
-            className="bg-gradient-to-r from-indigo-600 via-blue-600 to-amber-400 text-white shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            className="bg-gradient-to-r from-primary via-secondary to-accent text-primary-foreground shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
           >
             Start Shopping
           </ButtonLink>
@@ -98,12 +98,12 @@ export default function CartPage() {
     <div className="mx-auto w-full max-w-7xl space-y-10 px-6 py-12">
       <header className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-semibold text-slate-900">Your cart</h1>
-          <p className="text-sm text-slate-500">Review your items and proceed to checkout.</p>
+          <h1 className="text-3xl font-semibold text-foreground">Your cart</h1>
+          <p className="text-sm text-muted-foreground">Review your items and proceed to checkout.</p>
         </div>
         <Badge
           variant="outline"
-          className="bg-white text-slate-600"
+          className="bg-card text-muted-foreground"
           aria-label={`${itemCount} ${itemCount === 1 ? 'item' : 'items'} in cart`}
         >
           {itemCount} {itemCount === 1 ? 'item' : 'items'}
@@ -119,7 +119,7 @@ export default function CartPage() {
             {items.map((item) => (
               <Card
                 key={item.id}
-                className="flex flex-col gap-4 border-slate-200/70 bg-white p-5 shadow-sm sm:flex-row sm:items-center"
+                className="flex flex-col gap-4 border-border bg-card p-5 shadow-sm sm:flex-row sm:items-center"
                 role="listitem"
               >
                 <div
@@ -144,27 +144,27 @@ export default function CartPage() {
                   <div className="flex items-center justify-between">
                     <Link
                       href={`/storefront/products/${item.productId}`}
-                      className="text-base font-semibold text-slate-900 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded"
+                      className="text-base font-semibold text-foreground hover:text-primary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded"
                     >
                       {item.name}
                     </Link>
-                    <p className="text-base font-semibold text-slate-900">
+                    <p className="text-base font-semibold text-foreground">
                       {formatCurrency(item.price * item.quantity)}
                     </p>
                   </div>
                   {item.variant && (
-                    <p className="text-sm text-slate-500">{item.variant}</p>
+                    <p className="text-sm text-muted-foreground">{item.variant}</p>
                   )}
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4 text-xs text-slate-500">
+                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
                       <span id={`quantity-label-${item.id}`}>Qty</span>
                       <div
-                        className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1"
+                        className="flex items-center gap-2 rounded-full border border-border bg-muted px-3 py-1"
                         role="group"
                         aria-labelledby={`quantity-label-${item.id}`}
                       >
                         <button
-                          className="text-slate-400 hover:text-slate-600 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded"
+                          className="text-muted-foreground hover:text-foreground disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-ring rounded"
                           onClick={() => handleQuantityChange(item.id, item.quantity - 1)}
                           disabled={item.quantity <= 1}
                           aria-label={`Decrease quantity of ${item.name}`}
@@ -172,26 +172,26 @@ export default function CartPage() {
                           <Minus className="h-3 w-3" aria-hidden="true" />
                         </button>
                         <span
-                          className="text-slate-700 min-w-[20px] text-center"
+                          className="text-foreground min-w-[20px] text-center"
                           aria-live="polite"
                           aria-atomic="true"
                         >
                           {item.quantity}
                         </span>
                         <button
-                          className="text-slate-400 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded"
+                          className="text-muted-foreground hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring rounded"
                           onClick={() => handleQuantityChange(item.id, item.quantity + 1)}
                           aria-label={`Increase quantity of ${item.name}`}
                         >
                           <Plus className="h-3 w-3" aria-hidden="true" />
                         </button>
                       </div>
-                      <span className="text-slate-400">
+                      <span className="text-muted-foreground">
                         {formatCurrency(item.price)} each
                       </span>
                     </div>
                     <button
-                      className="text-slate-400 hover:text-red-500 p-1 focus:outline-none focus:ring-2 focus:ring-red-500 rounded"
+                      className="text-muted-foreground hover:text-destructive p-1 focus:outline-none focus:ring-2 focus:ring-destructive rounded"
                       onClick={() => handleRemoveItem(item.id)}
                       aria-label={`Remove ${item.name} from cart`}
                     >
@@ -205,27 +205,27 @@ export default function CartPage() {
         </main>
 
         <aside aria-labelledby="order-summary-heading">
-          <Card className="h-fit space-y-5 border-slate-200/70 bg-white p-6 shadow-sm">
+          <Card className="h-fit space-y-5 border-border bg-card p-6 shadow-sm">
             <div className="space-y-2">
-              <h2 id="order-summary-heading" className="text-lg font-semibold text-slate-900">
+              <h2 id="order-summary-heading" className="text-lg font-semibold text-foreground">
                 Order summary
               </h2>
-              <p className="text-sm text-slate-500">Shipping calculated by fulfillment region.</p>
+              <p className="text-sm text-muted-foreground">Shipping calculated by fulfillment region.</p>
             </div>
-            <div className="space-y-3 text-sm text-slate-600">
+            <div className="space-y-3 text-sm text-muted-foreground">
               <div className="flex items-center justify-between">
                 <span>Subtotal</span>
-                <span className="font-semibold text-slate-900">{formatCurrency(subtotal)}</span>
+                <span className="font-semibold text-foreground">{formatCurrency(subtotal)}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span>Shipping</span>
-                <span className="font-semibold text-slate-900">
+                <span className="font-semibold text-foreground">
                   {shipping > 0 ? formatCurrency(shipping) : 'Calculated at checkout'}
                 </span>
               </div>
               <div className="flex items-center justify-between">
                 <span>Tax</span>
-                <span className="font-semibold text-slate-900">
+                <span className="font-semibold text-foreground">
                   {tax > 0 ? formatCurrency(tax) : 'Calculated at checkout'}
                 </span>
               </div>
@@ -237,7 +237,7 @@ export default function CartPage() {
                       <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
                         {couponCode}
                         <button
-                          className="ml-1 hover:text-green-900 focus:outline-none focus:ring-2 focus:ring-green-500 rounded"
+                          className="ml-1 hover:text-green-900 focus:outline-none focus:ring-2 focus:ring-ring rounded"
                           onClick={() => removeCoupon()}
                           aria-label={`Remove coupon ${couponCode}`}
                         >
@@ -249,7 +249,7 @@ export default function CartPage() {
                   <span className="font-semibold">-{formatCurrency(discount)}</span>
                 </div>
               )}
-              <div className="flex items-center justify-between border-t border-slate-200 pt-3 text-base font-semibold text-slate-900">
+              <div className="flex items-center justify-between border-t border-border pt-3 text-base font-semibold text-foreground">
                 <span>Total</span>
                 <span>{formatCurrency(total)}</span>
               </div>
@@ -257,13 +257,13 @@ export default function CartPage() {
             <div className="space-y-3">
               <ButtonLink
                 href="/storefront/checkout"
-                className="w-full bg-gradient-to-r from-indigo-600 via-blue-600 to-amber-400 text-white shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                className="w-full bg-gradient-to-r from-primary via-secondary to-accent text-primary-foreground shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
               >
                 Proceed to checkout
               </ButtonLink>
               <Link
                 href="/storefront/products"
-                className="block text-center text-sm font-medium text-slate-500 hover:text-slate-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded"
+                className="block text-center text-sm font-medium text-muted-foreground hover:text-foreground hover:underline focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded"
               >
                 Continue shopping
               </Link>
@@ -272,7 +272,7 @@ export default function CartPage() {
               <div className="space-y-2">
                 <label
                   htmlFor="promo-code"
-                  className="text-xs font-semibold text-slate-500 uppercase tracking-[0.2em]"
+                  className="text-xs font-semibold text-muted-foreground uppercase tracking-[0.2em]"
                 >
                   Have a code?
                 </label>

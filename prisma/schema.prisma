@@ -15,8 +15,8 @@ enum StockConsumptionStrategy {
 model Tenant {
   id                       String                   @id @default(uuid())
   name                     String
-  businessName             String?                  // Display name for storefront
-  email                    String?                  // Contact/support email
+  businessName             String? // Display name for storefront
+  email                    String? // Contact/support email
   domain                   String?                  @unique
   isActive                 Boolean                  @default(true)
   baseCurrency             String                   @default("USD")
@@ -25,60 +25,63 @@ model Tenant {
   createdAt                DateTime                 @default(now())
   updatedAt                DateTime                 @updatedAt
 
-  users                 User[]
-  warehouses            Warehouse[]
-  locations             Location[]
-  items                 Item[]
-  itemUoms              ItemUom[]
-  batches               Batch[]
-  serials               Serial[]
-  warehouseItemBalances WarehouseItemBalance[]
-  binBalances           BinBalance[]
-  stockFifoLayers       StockFifoLayer[]
-  stockPostings         StockPosting[]
-  stockLedgerEntries    StockLedgerEntry[]
-  stockLedgerEntrySerials StockLedgerEntrySerial[]
-  accounts              Account[]
-  glEntries             GlEntry[]
-  auditLogs             AuditLog[]
-  customers             Customer[]
-  suppliers             Supplier[]
-  addresses             Address[]
-  contacts              Contact[]
-  contactLinks          ContactLink[]
-  banks                 Bank[]
-  bankAccounts          BankAccount[]
-  bankTransactions      BankTransaction[]
-  bankReconciliations   BankReconciliation[]
+  users                     User[]
+  warehouses                Warehouse[]
+  locations                 Location[]
+  items                     Item[]
+  itemUoms                  ItemUom[]
+  batches                   Batch[]
+  serials                   Serial[]
+  warehouseItemBalances     WarehouseItemBalance[]
+  binBalances               BinBalance[]
+  stockFifoLayers           StockFifoLayer[]
+  stockPostings             StockPosting[]
+  stockLedgerEntries        StockLedgerEntry[]
+  stockLedgerEntrySerials   StockLedgerEntrySerial[]
+  accounts                  Account[]
+  glEntries                 GlEntry[]
+  auditLogs                 AuditLog[]
+  customers                 Customer[]
+  suppliers                 Supplier[]
+  addresses                 Address[]
+  contacts                  Contact[]
+  contactLinks              ContactLink[]
+  banks                     Bank[]
+  bankAccounts              BankAccount[]
+  bankTransactions          BankTransaction[]
+  bankReconciliations       BankReconciliation[]
   bankReconciliationDetails BankReconciliationDetail[]
-  bankMatchingRules     BankMatchingRule[]
-  
+  bankMatchingRules         BankMatchingRule[]
+
   // Storefront relations
-  productCategories     ProductCategory[]
-  productListings       ProductListing[]
-  storeCustomers        StoreCustomer[]
-  storeAddresses        StoreAddress[]
-  passwordResets        PasswordReset[]
+  productCategories       ProductCategory[]
+  productListings         ProductListing[]
+  storeCustomers          StoreCustomer[]
+  storeAddresses          StoreAddress[]
+  passwordResets          PasswordReset[]
   emailVerificationTokens EmailVerificationToken[]
-  carts                 Cart[]
-  cartItems             CartItem[]
-  orders                Order[]
-  orderItems            OrderItem[]
-  payments              Payment[]
-  coupons               Coupon[]
-  
+  carts                   Cart[]
+  cartItems               CartItem[]
+  orders                  Order[]
+  orderItems              OrderItem[]
+  payments                Payment[]
+  coupons                 Coupon[]
+
   // Phase 2 E-commerce
-  itemAttributeTypes    ItemAttributeType[]
-  itemAttributeValues   ItemAttributeValue[]
-  productVariants       ProductVariant[]
-  productReviews        ProductReview[]
-  giftCards             GiftCard[]
-  giftCardTransactions  GiftCardTransaction[]
-  wishlists             Wishlist[]
+  itemAttributeTypes   ItemAttributeType[]
+  itemAttributeValues  ItemAttributeValue[]
+  productVariants      ProductVariant[]
+  productReviews       ProductReview[]
+  giftCards            GiftCard[]
+  giftCardTransactions GiftCardTransaction[]
+  wishlists            Wishlist[]
 
   // Email compliance
   storeCustomerPreferences StoreCustomerPreferences[]
-  emailBounces          EmailBounce[]
+  emailBounces             EmailBounce[]
+
+  // Theme system
+  storeThemes StoreTheme[]
 
   @@map("tenants")
 }
@@ -277,8 +280,8 @@ model Item {
   isStockItem Boolean @default(true)
   isActive    Boolean @default(true)
 
-  hasBatch  Boolean @default(false)
-  hasSerial Boolean @default(false)
+  hasBatch     Boolean  @default(false)
+  hasSerial    Boolean  @default(false)
   reorderLevel Decimal? @db.Decimal(18, 6)
   reorderQty   Decimal? @db.Decimal(18, 6)
 
@@ -288,11 +291,11 @@ model Item {
   cogsAccount    String?
 
   stockUomCode    String?
-  stockUom        Uom?     @relation("ItemStockUom", fields: [stockUomCode], references: [code], onDelete: SetNull)
+  stockUom        Uom?    @relation("ItemStockUom", fields: [stockUomCode], references: [code], onDelete: SetNull)
   purchaseUomCode String?
-  purchaseUom     Uom?     @relation("ItemPurchaseUom", fields: [purchaseUomCode], references: [code], onDelete: SetNull)
+  purchaseUom     Uom?    @relation("ItemPurchaseUom", fields: [purchaseUomCode], references: [code], onDelete: SetNull)
   salesUomCode    String?
-  salesUom        Uom?     @relation("ItemSalesUom", fields: [salesUomCode], references: [code], onDelete: SetNull)
+  salesUom        Uom?    @relation("ItemSalesUom", fields: [salesUomCode], references: [code], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -312,7 +315,7 @@ model Item {
 }
 
 model Uom {
-  code     String @id
+  code     String  @id
   name     String?
   isActive Boolean @default(true)
 
@@ -449,7 +452,7 @@ model BinBalance {
   batchId String?
   batch   Batch?  @relation(fields: [batchId], references: [id], onDelete: SetNull)
 
-  actualQty Decimal @default(0) @db.Decimal(18, 6)
+  actualQty   Decimal @default(0) @db.Decimal(18, 6)
   reservedQty Decimal @default(0) @db.Decimal(18, 6)
 
   createdAt DateTime @default(now())
@@ -485,7 +488,7 @@ model StockFifoLayer {
 
   // For derived layers (e.g. stock transfer), keep lineage to support safe reversals.
   sourceLayerId String?
-  sourceLayer   StockFifoLayer? @relation("LayerSource", fields: [sourceLayerId], references: [id], onDelete: SetNull)
+  sourceLayer   StockFifoLayer?  @relation("LayerSource", fields: [sourceLayerId], references: [id], onDelete: SetNull)
   derivedLayers StockFifoLayer[] @relation("LayerSource")
 
   voucherType String
@@ -601,14 +604,14 @@ model Account {
   tenantId String
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  code     String
-  name     String
-  rootType    String?
-  accountType String?
-  isGroup     Boolean @default(false)
+  code              String
+  name              String
+  rootType          String?
+  accountType       String?
+  isGroup           Boolean @default(false)
   parentAccountCode String?
-  currency String? // null means tenant base currency
-  isActive Boolean @default(true)
+  currency          String? // null means tenant base currency
+  isActive          Boolean @default(true)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -704,9 +707,9 @@ model Supplier {
   supplierGroup String?
   country       String?
 
-  taxId                   String?
-  taxCategory             String?
-  taxWithholdingCategory  String?
+  taxId                  String?
+  taxCategory            String?
+  taxWithholdingCategory String?
 
   defaultCurrency     String?
   defaultPriceList    String?
@@ -1053,24 +1056,24 @@ model ProductListing {
   shortDescription String?
   longDescription  String?
 
-  price         Decimal  @db.Decimal(18, 2)
+  price          Decimal  @db.Decimal(18, 2)
   compareAtPrice Decimal? @db.Decimal(18, 2)
   costPrice      Decimal? @db.Decimal(18, 2)
 
-  images     String[] // Array of image URLs
-  badge      String?  // "Best Seller", "New Arrival", "Limited", etc.
-  
+  images String[] // Array of image URLs
+  badge  String? // "Best Seller", "New Arrival", "Limited", etc.
+
   metaTitle       String?
   metaDescription String?
-  
-  isFeatured    Boolean @default(false)
-  isPublished   Boolean @default(false)
-  publishedAt   DateTime?
+
+  isFeatured  Boolean   @default(false)
+  isPublished Boolean   @default(false)
+  publishedAt DateTime?
 
   sortOrder Int @default(0)
-  
+
   // Review stats (cached for performance)
-  averageRating Decimal? @db.Decimal(3, 2) @default(0)
+  averageRating Decimal? @default(0) @db.Decimal(3, 2)
   reviewCount   Int      @default(0)
 
   createdAt DateTime @default(now())
@@ -1098,11 +1101,11 @@ model StoreCustomer {
   tenantId String
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  email         String
-  passwordHash  String?
-  firstName     String?
-  lastName      String?
-  phone         String?
+  email        String
+  passwordHash String?
+  firstName    String?
+  lastName     String?
+  phone        String?
 
   // Link to B2B customer record if applicable
   customerId String?
@@ -1113,21 +1116,21 @@ model StoreCustomer {
   emailVerifiedAt DateTime?
 
   // Password reset
-  resetToken      String?
-  resetTokenExp   DateTime?
+  resetToken    String?
+  resetTokenExp DateTime?
 
   // Marketing preferences
   acceptsMarketing Boolean @default(false)
 
   // Onboarding tracking
-  onboardingCompleted Boolean @default(false)
-  onboardingStep String? // Current step: welcome, profile, tour, incentive, completed
-  profileCompletionScore Int @default(0) // 0-100
+  onboardingCompleted       Boolean   @default(false)
+  onboardingStep            String? // Current step: welcome, profile, tour, incentive, completed
+  profileCompletionScore    Int       @default(0) // 0-100
   lastOnboardingInteraction DateTime?
-  hasViewedProductTour Boolean @default(false)
-  hasAddedToCart Boolean @default(false)
-  hasCompletedFirstPurchase Boolean @default(false)
-  hasAddedShippingAddress Boolean @default(false)
+  hasViewedProductTour      Boolean   @default(false)
+  hasAddedToCart            Boolean   @default(false)
+  hasCompletedFirstPurchase Boolean   @default(false)
+  hasAddedShippingAddress   Boolean   @default(false)
 
   lastLoginAt DateTime?
   isActive    Boolean   @default(true)
@@ -1135,14 +1138,14 @@ model StoreCustomer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  carts           Cart[]
-  orders          Order[]
-  addresses       StoreAddress[]
-  passwordResets  PasswordReset[]
+  carts                   Cart[]
+  orders                  Order[]
+  addresses               StoreAddress[]
+  passwordResets          PasswordReset[]
   emailVerificationTokens EmailVerificationToken[]
-  reviews         ProductReview[]
-  wishlists       Wishlist[]
-  emailPreferences StoreCustomerPreferences?
+  reviews                 ProductReview[]
+  wishlists               Wishlist[]
+  emailPreferences        StoreCustomerPreferences?
 
   @@unique([tenantId, email])
   @@index([tenantId, isActive])
@@ -1186,7 +1189,7 @@ model PasswordReset {
   customerId String
   customer   StoreCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
-  token     String   @unique
+  token     String    @unique
   expiresAt DateTime
   usedAt    DateTime?
 
@@ -1233,7 +1236,7 @@ model Cart {
   shippingAddressId String?
 
   // Coupon/discount
-  couponCode String?
+  couponCode     String?
   discountAmount Decimal @default(0) @db.Decimal(18, 2)
 
   // Calculated totals (updated on cart changes)
@@ -1243,9 +1246,9 @@ model Cart {
   grandTotal    Decimal @default(0) @db.Decimal(18, 2)
 
   // Cart recovery
-  abandonedAt   DateTime?
-  recoveredAt   DateTime?
-  lastActivityAt DateTime @default(now())
+  abandonedAt    DateTime?
+  recoveredAt    DateTime?
+  lastActivityAt DateTime  @default(now())
 
   expiresAt DateTime?
 
@@ -1347,12 +1350,12 @@ model Order {
   shippingCountry      String?
 
   // Order totals
-  subtotal       Decimal @db.Decimal(18, 2)
-  shippingTotal  Decimal @db.Decimal(18, 2)
-  taxTotal       Decimal @db.Decimal(18, 2)
-  discountTotal  Decimal @default(0) @db.Decimal(18, 2)
+  subtotal         Decimal @db.Decimal(18, 2)
+  shippingTotal    Decimal @db.Decimal(18, 2)
+  taxTotal         Decimal @db.Decimal(18, 2)
+  discountTotal    Decimal @default(0) @db.Decimal(18, 2)
   giftCardDiscount Decimal @default(0) @db.Decimal(18, 2)
-  grandTotal     Decimal @db.Decimal(18, 2)
+  grandTotal       Decimal @db.Decimal(18, 2)
 
   currency String @default("USD")
 
@@ -1365,11 +1368,11 @@ model Order {
   stripeChargeId        String?
 
   // Shipping tracking
-  shippingMethod   String?
-  shippingCarrier  String?
-  trackingNumber   String?
-  shippedAt        DateTime?
-  deliveredAt      DateTime?
+  shippingMethod  String?
+  shippingCarrier String?
+  trackingNumber  String?
+  shippedAt       DateTime?
+  deliveredAt     DateTime?
 
   // Notes
   customerNotes String?
@@ -1386,7 +1389,7 @@ model Order {
   items              OrderItem[]
   payments           Payment[]
   giftCardsUsed      GiftCardTransaction[]
-  giftCardsGenerated GiftCard[] @relation("GiftCardSource")
+  giftCardsGenerated GiftCard[]            @relation("GiftCardSource")
   shipments          Shipment[]
 
   @@unique([tenantId, orderNumber])
@@ -1461,9 +1464,9 @@ model Payment {
   giftCard   GiftCard? @relation(fields: [giftCardId], references: [id], onDelete: SetNull)
 
   // Card details (last 4 digits only for display)
-  cardBrand   String?
-  cardLast4   String?
-  cardExpiry  String?
+  cardBrand  String?
+  cardLast4  String?
+  cardExpiry String?
 
   // Error tracking
   errorCode    String?
@@ -1494,7 +1497,7 @@ model Coupon {
   description String?
 
   // Discount type
-  discountType String  @default("percentage") // percentage, fixed_amount
+  discountType  String  @default("percentage") // percentage, fixed_amount
   discountValue Decimal @db.Decimal(18, 2)
 
   // Constraints
@@ -1502,9 +1505,9 @@ model Coupon {
   maximumDiscount    Decimal? @db.Decimal(18, 2)
 
   // Usage limits
-  usageLimit     Int? // Total times this coupon can be used
+  usageLimit            Int? // Total times this coupon can be used
   usageLimitPerCustomer Int? @default(1)
-  timesUsed      Int  @default(0)
+  timesUsed             Int  @default(0)
 
   // Validity
   startsAt  DateTime?
@@ -1580,9 +1583,9 @@ model ProductVariant {
   productListing   ProductListing @relation(fields: [productListingId], references: [id], onDelete: Cascade)
 
   // Variant-specific fields
-  sku     String?
-  barcode String?
-  price   Decimal? @db.Decimal(18, 2) // NULL means use parent price
+  sku            String?
+  barcode        String?
+  price          Decimal? @db.Decimal(18, 2) // NULL means use parent price
   compareAtPrice Decimal? @db.Decimal(18, 2)
   costPrice      Decimal? @db.Decimal(18, 2)
 
@@ -1771,7 +1774,7 @@ model GiftCardTransaction {
   giftCard   GiftCard @relation(fields: [giftCardId], references: [id], onDelete: Cascade)
 
   // Transaction details
-  type          String  // redemption, refund, adjustment, activation
+  type          String // redemption, refund, adjustment, activation
   amount        Decimal @db.Decimal(18, 2) // Negative for redemptions
   balanceBefore Decimal @db.Decimal(18, 2)
   balanceAfter  Decimal @db.Decimal(18, 2)
@@ -1855,13 +1858,13 @@ model StoreCurrency {
 
   currencyCode       String // ISO 4217 (USD, EUR, GBP)
   symbol             String // $, €, £
-  symbolPosition     String @default("before") // before or after
-  decimalPlaces      Int    @default(2)
-  decimalSeparator   String @default(".")
-  thousandsSeparator String @default(",")
-  exchangeRate       Decimal @db.Decimal(18, 8) @default(1)
-  isBaseCurrency     Boolean @default(false)
-  isEnabled          Boolean @default(true)
+  symbolPosition     String    @default("before") // before or after
+  decimalPlaces      Int       @default(2)
+  decimalSeparator   String    @default(".")
+  thousandsSeparator String    @default(",")
+  exchangeRate       Decimal   @default(1) @db.Decimal(18, 8)
+  isBaseCurrency     Boolean   @default(false)
+  isEnabled          Boolean   @default(true)
   lastRateUpdate     DateTime?
 
   createdAt DateTime @default(now())
@@ -1881,7 +1884,7 @@ model ProductPriceOverride {
   productListing   ProductListing @relation(fields: [productListingId], references: [id], onDelete: Cascade)
 
   currencyCode   String
-  price          Decimal @db.Decimal(18, 4)
+  price          Decimal  @db.Decimal(18, 4)
   compareAtPrice Decimal? @db.Decimal(18, 4)
 
   createdAt DateTime @default(now())
@@ -1901,7 +1904,7 @@ model VariantPriceOverride {
   variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
 
   currencyCode   String
-  price          Decimal @db.Decimal(18, 4)
+  price          Decimal  @db.Decimal(18, 4)
   compareAtPrice Decimal? @db.Decimal(18, 4)
 
   createdAt DateTime @default(now())
@@ -1923,7 +1926,7 @@ model ShippingCarrier {
 
   name          String // UPS, FedEx, USPS, DHL
   code          String // ups, fedex, usps, dhl
-  type          String @default("api") // api, flat, weight, custom
+  type          String  @default("api") // api, flat, weight, custom
   isEnabled     Boolean @default(true)
   apiKey        String? // Encrypted
   apiSecret     String? // Encrypted
@@ -1976,7 +1979,7 @@ model ShippingRate {
   name                  String
   description           String?
   type                  String   @default("flat") // flat, weight, price, carrier
-  price                 Decimal  @db.Decimal(18, 4) @default(0)
+  price                 Decimal  @default(0) @db.Decimal(18, 4)
   minOrderAmount        Decimal? @db.Decimal(18, 4)
   maxOrderAmount        Decimal? @db.Decimal(18, 4)
   minWeight             Decimal? @db.Decimal(18, 4)
@@ -2007,7 +2010,7 @@ model ShippingWeightTier {
   rateId String
   rate   ShippingRate @relation(fields: [rateId], references: [id], onDelete: Cascade)
 
-  minWeight  Decimal  @db.Decimal(18, 4) @default(0)
+  minWeight  Decimal  @default(0) @db.Decimal(18, 4)
   maxWeight  Decimal? @db.Decimal(18, 4)
   price      Decimal  @db.Decimal(18, 4)
   pricePerKg Decimal? @db.Decimal(18, 4)
@@ -2024,7 +2027,7 @@ model Shipment {
   tenantId String
 
   orderId String
-  order   Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   carrierId String?
   carrier   ShippingCarrier? @relation(fields: [carrierId], references: [id], onDelete: SetNull)
@@ -2032,15 +2035,15 @@ model Shipment {
   carrierName       String
   trackingNumber    String?
   trackingUrl       String?
-  status            String   @default("pending") // pending, label_created, in_transit, delivered, failed
+  status            String    @default("pending") // pending, label_created, in_transit, delivered, failed
   labelUrl          String?
   estimatedDelivery DateTime?
   actualDelivery    DateTime?
   shippedAt         DateTime?
-  weight            Decimal? @db.Decimal(18, 4)
-  dimensions        Json?    // {length, width, height, unit}
-  cost              Decimal? @db.Decimal(18, 4)
-  metadata          Json     @default("{}")
+  weight            Decimal?  @db.Decimal(18, 4)
+  dimensions        Json? // {length, width, height, unit}
+  cost              Decimal?  @db.Decimal(18, 4)
+  metadata          Json      @default("{}")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2153,8 +2156,8 @@ model AttributeTranslation {
   id       String @id @default(uuid())
   tenantId String
 
-  attributeTypeId  String?
-  attributeType    ItemAttributeType? @relation(fields: [attributeTypeId], references: [id], onDelete: Cascade)
+  attributeTypeId String?
+  attributeType   ItemAttributeType? @relation(fields: [attributeTypeId], references: [id], onDelete: Cascade)
 
   attributeValueId String?
   attributeValue   ItemAttributeValue? @relation(fields: [attributeValueId], references: [id], onDelete: Cascade)
@@ -2194,10 +2197,10 @@ model ContentTranslation {
   id       String @id @default(uuid())
   tenantId String
 
-  contentKey  String // e.g., "checkout.title", "policy.returns"
+  contentKey   String // e.g., "checkout.title", "policy.returns"
   languageCode String
-  content     String
-  contentType String @default("text") // text, html, markdown
+  content      String
+  contentType  String @default("text") // text, html, markdown
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2212,21 +2215,21 @@ model ContentTranslation {
 // ==========================================
 
 model StoreCustomerPreferences {
-  id String @id @default(uuid())
-  tenantId String
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customerId String @unique
-  customer StoreCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  id         String        @id @default(uuid())
+  tenantId   String
+  tenant     Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId String        @unique
+  customer   StoreCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   // Email preferences
-  marketing Boolean @default(true)
+  marketing    Boolean @default(true)
   orderUpdates Boolean @default(true)
-  promotions Boolean @default(true)
-  newsletter Boolean @default(true)
+  promotions   Boolean @default(true)
+  newsletter   Boolean @default(true)
 
   unsubscribedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   @@unique([tenantId, customerId])
   @@index([tenantId])
@@ -2234,15 +2237,15 @@ model StoreCustomerPreferences {
 }
 
 model EmailBounce {
-  id String @id @default(uuid())
+  id       String @id @default(uuid())
   tenantId String
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  email String
-  type String // hard_bounce, soft_bounce, complaint, spam
-  reason String?
-  bouncedAt DateTime @default(now())
-  suppressed Boolean @default(false)
+  email      String
+  type       String // hard_bounce, soft_bounce, complaint, spam
+  reason     String?
+  bouncedAt  DateTime @default(now())
+  suppressed Boolean  @default(false)
 
   @@index([tenantId, email])
   @@index([suppressed])
@@ -2250,3 +2253,65 @@ model EmailBounce {
   @@map("email_bounces")
 }
 
+// ==================== THEME SYSTEM ====================
+
+model StoreTheme {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Basic Info
+  name        String
+  slug        String // minimal, bold, classic, modern, custom-1, etc
+  description String?
+  isActive    Boolean @default(false)
+  isCustom    Boolean @default(false)
+  isPreset    Boolean @default(false)
+
+  // Color Scheme (JSON for flexibility)
+  colors Json // { primary, secondary, accent, background, foreground, etc }
+
+  // Typography
+  fontFamily        String  @default("Inter")
+  headingFont       String?
+  fontSize          String  @default("base") // sm, base, lg
+  fontWeightBody    Int     @default(400)
+  fontWeightHeading Int     @default(700)
+
+  // Layout Settings
+  layoutStyle       String @default("standard") // standard, wide, boxed
+  headerStyle       String @default("classic") // classic, minimal, centered
+  footerStyle       String @default("standard") // standard, minimal
+  spacing           String @default("comfortable") // compact, comfortable, spacious
+  containerMaxWidth String @default("1280px")
+
+  // Component Styles
+  buttonStyle String @default("rounded") // rounded, square, pill
+  buttonSize  String @default("md") // sm, md, lg
+  cardStyle   String @default("shadow") // shadow, border, flat
+  cardRadius  String @default("lg") // none, sm, md, lg
+  inputStyle  String @default("outlined") // outlined, filled
+
+  // Product Display
+  productGridColumns Int     @default(3) // 2, 3, 4
+  productImageRatio  String  @default("square") // square, portrait, landscape
+  showQuickView      Boolean @default(true)
+  showWishlist       Boolean @default(true)
+
+  // Advanced
+  customCSS  String?
+  logoUrl    String?
+  faviconUrl String?
+
+  // Metadata
+  previewImageUrl String?
+  tags            String[] // Array of tags for filtering
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, slug])
+  @@index([tenantId, isActive])
+  @@index([tenantId, isPreset])
+  @@map("store_themes")
+}

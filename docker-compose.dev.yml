@@ -1,0 +1,17 @@
+# Development override for docker-compose
+# Use this for faster development without building Docker images
+# Run with: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  # Only infrastructure services - run API and Web locally
+  api:
+    profiles:
+      - donotstart  # This prevents the service from starting
+
+  web:
+    profiles:
+      - donotstart  # This prevents the service from starting
+
+  traefik:
+    profiles:
+      - donotstart  # Use direct ports instead

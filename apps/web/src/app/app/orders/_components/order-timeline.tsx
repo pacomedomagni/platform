@@ -1,7 +1,7 @@
 'use client';
 
 import { Check, Package, Truck, ShoppingBag, XCircle } from 'lucide-react';
-import { cn } from '@platform/ui/lib/utils';
+import { cn } from '@platform/ui';
 
 interface OrderTimelineProps {
   status: string;

@@ -168,12 +168,12 @@ export default function CheckoutPage() {
           className="flex flex-col items-center justify-center p-16 text-center"
           role="status"
         >
-          <ShoppingBag className="h-16 w-16 text-slate-300 mb-6" aria-hidden="true" />
-          <h2 className="text-2xl font-semibold text-slate-900 mb-2">Your cart is empty</h2>
-          <p className="text-slate-500 mb-6">Add some items to your cart before checking out.</p>
+          <ShoppingBag className="h-16 w-16 text-muted mb-6" aria-hidden="true" />
+          <h2 className="text-2xl font-semibold text-foreground mb-2">Your cart is empty</h2>
+          <p className="text-muted-foreground mb-6">Add some items to your cart before checking out.</p>
           <Link
             href="/storefront/products"
-            className="inline-flex items-center justify-center rounded-md bg-gradient-to-r from-indigo-600 via-blue-600 to-amber-400 px-6 py-3 text-white shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            className="inline-flex items-center justify-center rounded-md bg-gradient-to-r from-primary via-secondary to-accent px-6 py-3 text-primary-foreground shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
           >
             Browse Products
           </Link>
@@ -194,22 +194,22 @@ export default function CheckoutPage() {
 
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-3xl font-semibold text-slate-900">Checkout</h1>
-          <p className="text-sm text-slate-500">
+          <h1 className="text-3xl font-semibold text-foreground">Checkout</h1>
+          <p className="text-sm text-muted-foreground">
             {step === 'info' ? 'Confirm delivery details.' : 'Complete payment to place your order.'}
           </p>
         </div>
         {step === 'info' ? (
           <Link
             href="/storefront/cart"
-            className="text-sm font-semibold text-blue-600 hover:text-blue-500 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded"
+            className="text-sm font-semibold text-primary hover:opacity-80 hover:underline focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded"
           >
             Back to cart
           </Link>
         ) : (
           <button
             onClick={() => setStep('info')}
-            className="text-sm font-semibold text-blue-600 hover:text-blue-500 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded"
+            className="text-sm font-semibold text-primary hover:opacity-80 hover:underline focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded"
             aria-label="Edit shipping information"
           >
             Edit shipping info
@@ -232,7 +232,7 @@ export default function CheckoutPage() {
         {step === 'info' ? (
           <main>
             <Card
-              className="space-y-8 border-slate-200/70 bg-white p-6 shadow-sm"
+              className="space-y-8 border-border bg-card p-6 shadow-sm"
               role="main"
               aria-labelledby="checkout-form-heading"
             >
@@ -242,15 +242,15 @@ export default function CheckoutPage() {
 
               <form onSubmit={handleSubmit(onSubmit)} noValidate>
                 <section className="space-y-4 mb-8" aria-labelledby="contact-heading">
-                  <h3 id="contact-heading" className="text-lg font-semibold text-slate-900">
+                  <h3 id="contact-heading" className="text-lg font-semibold text-foreground">
                     Contact
                   </h3>
                   {!isAuthenticated && (
-                    <p className="text-sm text-slate-500">
+                    <p className="text-sm text-muted-foreground">
                       Already have an account?{' '}
                       <Link
                         href="/storefront/account/login?redirect=/storefront/checkout"
-                        className="text-blue-600 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded"
+                        className="text-primary hover:underline focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded"
                       >
                         Sign in
                       </Link>
@@ -316,7 +316,7 @@ export default function CheckoutPage() {
                 </section>
 
                 <section className="space-y-4" aria-labelledby="shipping-heading">
-                  <h3 id="shipping-heading" className="text-lg font-semibold text-slate-900">
+                  <h3 id="shipping-heading" className="text-lg font-semibold text-foreground">
                     Shipping Address
                   </h3>
                   <div className="grid gap-4 md:grid-cols-2">
@@ -429,7 +429,7 @@ export default function CheckoutPage() {
 
                 <Button
                   type="submit"
-                  className="w-full mt-8 bg-gradient-to-r from-indigo-600 via-blue-600 to-amber-400 text-white shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                  className="w-full mt-8 bg-gradient-to-r from-primary via-secondary to-accent text-primary-foreground shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
                   disabled={isCreatingOrder || isSubmitting}
                   aria-busy={isCreatingOrder || isSubmitting}
                 >
@@ -448,31 +448,31 @@ export default function CheckoutPage() {
         ) : (
           <main>
             <Card
-              className="space-y-6 border-slate-200/70 bg-white p-6 shadow-sm"
+              className="space-y-6 border-border bg-card p-6 shadow-sm"
               role="main"
               aria-labelledby="payment-heading"
             >
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <Lock className="h-5 w-5 text-green-600" aria-hidden="true" />
-                  <h2 id="payment-heading" className="text-lg font-semibold text-slate-900">
+                  <h2 id="payment-heading" className="text-lg font-semibold text-foreground">
                     Secure Payment
                   </h2>
                 </div>
-                <p className="text-sm text-slate-500">
+                <p className="text-sm text-muted-foreground">
                   Your payment is secured by Stripe. We never store your card details.
                 </p>
               </div>
 
               <div
-                className="rounded-lg bg-slate-50 p-4 text-sm"
+                className="rounded-lg bg-muted p-4 text-sm"
                 role="region"
                 aria-labelledby="shipping-summary-heading"
               >
-                <p id="shipping-summary-heading" className="font-medium text-slate-700 mb-2">
+                <p id="shipping-summary-heading" className="font-medium text-foreground mb-2">
                   Shipping to:
                 </p>
-                <address className="text-slate-600 not-italic">
+                <address className="text-muted-foreground not-italic">
                   {formValues.firstName} {formValues.lastName}<br />
                   {formValues.addressLine1}<br />
                   {formValues.addressLine2 && <>{formValues.addressLine2}<br /></>}
@@ -494,7 +494,7 @@ export default function CheckoutPage() {
                   aria-live="polite"
                 >
                   <Spinner className="h-8 w-8" aria-hidden="true" />
-                  <span className="ml-3 text-slate-600">Loading payment form...</span>
+                  <span className="ml-3 text-muted-foreground">Loading payment form...</span>
                 </div>
               )}
             </Card>
@@ -506,12 +506,12 @@ export default function CheckoutPage() {
           {step === 'info' && <TrustBadges />}
 
           {/* Order Summary Card */}
-          <Card className="h-fit space-y-6 border-slate-200/70 bg-white p-6 shadow-sm lg:sticky lg:top-6">
+          <Card className="h-fit space-y-6 border-border bg-card p-6 shadow-sm lg:sticky lg:top-6">
             <div className="space-y-2">
-              <h2 id="order-summary-heading" className="text-lg font-semibold text-slate-900">
+              <h2 id="order-summary-heading" className="text-lg font-semibold text-foreground">
                 Order summary
               </h2>
-              <p className="text-sm text-slate-500">
+              <p className="text-sm text-muted-foreground">
                 {orderNumber ? `Order #${orderNumber}` : 'Live inventory reserved for 30 minutes.'}
               </p>
             </div>
@@ -523,35 +523,35 @@ export default function CheckoutPage() {
               {items.map((item) => (
                 <div key={item.id} className="flex items-start justify-between text-sm" role="listitem">
                   <div>
-                    <p className="font-semibold text-slate-900">{item.name}</p>
-                    {item.variant && <p className="text-xs text-slate-400">{item.variant}</p>}
-                    <p className="text-xs text-slate-500">Qty {item.quantity}</p>
+                    <p className="font-semibold text-foreground">{item.name}</p>
+                    {item.variant && <p className="text-xs text-muted-foreground">{item.variant}</p>}
+                    <p className="text-xs text-muted-foreground">Qty {item.quantity}</p>
                   </div>
-                  <p className="font-semibold text-slate-900">{formatCurrency(item.price * item.quantity)}</p>
+                  <p className="font-semibold text-foreground">{formatCurrency(item.price * item.quantity)}</p>
                 </div>
               ))}
             </div>
             {/* Promo Code Section */}
             {step === 'info' && (
-              <div className="border-t border-slate-200 pt-4">
+              <div className="border-t border-border pt-4">
                 <PromoCode />
               </div>
             )}
 
-            <div className="space-y-3 text-sm text-slate-600 border-t border-slate-200 pt-4">
+            <div className="space-y-3 text-sm text-muted-foreground border-t border-border pt-4">
               <div className="flex items-center justify-between">
                 <span>Subtotal</span>
-                <span className="font-semibold text-slate-900">{formatCurrency(subtotal)}</span>
+                <span className="font-semibold text-foreground">{formatCurrency(subtotal)}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span>Shipping</span>
-                <span className="font-semibold text-slate-900">
+                <span className="font-semibold text-foreground">
                   {shipping > 0 ? formatCurrency(shipping) : 'Calculated'}
                 </span>
               </div>
               <div className="flex items-center justify-between">
                 <span>Tax</span>
-                <span className="font-semibold text-slate-900">
+                <span className="font-semibold text-foreground">
                   {tax > 0 ? formatCurrency(tax) : 'Calculated'}
                 </span>
               </div>
@@ -561,12 +561,12 @@ export default function CheckoutPage() {
                   <span className="font-semibold">-{formatCurrency(discount)}</span>
                 </div>
               )}
-              <div className="flex items-center justify-between border-t border-slate-200 pt-3 text-base font-semibold text-slate-900">
+              <div className="flex items-center justify-between border-t border-border pt-3 text-base font-semibold text-foreground">
                 <span>Total</span>
                 <span>{formatCurrency(total)}</span>
               </div>
             </div>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-muted-foreground">
               By placing your order, you agree to the NoSlag storefront terms and ERP-managed fulfillment policies.
             </p>
           </Card>
