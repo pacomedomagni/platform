@@ -88,7 +88,77 @@ export type NotificationType =
   | 'invoice-generated'
   | 'welcome'
   | 'password-reset'
-  | 'account-verification';
+  | 'account-verification'
+  // Storefront notification types
+  | 'store-order-confirmation'
+  | 'store-order-shipped'
+  | 'store-order-delivered'
+  | 'store-order-cancelled'
+  | 'store-payment-confirmation'
+  | 'store-account-welcome'
+  | 'store-password-reset'
+  | 'store-abandoned-cart'
+  | 'store-back-in-stock'
+  | 'store-review-request';
+
+// Storefront order item for emails
+export interface StoreOrderItem {
+  name: string;
+  sku?: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+  image?: string;
+  variant?: string;
+}
+
+// Storefront order context for emails
+export interface StoreOrderEmailContext extends NotificationEmailContext {
+  order: {
+    orderNumber: string;
+    status: string;
+    items: StoreOrderItem[];
+    subtotal: number;
+    shipping: number;
+    tax: number;
+    discount?: number;
+    total: number;
+    currency: string;
+    shippingAddress: {
+      name: string;
+      line1: string;
+      line2?: string;
+      city: string;
+      state: string;
+      postalCode: string;
+      country: string;
+    };
+    billingAddress?: {
+      name: string;
+      line1: string;
+      line2?: string;
+      city: string;
+      state: string;
+      postalCode: string;
+      country: string;
+    };
+    trackingNumber?: string;
+    trackingUrl?: string;
+    estimatedDelivery?: string;
+    paymentMethod?: string;
+  };
+}
+
+// Abandoned cart email context
+export interface AbandonedCartEmailContext extends NotificationEmailContext {
+  cart: {
+    items: StoreOrderItem[];
+    subtotal: number;
+    currency: string;
+  };
+  recoveryUrl: string;
+  expiresAt?: string;
+}
 
 export interface NotificationEmailContext {
   type: NotificationType;

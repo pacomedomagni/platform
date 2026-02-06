@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { DbModule } from '@platform/db';
+import { EmailModule } from '@platform/email';
 import { ProductsController } from './products/products.controller';
 import { ProductsService } from './products/products.service';
 import { CartController } from './cart/cart.controller';
@@ -15,7 +16,24 @@ import { OrdersController } from './orders/orders.controller';
 import { OrdersService } from './orders/orders.service';
 
 @Module({
-  imports: [DbModule],
+  imports: [
+    DbModule,
+    EmailModule.forRoot({
+      smtp: {
+        host: process.env['SMTP_HOST'] || 'localhost',
+        port: parseInt(process.env['SMTP_PORT'] || '587', 10),
+        secure: process.env['SMTP_SECURE'] === 'true',
+        auth: process.env['SMTP_USER'] ? {
+          user: process.env['SMTP_USER'],
+          pass: process.env['SMTP_PASS'] || '',
+        } : undefined,
+      },
+      defaults: {
+        from: process.env['SMTP_FROM'] || 'noreply@example.com',
+      },
+      previewMode: process.env['NODE_ENV'] !== 'production',
+    }),
+  ],
   controllers: [
     ProductsController,
     CartController,

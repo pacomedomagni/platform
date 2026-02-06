@@ -5,8 +5,12 @@ import {
   ConflictException,
   NotFoundException,
   BadRequestException,
+  Inject,
+  Optional,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { EmailService } from '@platform/email';
 import * as bcrypt from 'bcrypt';
 import * as jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
@@ -25,7 +29,12 @@ const RESET_TOKEN_EXPIRY = 1 * 60 * 60 * 1000; // 1 hour
 
 @Injectable()
 export class CustomerAuthService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(CustomerAuthService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() @Inject(EmailService) private readonly emailService?: EmailService
+  ) {}
 
   /**
    * Register a new customer
@@ -58,6 +67,9 @@ export class CustomerAuthService {
     });
 
     // TODO: Send verification email
+
+    // Send welcome email
+    this.sendWelcomeEmail(customer.id, tenantId);
 
     // Generate token
     const accessToken = this.generateToken(customer.id, tenantId);
@@ -208,9 +220,8 @@ export class CustomerAuthService {
       },
     });
 
-    // TODO: Send email with reset link
-    // For now, log the token (remove in production)
-    console.log(`Password reset token for ${email}: ${token}`);
+    // Send password reset email
+    this.sendPasswordResetEmail(customer.id, tenantId, token);
 
     return { success: true, message: 'If the email exists, a reset link will be sent' };
   }
@@ -418,5 +429,81 @@ export class CustomerAuthService {
       acceptsMarketing: customer.acceptsMarketing,
       createdAt: customer.createdAt,
     };
+  }
+
+  /**
+   * Send welcome email to new customer
+   */
+  private async sendWelcomeEmail(customerId: string, tenantId: string) {
+    if (!this.emailService) {
+      this.logger.warn('Email service not available, skipping welcome email');
+      return;
+    }
+
+    try {
+      const customer = await this.prisma.storeCustomer.findUnique({
+        where: { id: customerId },
+        include: { tenant: true },
+      });
+
+      if (!customer) {
+        return;
+      }
+
+      await this.emailService.sendStoreWelcome({
+        type: 'store-account-welcome',
+        tenantId,
+        recipientName: `${customer.firstName} ${customer.lastName}`,
+        recipientEmail: customer.email,
+        actionUrl: `${process.env['STORE_URL'] || process.env['FRONTEND_URL']}/storefront/products`,
+        company: {
+          name: customer.tenant.businessName || customer.tenant.name,
+          supportEmail: customer.tenant.email || 'support@example.com',
+        },
+      });
+
+      this.logger.log(`Welcome email sent to: ${customer.email}`);
+    } catch (error) {
+      this.logger.error(`Failed to send welcome email to customer ${customerId}:`, error);
+    }
+  }
+
+  /**
+   * Send password reset email
+   */
+  private async sendPasswordResetEmail(customerId: string, tenantId: string, resetToken: string) {
+    if (!this.emailService) {
+      this.logger.warn('Email service not available, skipping password reset email');
+      return;
+    }
+
+    try {
+      const customer = await this.prisma.storeCustomer.findUnique({
+        where: { id: customerId },
+        include: { tenant: true },
+      });
+
+      if (!customer) {
+        return;
+      }
+
+      const resetUrl = `${process.env['STORE_URL'] || process.env['FRONTEND_URL']}/storefront/account/reset-password?token=${resetToken}`;
+
+      await this.emailService.sendStorePasswordReset({
+        type: 'store-password-reset',
+        tenantId,
+        recipientName: `${customer.firstName} ${customer.lastName}`,
+        recipientEmail: customer.email,
+        actionUrl: resetUrl,
+        company: {
+          name: customer.tenant.businessName || customer.tenant.name,
+          supportEmail: customer.tenant.email || 'support@example.com',
+        },
+      });
+
+      this.logger.log(`Password reset email sent to: ${customer.email}`);
+    } catch (error) {
+      this.logger.error(`Failed to send password reset email to customer ${customerId}:`, error);
+    }
   }
 }

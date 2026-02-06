@@ -1,0 +1,254 @@
+name: Deploy to Production
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to deploy'
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '20'
+  DEPLOY_ENV: production
+
+jobs:
+  validate:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "version=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Validate version format
+        run: |
+          VERSION=${{ steps.version.outputs.version }}
+          if ! [[ $VERSION =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid version format: $VERSION"
+            echo "Expected format: vX.Y.Z (e.g., v1.0.0)"
+            exit 1
+          fi
+
+  build:
+    name: Build Production
+    runs-on: ubuntu-latest
+    needs: [validate]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.version }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npx nx run-many -t test --projects=api,web,desk --parallel=3
+
+      - name: Build applications
+        run: npx nx run-many -t build --projects=api,web,desk --parallel=3
+        env:
+          NEXT_PUBLIC_API_URL: ${{ vars.PRODUCTION_API_URL }}
+          NEXT_PUBLIC_SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/platform-api:latest
+            ${{ secrets.DOCKER_USERNAME }}/platform-api:${{ needs.validate.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Web image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/platform-web:latest
+            ${{ secrets.DOCKER_USERNAME }}/platform-web:${{ needs.validate.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [validate, build]
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.version }}
+
+      - name: Create backup before deployment
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: ${{ secrets.PRODUCTION_USER }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          script: |
+            cd /opt/platform
+            ./scripts/backup.sh "pre-deploy-${{ needs.validate.outputs.version }}"
+
+      - name: Deploy to production server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: ${{ secrets.PRODUCTION_USER }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          script: |
+            cd /opt/platform
+            
+            # Pull latest images
+            export VERSION=${{ needs.validate.outputs.version }}
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+            
+            # Run migrations
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm api npx prisma migrate deploy
+            
+            # Deploy with rolling update
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --remove-orphans --scale api=2
+            
+            # Wait for health checks
+            sleep 30
+            
+            # Scale back to normal
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --scale api=1
+            
+            # Cleanup old images
+            docker image prune -f
+            
+            # Log deployment
+            echo "$(date): Deployed $VERSION" >> /var/log/platform/deployments.log
+
+      - name: Run smoke tests
+        run: |
+          sleep 30
+          curl -f ${{ vars.PRODUCTION_API_URL }}/health || exit 1
+          curl -f ${{ vars.PRODUCTION_WEB_URL }} || exit 1
+
+      - name: Create Sentry release
+        uses: getsentry/action-release@v1
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
+          SENTRY_PROJECT: platform
+        with:
+          environment: production
+          version: ${{ needs.validate.outputs.version }}
+
+      - name: Notify on success
+        if: success()
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": "🚀 Production deployment successful",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*🚀 Production Deployment Successful*\n\nVersion: `${{ needs.validate.outputs.version }}`\n\n<${{ vars.PRODUCTION_WEB_URL }}|View Production>"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Notify on failure
+        if: failure()
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": "❌ Production deployment failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*❌ Production Deployment Failed*\n\nVersion: `${{ needs.validate.outputs.version }}`\n\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Logs>\n\n⚠️ Rollback may be required!"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+  rollback:
+    name: Rollback (Manual)
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    if: failure() && needs.deploy.result == 'failure'
+    environment: production-rollback
+    steps:
+      - name: Rollback to previous version
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: ${{ secrets.PRODUCTION_USER }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          script: |
+            cd /opt/platform
+            
+            # Get previous image tag
+            PREV_TAG=$(docker image ls --format "{{.Tag}}" ${{ secrets.DOCKER_USERNAME }}/platform-api | grep -v latest | head -2 | tail -1)
+            
+            if [ -n "$PREV_TAG" ]; then
+              export VERSION=$PREV_TAG
+              docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+              echo "$(date): Rolled back to $PREV_TAG" >> /var/log/platform/deployments.log
+            fi
+
+      - name: Restore database if needed
+        if: ${{ inputs.restore_database == 'true' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: ${{ secrets.PRODUCTION_USER }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          script: |
+            cd /opt/platform
+            ./scripts/restore.sh "pre-deploy-${{ needs.validate.outputs.version }}"

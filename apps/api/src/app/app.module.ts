@@ -14,6 +14,7 @@ import { TenantMiddleware } from './tenant.middleware';
 import { HealthModule } from './health/health.module';
 import { ProvisioningModule } from './provisioning/provisioning.module';
 import { StorefrontModule } from './storefront/storefront.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { SentryInterceptor } from './sentry/sentry.interceptor';
 
@@ -48,6 +49,7 @@ import { SentryInterceptor } from './sentry/sentry.interceptor';
     HealthModule,
     ProvisioningModule,
     StorefrontModule,
+    DashboardModule,
   ],
   controllers: [AppController, InventoryController, ReportsController],
   providers: [

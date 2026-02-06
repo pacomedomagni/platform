@@ -1,10 +1,22 @@
 import Link from 'next/link';
+import { Metadata } from 'next';
 import { Badge, Button, Card } from '@noslag/ui';
 import { ArrowRight, Check, Sparkles } from 'lucide-react';
 import { bestSellers, featuredProducts, productCategories } from './_data/products';
 import { SectionHeader } from './_components/section-header';
 import { ProductCard } from './_components/product-card';
 import { ButtonLink } from './_components/button-link';
+
+export const metadata: Metadata = {
+  title: 'Premium Storefront | NoSlag - Inventory-First Shopping',
+  description: 'Shop premium products with real-time inventory visibility. Every item synced to ERP-grade stock control with multi-location support and batch tracking.',
+  keywords: ['ecommerce', 'inventory management', 'erp', 'storefront', 'b2b', 'wholesale'],
+  openGraph: {
+    title: 'Premium Storefront | NoSlag',
+    description: 'A storefront that feels premium, yet runs on ERP-grade control.',
+    type: 'website',
+  },
+};
 
 export default function StorefrontLanding() {
   return (

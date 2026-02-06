@@ -165,6 +165,387 @@ export class EmailService implements OnModuleInit {
         </p>
       `,
     });
+
+    // Register storefront email templates
+    this.registerStorefrontTemplates();
+  }
+
+  private registerStorefrontTemplates(): void {
+    // Store Order Confirmation
+    this.templateService.compileTemplate({
+      name: 'store-order-confirmation',
+      subject: 'Order Confirmed: #{{order.orderNumber}} - {{company.name}}',
+      html: `
+        <h2 style="margin: 0 0 20px 0; color: #059669;">✓ Order Confirmed</h2>
+        <p>Hi {{recipientName}},</p>
+        <p>Thank you for your order! We've received your order and will begin processing it shortly.</p>
+        
+        <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px; margin: 24px 0;">
+          <p style="margin: 0; font-weight: 600; color: #166534;">Order #{{order.orderNumber}}</p>
+          {{#if order.estimatedDelivery}}
+          <p style="margin: 8px 0 0 0; color: #166534;">Estimated delivery: {{order.estimatedDelivery}}</p>
+          {{/if}}
+        </div>
+
+        <h3 style="margin: 24px 0 16px 0; color: #1e293b; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">Order Summary</h3>
+        <table style="width: 100%; border-collapse: collapse;">
+          {{#each order.items}}
+          <tr style="border-bottom: 1px solid #f1f5f9;">
+            <td style="padding: 12px 0; vertical-align: top;">
+              {{#if image}}
+              <img src="{{image}}" alt="{{name}}" style="width: 60px; height: 60px; object-fit: cover; border-radius: 4px;">
+              {{/if}}
+            </td>
+            <td style="padding: 12px 8px; vertical-align: top;">
+              <p style="margin: 0; font-weight: 500;">{{name}}</p>
+              {{#if variant}}<p style="margin: 4px 0 0 0; color: #64748b; font-size: 12px;">{{variant}}</p>{{/if}}
+              <p style="margin: 4px 0 0 0; color: #64748b; font-size: 12px;">Qty: {{quantity}}</p>
+            </td>
+            <td style="padding: 12px 0; text-align: right; vertical-align: top;">
+              <p style="margin: 0; font-weight: 500;">{{formatCurrency totalPrice ../order.currency}}</p>
+            </td>
+          </tr>
+          {{/each}}
+        </table>
+
+        <table style="width: 100%; margin-top: 16px;">
+          <tr>
+            <td style="padding: 4px 0; color: #64748b;">Subtotal</td>
+            <td style="padding: 4px 0; text-align: right;">{{formatCurrency order.subtotal order.currency}}</td>
+          </tr>
+          <tr>
+            <td style="padding: 4px 0; color: #64748b;">Shipping</td>
+            <td style="padding: 4px 0; text-align: right;">{{formatCurrency order.shipping order.currency}}</td>
+          </tr>
+          <tr>
+            <td style="padding: 4px 0; color: #64748b;">Tax</td>
+            <td style="padding: 4px 0; text-align: right;">{{formatCurrency order.tax order.currency}}</td>
+          </tr>
+          {{#if order.discount}}
+          <tr>
+            <td style="padding: 4px 0; color: #059669;">Discount</td>
+            <td style="padding: 4px 0; text-align: right; color: #059669;">-{{formatCurrency order.discount order.currency}}</td>
+          </tr>
+          {{/if}}
+          <tr style="border-top: 2px solid #e2e8f0;">
+            <td style="padding: 12px 0; font-weight: 600; font-size: 18px;">Total</td>
+            <td style="padding: 12px 0; text-align: right; font-weight: 600; font-size: 18px;">{{formatCurrency order.total order.currency}}</td>
+          </tr>
+        </table>
+
+        <div style="display: flex; gap: 24px; margin-top: 24px;">
+          <div style="flex: 1;">
+            <h4 style="margin: 0 0 8px 0; color: #64748b; font-size: 12px; text-transform: uppercase;">Shipping Address</h4>
+            <p style="margin: 0; line-height: 1.6;">
+              {{order.shippingAddress.name}}<br>
+              {{order.shippingAddress.line1}}<br>
+              {{#if order.shippingAddress.line2}}{{order.shippingAddress.line2}}<br>{{/if}}
+              {{order.shippingAddress.city}}, {{order.shippingAddress.state}} {{order.shippingAddress.postalCode}}<br>
+              {{order.shippingAddress.country}}
+            </p>
+          </div>
+          {{#if order.paymentMethod}}
+          <div style="flex: 1;">
+            <h4 style="margin: 0 0 8px 0; color: #64748b; font-size: 12px; text-transform: uppercase;">Payment Method</h4>
+            <p style="margin: 0;">{{order.paymentMethod}}</p>
+          </div>
+          {{/if}}
+        </div>
+
+        {{#if actionUrl}}
+        <p style="margin: 30px 0;">
+          <a href="{{actionUrl}}" class="btn">View Order Details</a>
+        </p>
+        {{/if}}
+
+        <p style="color: #64748b; margin-top: 24px;">
+          If you have any questions about your order, please contact us at {{company.supportEmail}}.
+        </p>
+      `,
+    });
+
+    // Store Order Shipped
+    this.templateService.compileTemplate({
+      name: 'store-order-shipped',
+      subject: 'Your Order Has Shipped! #{{order.orderNumber}} - {{company.name}}',
+      html: `
+        <h2 style="margin: 0 0 20px 0; color: #2563eb;">📦 Your Order is On Its Way!</h2>
+        <p>Hi {{recipientName}},</p>
+        <p>Great news! Your order has been shipped and is on its way to you.</p>
+        
+        <div style="background-color: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin: 24px 0;">
+          <p style="margin: 0; font-weight: 600; color: #1e40af;">Order #{{order.orderNumber}}</p>
+          {{#if order.trackingNumber}}
+          <p style="margin: 8px 0 0 0; color: #1e40af;">Tracking: {{order.trackingNumber}}</p>
+          {{/if}}
+          {{#if order.estimatedDelivery}}
+          <p style="margin: 8px 0 0 0; color: #1e40af;">Expected delivery: {{order.estimatedDelivery}}</p>
+          {{/if}}
+        </div>
+
+        {{#if order.trackingUrl}}
+        <p style="margin: 30px 0;">
+          <a href="{{order.trackingUrl}}" class="btn">Track Your Package</a>
+        </p>
+        {{/if}}
+
+        <h3 style="margin: 24px 0 16px 0; color: #1e293b;">Items in This Shipment</h3>
+        <table style="width: 100%; border-collapse: collapse;">
+          {{#each order.items}}
+          <tr style="border-bottom: 1px solid #f1f5f9;">
+            <td style="padding: 12px 0;">
+              <p style="margin: 0; font-weight: 500;">{{name}} {{#if variant}}({{variant}}){{/if}}</p>
+              <p style="margin: 4px 0 0 0; color: #64748b; font-size: 12px;">Qty: {{quantity}}</p>
+            </td>
+          </tr>
+          {{/each}}
+        </table>
+
+        <h4 style="margin: 24px 0 8px 0; color: #64748b; font-size: 12px; text-transform: uppercase;">Shipping To</h4>
+        <p style="margin: 0; line-height: 1.6;">
+          {{order.shippingAddress.name}}<br>
+          {{order.shippingAddress.line1}}<br>
+          {{#if order.shippingAddress.line2}}{{order.shippingAddress.line2}}<br>{{/if}}
+          {{order.shippingAddress.city}}, {{order.shippingAddress.state}} {{order.shippingAddress.postalCode}}
+        </p>
+
+        <p style="color: #64748b; margin-top: 24px;">
+          Questions? Contact us at {{company.supportEmail}}.
+        </p>
+      `,
+    });
+
+    // Store Order Delivered
+    this.templateService.compileTemplate({
+      name: 'store-order-delivered',
+      subject: 'Your Order Has Been Delivered! #{{order.orderNumber}} - {{company.name}}',
+      html: `
+        <h2 style="margin: 0 0 20px 0; color: #059669;">✓ Your Order Has Arrived!</h2>
+        <p>Hi {{recipientName}},</p>
+        <p>Your order #{{order.orderNumber}} has been delivered. We hope you love your purchase!</p>
+
+        {{#if actionUrl}}
+        <p style="margin: 30px 0;">
+          <a href="{{actionUrl}}" class="btn">Leave a Review</a>
+        </p>
+        {{/if}}
+
+        <p>Not happy with your order? We offer hassle-free returns within 30 days.</p>
+        
+        <p style="color: #64748b; margin-top: 24px;">
+          Thank you for shopping with {{company.name}}!
+        </p>
+      `,
+    });
+
+    // Store Order Cancelled
+    this.templateService.compileTemplate({
+      name: 'store-order-cancelled',
+      subject: 'Order Cancelled: #{{order.orderNumber}} - {{company.name}}',
+      html: `
+        <h2 style="margin: 0 0 20px 0; color: #dc2626;">Order Cancelled</h2>
+        <p>Hi {{recipientName}},</p>
+        <p>Your order #{{order.orderNumber}} has been cancelled{{#if message}} - {{message}}{{/if}}.</p>
+        
+        {{#if order.total}}
+        <p>If you were charged, a refund of <strong>{{formatCurrency order.total order.currency}}</strong> will be processed within 5-10 business days.</p>
+        {{/if}}
+
+        <p style="margin-top: 24px;">We're sorry to see you go. If you have any questions, please contact us at {{company.supportEmail}}.</p>
+      `,
+    });
+
+    // Store Payment Confirmation
+    this.templateService.compileTemplate({
+      name: 'store-payment-confirmation',
+      subject: 'Payment Confirmed for Order #{{order.orderNumber}} - {{company.name}}',
+      html: `
+        <h2 style="margin: 0 0 20px 0; color: #059669;">✓ Payment Successful</h2>
+        <p>Hi {{recipientName}},</p>
+        <p>We've successfully processed your payment for order #{{order.orderNumber}}.</p>
+        
+        <div style="background-color: #f8fafc; border-radius: 8px; padding: 16px; margin: 24px 0;">
+          <table style="width: 100%;">
+            <tr>
+              <td style="padding: 4px 0; color: #64748b;">Order Number</td>
+              <td style="padding: 4px 0; text-align: right; font-weight: 500;">#{{order.orderNumber}}</td>
+            </tr>
+            <tr>
+              <td style="padding: 4px 0; color: #64748b;">Amount Paid</td>
+              <td style="padding: 4px 0; text-align: right; font-weight: 500;">{{formatCurrency order.total order.currency}}</td>
+            </tr>
+            {{#if order.paymentMethod}}
+            <tr>
+              <td style="padding: 4px 0; color: #64748b;">Payment Method</td>
+              <td style="padding: 4px 0; text-align: right;">{{order.paymentMethod}}</td>
+            </tr>
+            {{/if}}
+          </table>
+        </div>
+
+        <p>A receipt has been sent to your email address.</p>
+        
+        {{#if actionUrl}}
+        <p style="margin: 30px 0;">
+          <a href="{{actionUrl}}" class="btn">View Order</a>
+        </p>
+        {{/if}}
+      `,
+    });
+
+    // Store Account Welcome
+    this.templateService.compileTemplate({
+      name: 'store-account-welcome',
+      subject: 'Welcome to {{company.name}}! 🎉',
+      html: `
+        <h2 style="margin: 0 0 20px 0; color: #1e293b;">Welcome, {{recipientName}}!</h2>
+        <p>Thanks for creating an account with {{company.name}}. We're thrilled to have you!</p>
+        
+        <div style="background-color: #f8fafc; border-radius: 8px; padding: 20px; margin: 24px 0;">
+          <h3 style="margin: 0 0 12px 0; color: #1e293b;">What you can do with your account:</h3>
+          <ul style="margin: 0; padding-left: 20px; color: #475569;">
+            <li style="margin-bottom: 8px;">Track your orders and view order history</li>
+            <li style="margin-bottom: 8px;">Save multiple shipping addresses</li>
+            <li style="margin-bottom: 8px;">Faster checkout with saved payment methods</li>
+            <li style="margin-bottom: 8px;">Create wishlists and save favorites</li>
+            <li>Get exclusive member-only offers</li>
+          </ul>
+        </div>
+
+        {{#if actionUrl}}
+        <p style="margin: 30px 0;">
+          <a href="{{actionUrl}}" class="btn">Start Shopping</a>
+        </p>
+        {{/if}}
+
+        <p style="color: #64748b; margin-top: 24px;">
+          Happy shopping!<br>
+          The {{company.name}} Team
+        </p>
+      `,
+    });
+
+    // Store Password Reset
+    this.templateService.compileTemplate({
+      name: 'store-password-reset',
+      subject: 'Reset Your Password - {{company.name}}',
+      html: `
+        <h2 style="margin: 0 0 20px 0; color: #1e293b;">Reset Your Password</h2>
+        <p>Hi {{recipientName}},</p>
+        <p>We received a request to reset your password. Click the button below to create a new password:</p>
+        
+        <p style="margin: 30px 0;">
+          <a href="{{actionUrl}}" class="btn">Reset Password</a>
+        </p>
+
+        <p style="color: #64748b; font-size: 14px;">
+          This link will expire in 1 hour. If you didn't request a password reset, you can safely ignore this email.
+        </p>
+        
+        <div style="background-color: #fef3c7; border-radius: 8px; padding: 12px; margin-top: 24px;">
+          <p style="margin: 0; color: #92400e; font-size: 13px;">
+            ⚠️ If you didn't request this, someone may be trying to access your account. Consider changing your password.
+          </p>
+        </div>
+      `,
+    });
+
+    // Abandoned Cart Recovery
+    this.templateService.compileTemplate({
+      name: 'store-abandoned-cart',
+      subject: 'Did you forget something? 🛒 - {{company.name}}',
+      html: `
+        <h2 style="margin: 0 0 20px 0; color: #1e293b;">You Left Something Behind!</h2>
+        <p>Hi {{recipientName}},</p>
+        <p>We noticed you left some items in your cart. They're waiting for you!</p>
+
+        <div style="background-color: #f8fafc; border-radius: 8px; padding: 16px; margin: 24px 0;">
+          <table style="width: 100%; border-collapse: collapse;">
+            {{#each cart.items}}
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+              <td style="padding: 12px 0; width: 80px;">
+                {{#if image}}
+                <img src="{{image}}" alt="{{name}}" style="width: 60px; height: 60px; object-fit: cover; border-radius: 4px;">
+                {{/if}}
+              </td>
+              <td style="padding: 12px 8px;">
+                <p style="margin: 0; font-weight: 500;">{{name}}</p>
+                {{#if variant}}<p style="margin: 4px 0 0 0; color: #64748b; font-size: 12px;">{{variant}}</p>{{/if}}
+                <p style="margin: 4px 0 0 0; color: #64748b; font-size: 12px;">Qty: {{quantity}}</p>
+              </td>
+              <td style="padding: 12px 0; text-align: right;">
+                <p style="margin: 0; font-weight: 500;">{{formatCurrency totalPrice ../cart.currency}}</p>
+              </td>
+            </tr>
+            {{/each}}
+          </table>
+          <div style="padding-top: 16px; border-top: 1px solid #e2e8f0; margin-top: 8px;">
+            <p style="margin: 0; text-align: right; font-weight: 600;">
+              Cart Total: {{formatCurrency cart.subtotal cart.currency}}
+            </p>
+          </div>
+        </div>
+
+        <p style="margin: 30px 0;">
+          <a href="{{recoveryUrl}}" class="btn">Complete Your Order</a>
+        </p>
+
+        <p style="color: #64748b; font-size: 14px;">
+          Items in your cart may sell out. Don't miss out!
+        </p>
+      `,
+    });
+
+    // Back in Stock Notification
+    this.templateService.compileTemplate({
+      name: 'store-back-in-stock',
+      subject: 'Good news! {{productName}} is back in stock - {{company.name}}',
+      html: `
+        <h2 style="margin: 0 0 20px 0; color: #059669;">🎉 It's Back!</h2>
+        <p>Hi {{recipientName}},</p>
+        <p>Great news! The item you were waiting for is now back in stock:</p>
+
+        <div style="background-color: #f8fafc; border-radius: 8px; padding: 20px; margin: 24px 0; text-align: center;">
+          {{#if productImage}}
+          <img src="{{productImage}}" alt="{{productName}}" style="max-width: 200px; border-radius: 8px; margin-bottom: 16px;">
+          {{/if}}
+          <h3 style="margin: 0 0 8px 0; color: #1e293b;">{{productName}}</h3>
+          <p style="margin: 0; font-size: 20px; font-weight: 600; color: #059669;">{{formatCurrency productPrice productCurrency}}</p>
+        </div>
+
+        <p style="margin: 30px 0; text-align: center;">
+          <a href="{{actionUrl}}" class="btn">Shop Now</a>
+        </p>
+
+        <p style="color: #64748b; text-align: center; font-size: 14px;">
+          Hurry! Popular items sell fast.
+        </p>
+      `,
+    });
+
+    // Review Request
+    this.templateService.compileTemplate({
+      name: 'store-review-request',
+      subject: 'How was your purchase? - {{company.name}}',
+      html: `
+        <h2 style="margin: 0 0 20px 0; color: #1e293b;">How Did We Do?</h2>
+        <p>Hi {{recipientName}},</p>
+        <p>We hope you're enjoying your recent purchase! We'd love to hear your feedback.</p>
+
+        <div style="text-align: center; margin: 30px 0;">
+          <p style="margin-bottom: 16px; color: #64748b;">How would you rate your experience?</p>
+          <p style="font-size: 32px; margin: 0;">⭐ ⭐ ⭐ ⭐ ⭐</p>
+        </div>
+
+        <p style="margin: 30px 0; text-align: center;">
+          <a href="{{actionUrl}}" class="btn">Write a Review</a>
+        </p>
+
+        <p style="color: #64748b; text-align: center; font-size: 14px;">
+          Your review helps other shoppers and helps us improve.
+        </p>
+      `,
+    });
   }
 
   /**
@@ -271,6 +652,27 @@ export class EmailService implements OnModuleInit {
         return 'password-reset';
       case 'account-verification':
         return 'welcome';
+      // Storefront templates
+      case 'store-order-confirmation':
+        return 'store-order-confirmation';
+      case 'store-order-shipped':
+        return 'store-order-shipped';
+      case 'store-order-delivered':
+        return 'store-order-delivered';
+      case 'store-order-cancelled':
+        return 'store-order-cancelled';
+      case 'store-payment-confirmation':
+        return 'store-payment-confirmation';
+      case 'store-account-welcome':
+        return 'store-account-welcome';
+      case 'store-password-reset':
+        return 'store-password-reset';
+      case 'store-abandoned-cart':
+        return 'store-abandoned-cart';
+      case 'store-back-in-stock':
+        return 'store-back-in-stock';
+      case 'store-review-request':
+        return 'store-review-request';
       default:
         return 'document-notification';
     }
@@ -295,6 +697,17 @@ export class EmailService implements OnModuleInit {
       'welcome': 'Welcome',
       'password-reset': 'Password Reset',
       'account-verification': 'Verify Account',
+      // Storefront action texts
+      'store-order-confirmation': 'Order Confirmed',
+      'store-order-shipped': 'Order Shipped',
+      'store-order-delivered': 'Order Delivered',
+      'store-order-cancelled': 'Order Cancelled',
+      'store-payment-confirmation': 'Payment Confirmed',
+      'store-account-welcome': 'Welcome',
+      'store-password-reset': 'Reset Password',
+      'store-abandoned-cart': 'Complete Your Order',
+      'store-back-in-stock': 'Back in Stock',
+      'store-review-request': 'Leave a Review',
     };
     return actionTexts[type] || 'Notification';
   }
@@ -332,5 +745,134 @@ export class EmailService implements OnModuleInit {
     } catch {
       return false;
     }
+  }
+
+  // ============================================================
+  // STOREFRONT EMAIL CONVENIENCE METHODS
+  // ============================================================
+
+  /**
+   * Send order confirmation email
+   */
+  async sendOrderConfirmation(
+    context: import('./email.types').StoreOrderEmailContext,
+  ): Promise<SendEmailResult> {
+    return this.sendNotification({
+      ...context,
+      type: 'store-order-confirmation',
+    });
+  }
+
+  /**
+   * Send order shipped email
+   */
+  async sendOrderShipped(
+    context: import('./email.types').StoreOrderEmailContext,
+  ): Promise<SendEmailResult> {
+    return this.sendNotification({
+      ...context,
+      type: 'store-order-shipped',
+    });
+  }
+
+  /**
+   * Send order delivered email
+   */
+  async sendOrderDelivered(
+    context: import('./email.types').StoreOrderEmailContext,
+  ): Promise<SendEmailResult> {
+    return this.sendNotification({
+      ...context,
+      type: 'store-order-delivered',
+    });
+  }
+
+  /**
+   * Send order cancelled email
+   */
+  async sendOrderCancelled(
+    context: import('./email.types').StoreOrderEmailContext,
+  ): Promise<SendEmailResult> {
+    return this.sendNotification({
+      ...context,
+      type: 'store-order-cancelled',
+    });
+  }
+
+  /**
+   * Send payment confirmation email
+   */
+  async sendPaymentConfirmation(
+    context: import('./email.types').StoreOrderEmailContext,
+  ): Promise<SendEmailResult> {
+    return this.sendNotification({
+      ...context,
+      type: 'store-payment-confirmation',
+    });
+  }
+
+  /**
+   * Send storefront account welcome email
+   */
+  async sendStoreWelcome(
+    context: import('./email.types').NotificationEmailContext,
+  ): Promise<SendEmailResult> {
+    return this.sendNotification({
+      ...context,
+      type: 'store-account-welcome',
+    });
+  }
+
+  /**
+   * Send storefront password reset email
+   */
+  async sendStorePasswordReset(
+    context: import('./email.types').NotificationEmailContext,
+  ): Promise<SendEmailResult> {
+    return this.sendNotification({
+      ...context,
+      type: 'store-password-reset',
+    });
+  }
+
+  /**
+   * Send abandoned cart email
+   */
+  async sendAbandonedCart(
+    context: import('./email.types').AbandonedCartEmailContext,
+  ): Promise<SendEmailResult> {
+    return this.sendNotification({
+      ...context,
+      type: 'store-abandoned-cart',
+    });
+  }
+
+  /**
+   * Send back in stock notification
+   */
+  async sendBackInStock(
+    context: import('./email.types').NotificationEmailContext & {
+      productName: string;
+      productImage?: string;
+      productPrice: number;
+      productCurrency: string;
+    },
+  ): Promise<SendEmailResult> {
+    return this.sendNotification({
+      ...context,
+      type: 'store-back-in-stock',
+    });
+  }
+
+  /**
+   * Send review request email
+   */
+  async sendReviewRequest(
+    context: import('./email.types').NotificationEmailContext,
+  ): Promise<SendEmailResult> {
+    return this.sendNotification({
+      ...context,
+      type: 'store-review-request',
+    });
   }
 }

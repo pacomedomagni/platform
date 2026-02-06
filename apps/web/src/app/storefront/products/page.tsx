@@ -1,9 +1,12 @@
+'use client';
+
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Badge, Button, Card, Input, NativeSelect } from '@noslag/ui';
-import { Filter, SlidersHorizontal } from 'lucide-react';
-import { products } from '../_data/products';
+import { Badge, Button, Card, Input, NativeSelect, Spinner } from '@noslag/ui';
+import { Filter, SlidersHorizontal, AlertCircle } from 'lucide-react';
 import { SectionHeader } from '../_components/section-header';
 import { ProductCard } from '../_components/product-card';
+import { productsApi, type StoreProduct } from '@/lib/store-api';
 
 const filters = [
   { label: 'All', value: 'all' },
@@ -13,7 +16,86 @@ const filters = [
   { label: 'Workspace', value: 'workspace' },
 ];
 
+type SortOption = 'featured' | 'price-asc' | 'price-desc' | 'newest';
+
 export default function ProductsPage() {
+  const [products, setProducts] = useState<StoreProduct[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [sortBy, setSortBy] = useState<SortOption>('featured');
+
+  useEffect(() => {
+    const fetchProducts = async () => {
+      setIsLoading(true);
+      setError(null);
+      
+      try {
+        const data = await productsApi.list({
+          search: searchQuery || undefined,
+          category: selectedCategory !== 'all' ? selectedCategory : undefined,
+          limit: 50,
+        });
+        
+        // Sort products locally
+        let sortedProducts = [...data.products];
+        switch (sortBy) {
+          case 'price-asc':
+            sortedProducts.sort((a, b) => a.price - b.price);
+            break;
+          case 'price-desc':
+            sortedProducts.sort((a, b) => b.price - a.price);
+            break;
+          case 'newest':
+            sortedProducts.sort((a, b) => 
+              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+            );
+            break;
+          case 'featured':
+          default:
+            // Keep original order (featured first from API)
+            break;
+        }
+        
+        setProducts(sortedProducts);
+      } catch (err) {
+        console.error('Failed to fetch products:', err);
+        setError('Failed to load products. Please try again.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    // Debounce search
+    const timeout = setTimeout(fetchProducts, 300);
+    return () => clearTimeout(timeout);
+  }, [searchQuery, selectedCategory, sortBy]);
+
+  // Map API product to ProductCard expected format
+  const mapProductForCard = (product: StoreProduct) => ({
+    id: product.id,
+    name: product.name,
+    slug: product.slug,
+    category: product.category || 'Uncategorized',
+    price: product.price,
+    compareAt: product.compareAtPrice || undefined,
+    rating: 4.5, // Default rating - would come from reviews in a full implementation
+    reviews: 0,
+    badge: product.tags?.includes('bestseller') 
+      ? 'Best Seller' as const
+      : product.tags?.includes('new') 
+        ? 'New Arrival' as const 
+        : undefined,
+    description: product.shortDescription || product.description?.substring(0, 100) || '',
+    stockStatus: product.trackInventory && product.quantity === 0 
+      ? 'Low Stock' as const
+      : 'In Stock' as const,
+    leadTime: '2-4 days',
+    tone: 'from-blue-50 via-slate-50 to-amber-50',
+    images: product.images,
+  });
+
   return (
     <div className="mx-auto w-full max-w-7xl space-y-10 px-6 py-12">
       <SectionHeader
@@ -34,32 +116,85 @@ export default function ProductsPage() {
             Filters
           </div>
           {filters.map((filter) => (
-            <Badge key={filter.value} variant="outline" className="cursor-pointer bg-white text-slate-600 hover:bg-slate-100">
+            <Badge 
+              key={filter.value} 
+              variant="outline" 
+              className={`cursor-pointer ${
+                selectedCategory === filter.value 
+                  ? 'bg-blue-50 text-blue-600 border-blue-200' 
+                  : 'bg-white text-slate-600 hover:bg-slate-100'
+              }`}
+              onClick={() => setSelectedCategory(filter.value)}
+            >
               {filter.label}
             </Badge>
           ))}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <div className="relative w-full sm:w-60">
-            <Input placeholder="Search products" className="h-9" />
+            <Input 
+              placeholder="Search products" 
+              className="h-9"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
           </div>
           <div className="flex items-center gap-2 text-sm text-slate-500">
             <SlidersHorizontal className="h-4 w-4" />
-            <NativeSelect className="h-9">
-              <option>Sort by: Featured</option>
-              <option>Sort by: Price low to high</option>
-              <option>Sort by: Price high to low</option>
-              <option>Sort by: Newest</option>
+            <NativeSelect 
+              className="h-9"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortOption)}
+            >
+              <option value="featured">Sort by: Featured</option>
+              <option value="price-asc">Sort by: Price low to high</option>
+              <option value="price-desc">Sort by: Price high to low</option>
+              <option value="newest">Sort by: Newest</option>
             </NativeSelect>
           </div>
         </div>
       </Card>
 
-      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-        {products.map((product) => (
-          <ProductCard key={product.id} product={product} />
-        ))}
-      </div>
+      {isLoading ? (
+        <div className="flex items-center justify-center py-20">
+          <Spinner className="h-8 w-8" />
+          <span className="ml-3 text-slate-600">Loading products...</span>
+        </div>
+      ) : error ? (
+        <Card className="flex flex-col items-center justify-center p-10 text-center">
+          <AlertCircle className="h-12 w-12 text-red-500 mb-4" />
+          <p className="text-slate-700 font-medium">{error}</p>
+          <Button 
+            variant="outline" 
+            className="mt-4"
+            onClick={() => window.location.reload()}
+          >
+            Try Again
+          </Button>
+        </Card>
+      ) : products.length === 0 ? (
+        <Card className="flex flex-col items-center justify-center p-10 text-center">
+          <p className="text-slate-600">No products found.</p>
+          {(searchQuery || selectedCategory !== 'all') && (
+            <Button 
+              variant="outline" 
+              className="mt-4"
+              onClick={() => {
+                setSearchQuery('');
+                setSelectedCategory('all');
+              }}
+            >
+              Clear Filters
+            </Button>
+          )}
+        </Card>
+      ) : (
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          {products.map((product) => (
+            <ProductCard key={product.id} product={mapProductForCard(product)} />
+          ))}
+        </div>
+      )}
 
       <Card className="flex flex-col items-start justify-between gap-4 border-slate-200/70 bg-gradient-to-r from-blue-600 via-indigo-600 to-amber-400 p-6 text-white shadow-lg md:flex-row md:items-center">
         <div>

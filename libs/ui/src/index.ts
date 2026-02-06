@@ -11,3 +11,11 @@ export * from './lib/link-field';
 export * from './lib/global-command-bar';
 export * from './lib/app-shell';
 export * from './lib/studio';
+
+// New UI components
+export * from './lib/dialog';
+export * from './lib/dropdown-menu';
+export * from './lib/toast';
+export * from './lib/tabs';
+export * from './lib/avatar';
+export * from './lib/tooltip';
