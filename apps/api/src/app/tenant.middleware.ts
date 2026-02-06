@@ -1,7 +1,39 @@
-import { Injectable, NestMiddleware } from '@nestjs/common';
+import { Injectable, NestMiddleware, createParamDecorator, ExecutionContext } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
 import { Request, Response, NextFunction } from 'express';
 import { decode } from 'jsonwebtoken';
+
+/**
+ * Parameter decorator to extract tenantId from the request
+ */
+export const Tenant = createParamDecorator(
+  (data: unknown, ctx: ExecutionContext): string => {
+    const request = ctx.switchToHttp().getRequest();
+    // First try to get from user (set by AuthGuard/JWT)
+    if (request.user?.tenantId) {
+      return request.user.tenantId;
+    }
+    // Fallback to header for dev mode
+    if (process.env.ALLOW_TENANT_HEADER === 'true') {
+      const headerTenantId = request.headers['x-tenant-id'];
+      if (headerTenantId) return headerTenantId;
+    }
+    // Final fallback: decode from token directly
+    const authHeader = request.headers.authorization;
+    if (authHeader?.startsWith('Bearer ')) {
+      const token = authHeader.split(' ')[1];
+      try {
+        const payload: any = decode(token);
+        if (payload?.tenant_id || payload?.tenantId) {
+          return payload.tenant_id || payload.tenantId;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return '';
+  },
+);
 
 @Injectable()
 export class TenantMiddleware implements NestMiddleware {

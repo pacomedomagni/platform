@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { Badge, Card } from '@noslag/ui';
+import { Badge, Card } from '@platform/ui';
 import { ArrowRight, ShieldCheck } from 'lucide-react';
 import { ButtonLink } from './storefront/_components/button-link';
 

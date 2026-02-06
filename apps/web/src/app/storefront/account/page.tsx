@@ -7,7 +7,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Card } from '@noslag/ui';
+import { Card } from '@platform/ui';
 import { User, Package, MapPin, LogOut, ChevronRight } from 'lucide-react';
 import { useAuthStore } from '../../../lib/auth-store';
 

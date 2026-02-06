@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Badge, Card } from '@noslag/ui';
+import { Badge, Card } from '@platform/ui';
 import { Check, ShieldCheck, Truck } from 'lucide-react';
 import { products } from '../../_data/products';
 import { formatCurrency } from '../../_lib/format';

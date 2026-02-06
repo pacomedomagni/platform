@@ -2,6 +2,9 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma, PrismaClient, StockConsumptionStrategy } from '@prisma/client';
 import { PrismaService } from '@platform/db';
 
+// Type alias for transaction client (Prisma.$TransactionClient equivalent)
+type TransactionClient = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$extends'>;
+
 type VoucherRef = {
   voucherType: string;
   voucherNo: string;
@@ -322,7 +325,7 @@ export class StockService {
                 warehouseId: warehouse.id,
                 locationId: preferredLocationId,
                 batchId: batch?.id ?? null,
-              },
+              } as any,
             },
           });
           const reservedInBin = new Prisma.Decimal(binBalance?.reservedQty ?? 0);
@@ -743,7 +746,7 @@ export class StockService {
               warehouseId: layer.warehouseId,
               locationId: layer.locationId,
               batchId: layer.batchId ?? null,
-            },
+            } as any,
           },
         });
         const binActual = new Prisma.Decimal(binBalance?.actualQty ?? 0);
@@ -1012,7 +1015,7 @@ export class StockService {
               warehouseId: layer.warehouseId,
               locationId: layer.locationId,
               batchId: layer.batchId ?? null,
-            },
+            } as any,
           },
         });
         const destBinActual = new Prisma.Decimal(destBinBalance?.actualQty ?? 0);
@@ -1305,7 +1308,7 @@ export class StockService {
               warehouseId: warehouse.id,
               locationId,
               batchId: batch?.id ?? null,
-            },
+            } as any,
           },
         });
         const reservedInBin = new Prisma.Decimal(binBalance?.reservedQty ?? 0);
@@ -1411,7 +1414,7 @@ export class StockService {
             warehouseId: warehouse.id,
             locationId: location.id,
             batchId: batch?.id ?? null,
-          },
+          } as any,
         },
       });
       const currentQty = new Prisma.Decimal(current?.actualQty ?? 0);
@@ -1660,12 +1663,12 @@ export class StockService {
     });
   }
 
-  private async setTenant(tx: PrismaClient, tenantId: string) {
+  private async setTenant(tx: TransactionClient, tenantId: string) {
     await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
   }
 
   private async logAudit(
-    tx: PrismaClient,
+    tx: TransactionClient,
     tenantId: string,
     action: string,
     docType: string,
@@ -1684,7 +1687,7 @@ export class StockService {
     });
   }
 
-  private async lockStock(tx: PrismaClient, tenantId: string, warehouseId: string, itemId: string) {
+  private async lockStock(tx: TransactionClient, tenantId: string, warehouseId: string, itemId: string) {
     const key = `${tenantId}:${warehouseId}:${itemId}`;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
   }
@@ -1701,7 +1704,7 @@ export class StockService {
   }
 
   private async resolveStockQty(
-    tx: PrismaClient,
+    tx: TransactionClient,
     input: {
       tenantId: string;
       item: { id: string; code: string; stockUomCode?: string | null };
@@ -1770,7 +1773,7 @@ export class StockService {
   }
 
   private async ensureSerialsAvailable(
-    tx: PrismaClient,
+    tx: TransactionClient,
     tenantId: string,
     itemId: string,
     serialNos: string[],
@@ -1788,7 +1791,7 @@ export class StockService {
   }
 
   private async ensureSerialsInLocation(
-    tx: PrismaClient,
+    tx: TransactionClient,
     input: {
       tenantId: string;
       itemId: string;
@@ -1817,7 +1820,7 @@ export class StockService {
   }
 
   private async createPostingMarker(
-    tx: PrismaClient,
+    tx: TransactionClient,
     input: { tenantId: string; postingKey: string; voucherType: string; voucherNo: string },
   ) {
     try {
@@ -1837,7 +1840,7 @@ export class StockService {
   }
 
   private async resolveItemWarehouseBatch(
-    tx: PrismaClient,
+    tx: TransactionClient,
     tenantId: string,
     itemCode: string,
     warehouseCode: string,
@@ -1871,7 +1874,7 @@ export class StockService {
   }
 
   private async resolveOrCreateBatch(
-    tx: PrismaClient,
+    tx: TransactionClient,
     input: { tenantId: string; itemId: string; batchNo: string; batchExpDate?: Date },
   ) {
     const existing = await tx.batch.findUnique({
@@ -1916,7 +1919,7 @@ export class StockService {
   }
 
   private async resolveReceivingLocation(
-    tx: PrismaClient,
+    tx: TransactionClient,
     tenantId: string,
     warehouseId: string,
     defaultReceivingLocationId: string | null | undefined,
@@ -1949,7 +1952,7 @@ export class StockService {
   }
 
   private async resolvePickingLocationId(
-    tx: PrismaClient,
+    tx: TransactionClient,
     tenantId: string,
     warehouseId: string,
     defaultPickingLocationId: string | null | undefined,
@@ -1969,7 +1972,7 @@ export class StockService {
   }
 
   private async upsertWarehouseBalance(
-    tx: PrismaClient,
+    tx: TransactionClient,
     tenantId: string,
     itemId: string,
     warehouseId: string,
@@ -1983,7 +1986,7 @@ export class StockService {
   }
 
   private async updateWarehouseBalance(
-    tx: PrismaClient,
+    tx: TransactionClient,
     tenantId: string,
     itemId: string,
     warehouseId: string,
@@ -1996,7 +1999,7 @@ export class StockService {
   }
 
   private async upsertBinBalance(
-    tx: PrismaClient,
+    tx: TransactionClient,
     tenantId: string,
     itemId: string,
     warehouseId: string,
@@ -2012,7 +2015,7 @@ export class StockService {
           warehouseId,
           locationId,
           batchId: batchId ?? null,
-        },
+        } as any,
       },
       update: { actualQty: { increment: deltaQty } },
       create: {
@@ -2028,13 +2031,13 @@ export class StockService {
   }
 
   private async upsertBinReservation(
-    tx: PrismaClient,
+    tx: TransactionClient,
     input: {
       tenantId: string;
       itemId: string;
       warehouseId: string;
       locationId: string;
-      batchId?: string;
+      batchId?: string | null;
       deltaQty: Prisma.Decimal;
     },
   ) {
@@ -2046,7 +2049,7 @@ export class StockService {
           warehouseId: input.warehouseId,
           locationId: input.locationId,
           batchId: input.batchId ?? null,
-        },
+        } as any,
       },
       update: { reservedQty: { increment: input.deltaQty } },
       create: {
@@ -2054,7 +2057,7 @@ export class StockService {
         itemId: input.itemId,
         warehouseId: input.warehouseId,
         locationId: input.locationId,
-        batchId: input.batchId ?? null,
+        batchId: input.batchId,
         actualQty: 0,
         reservedQty: input.deltaQty,
       },
@@ -2062,7 +2065,7 @@ export class StockService {
   }
 
   private async getLocationAvailableQty(
-    tx: PrismaClient,
+    tx: TransactionClient,
     input: {
       tenantId: string;
       itemId: string;
@@ -2088,7 +2091,7 @@ export class StockService {
   }
 
   private async consumeFifoLayers(
-    tx: PrismaClient,
+    tx: TransactionClient,
     input: {
       tenantId: string;
       itemId: string;

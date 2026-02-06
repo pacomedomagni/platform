@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ListView, DocTypeDefinition } from '@noslag/ui';
+import { ListView, DocTypeDefinition } from '@platform/ui';
 import { Loader2 } from 'lucide-react';
 import api from '../../../lib/api';
 

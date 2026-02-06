@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Button, Card, Input, Label, NativeSelect, Textarea, Spinner } from '@noslag/ui';
+import { Button, Card, Input, Label, NativeSelect, Textarea, Spinner } from '@platform/ui';
 import { AlertCircle, Lock, ShoppingBag } from 'lucide-react';
 import { useCartStore } from '@/lib/cart-store';
 import { useAuthStore } from '@/lib/auth-store';
@@ -153,8 +153,8 @@ export default function CheckoutPage() {
       setOrderId(checkout.id);
       setOrderNumber(checkout.orderNumber);
       
-      if (checkout.stripeClientSecret) {
-        setStripeClientSecret(checkout.stripeClientSecret);
+      if (checkout.clientSecret) {
+        setStripeClientSecret(checkout.clientSecret);
         setStep('payment');
       } else {
         // No payment needed (free order?) - redirect to confirmation
@@ -404,7 +404,6 @@ export default function CheckoutPage() {
             {stripePublicKey && stripeClientSecret ? (
               <StripePayment
                 clientSecret={stripeClientSecret}
-                publishableKey={stripePublicKey}
                 onSuccess={handlePaymentSuccess}
                 onError={handlePaymentError}
               />

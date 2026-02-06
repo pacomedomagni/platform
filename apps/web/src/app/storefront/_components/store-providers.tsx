@@ -4,8 +4,8 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useCartStore } from '../../lib/cart-store';
-import { useAuthStore } from '../../lib/auth-store';
+import { useCartStore } from '../../../lib/cart-store';
+import { useAuthStore } from '../../../lib/auth-store';
 
 export function StoreProviders({ children }: { children: React.ReactNode }) {
   const initCart = useCartStore((state) => state.initCart);

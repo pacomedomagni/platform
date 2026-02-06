@@ -197,7 +197,7 @@ export class DashboardService {
       },
       include: {
         warehouseItemBalances: {
-          select: { quantity: true },
+          select: { actualQty: true },
         },
       },
     });
@@ -207,7 +207,7 @@ export class DashboardService {
 
     for (const item of itemsWithStock) {
       const totalStock = item.warehouseItemBalances.reduce(
-        (sum, b) => sum + Number(b.quantity),
+        (sum, b) => sum + Number(b.actualQty),
         0
       );
       const reorderLevel = Number(item.reorderLevel || 0);
@@ -304,32 +304,33 @@ export class DashboardService {
 
   private async getTopProducts(tenantId: string, limit = 5): Promise<TopProduct[]> {
     // Get top selling products from order items
-    const topProducts = await this.db.orderItem.groupBy({
-      by: ['productCode', 'productName'],
-      where: {
-        order: {
-          tenantId,
-          paymentStatus: 'CAPTURED',
-        },
-      },
-      _sum: {
-        quantity: true,
-        lineTotal: true,
-      },
-      orderBy: {
-        _sum: {
-          lineTotal: 'desc',
-        },
-      },
-      take: limit,
-    });
+    // Use raw query to avoid Prisma circular type inference issues with complex groupBy
+    const topProducts = await this.db.$queryRaw<Array<{
+      productCode: string;
+      productName: string;
+      totalQty: number;
+      totalRevenue: number;
+    }>>`
+      SELECT 
+        oi."productCode",
+        oi."productName",
+        SUM(oi."quantity")::float as "totalQty",
+        SUM(oi."lineTotal")::float as "totalRevenue"
+      FROM "order_items" oi
+      INNER JOIN "orders" o ON o.id = oi."orderId"
+      WHERE o."tenantId" = ${tenantId}
+        AND o."paymentStatus" = 'CAPTURED'
+      GROUP BY oi."productCode", oi."productName"
+      ORDER BY "totalRevenue" DESC
+      LIMIT ${limit}
+    `;
 
     return topProducts.map((p, idx) => ({
       id: `top-${idx}`,
       code: p.productCode,
       name: p.productName,
-      salesCount: Number(p._sum.quantity || 0),
-      revenue: Number(p._sum.lineTotal || 0),
+      salesCount: Number(p.totalQty || 0),
+      revenue: Number(p.totalRevenue || 0),
     }));
   }
 

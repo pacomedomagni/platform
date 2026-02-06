@@ -568,11 +568,11 @@ export class EmailService implements OnModuleInit {
     }
 
     const mailOptions: nodemailer.SendMailOptions = {
-      from: emailOptions.from || this.options.defaults?.from,
-      to: emailOptions.to,
-      cc: emailOptions.cc,
-      bcc: emailOptions.bcc,
-      replyTo: emailOptions.replyTo || this.options.defaults?.replyTo,
+      from: this.convertAddress(emailOptions.from || this.options.defaults?.from),
+      to: this.convertAddresses(emailOptions.to),
+      cc: emailOptions.cc ? this.convertAddresses(emailOptions.cc) : undefined,
+      bcc: emailOptions.bcc ? this.convertAddresses(emailOptions.bcc) : undefined,
+      replyTo: this.convertAddress(emailOptions.replyTo || this.options.defaults?.replyTo),
       subject,
       html,
       text,
@@ -874,5 +874,30 @@ export class EmailService implements OnModuleInit {
       ...context,
       type: 'store-review-request',
     });
+  }
+
+  /**
+   * Convert EmailAddress to nodemailer Address format
+   */
+  private convertAddress(addr: string | import('./email.types').EmailAddress | undefined): string | { name: string; address: string } | undefined {
+    if (!addr) return undefined;
+    if (typeof addr === 'string') return addr;
+    return { name: addr.name || '', address: addr.address };
+  }
+
+  /**
+   * Convert array of EmailAddress to nodemailer format
+   */
+  private convertAddresses(
+    addrs: string | string[] | import('./email.types').EmailAddress | import('./email.types').EmailAddress[]
+  ): string | { name: string; address: string } | (string | { name: string; address: string })[] {
+    if (typeof addrs === 'string') return addrs;
+    if (Array.isArray(addrs)) {
+      return addrs.map(a => {
+        if (typeof a === 'string') return a;
+        return { name: a.name || '', address: a.address };
+      });
+    }
+    return { name: addrs.name || '', address: addrs.address };
   }
 }

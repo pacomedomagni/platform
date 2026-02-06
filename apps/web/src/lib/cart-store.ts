@@ -23,8 +23,15 @@ interface CartState {
   isLoading: boolean;
   error: string | null;
 
+  // Aliases for backward compatibility
+  shipping: number;
+  tax: number;
+  discount: number;
+  total: number;
+
   // Actions
   initCart: () => Promise<void>;
+  initializeCart: () => Promise<void>; // Alias for initCart
   addItem: (productId: string, quantity?: number) => Promise<void>;
   updateItem: (itemId: string, quantity: number) => Promise<void>;
   removeItem: (itemId: string) => Promise<void>;
@@ -57,11 +64,30 @@ export const useCartStore = create<CartState>()(
       isLoading: false,
       error: null,
 
+      // Computed aliases (getters via get())
+      get shipping() { return get().shippingTotal; },
+      get tax() { return get().taxTotal; },
+      get discount() { return get().discountAmount; },
+      get total() { return get().grandTotal; },
+
+      // initializeCart alias
+      initializeCart: async () => get().initCart(),
+
       // Set cart from API response
       setCartFromApi: (cart: Cart) => {
+        // Map items with convenience aliases
+        const mappedItems = cart.items.map(item => ({
+          ...item,
+          productId: item.product.id,
+          name: item.product.displayName,
+          price: item.product.price,
+          image: item.product.images[0] || '',
+          variant: undefined,
+        }));
+
         set({
           cartId: cart.id,
-          items: cart.items,
+          items: mappedItems,
           itemCount: cart.itemCount,
           subtotal: cart.subtotal,
           shippingTotal: cart.shippingTotal,

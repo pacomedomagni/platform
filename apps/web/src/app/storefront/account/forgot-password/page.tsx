@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Button, Card, Input, Label, Spinner } from '@noslag/ui';
+import { Button, Card, Input, Label, Spinner } from '@platform/ui';
 import { Mail, ArrowLeft, CheckCircle } from 'lucide-react';
 import { useAuthStore } from '@/lib/auth-store';
 

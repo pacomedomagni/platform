@@ -6,7 +6,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Card, Input, Label, Button } from '@noslag/ui';
+import { Card, Input, Label, Button } from '@platform/ui';
 import { useAuthStore } from '../../../../lib/auth-store';
 
 export default function LoginPage() {

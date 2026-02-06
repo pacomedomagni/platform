@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Button, Card, Input, Label, Spinner } from '@noslag/ui';
+import { Button, Card, Input, Label, Spinner } from '@platform/ui';
 import { Lock, CheckCircle, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { authApi } from '@/lib/store-api';
 

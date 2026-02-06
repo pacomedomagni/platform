@@ -27,7 +27,7 @@ export default function ListPage({ params }: { params: { doctype: string } }) {
     return (
         <ListView 
             docType={meta} 
-            onNavigate={(path) => router.push(path)} 
+            onRowClick={(row: { name?: string }) => router.push(`/desk/${docName}/${row.name || 'new'}`)} 
         />
     );
 }

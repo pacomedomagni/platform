@@ -21,10 +21,14 @@ async function apiFetch<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const headers: HeadersInit = {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'x-tenant-id': getTenantId(),
-    ...options.headers,
+    ...Object.fromEntries(
+      options.headers instanceof Headers 
+        ? options.headers.entries() 
+        : Object.entries(options.headers || {})
+    ),
   };
 
   // Add auth token if available
@@ -60,6 +64,7 @@ export interface Product {
   id: string;
   slug: string;
   displayName: string;
+  name?: string;  // Alias for displayName
   shortDescription: string | null;
   description: string | null;
   price: number;
@@ -68,8 +73,15 @@ export interface Product {
   category: { id: string; name: string; slug: string } | null;
   stockStatus: 'in_stock' | 'low_stock' | 'out_of_stock' | 'preorder';
   stockQuantity: number;
+  quantity?: number; // Alias for stockQuantity
   isFeatured: boolean;
+  trackInventory?: boolean;
+  tags?: string[];
+  createdAt?: string;
 }
+
+// Alias for backward compatibility
+export type StoreProduct = Product;
 
 export interface ProductListResponse {
   items: Product[];
@@ -131,6 +143,7 @@ export const productsApi = {
 
 export interface CartItem {
   id: string;
+  productId: string;  // Alias for product.id
   product: {
     id: string;
     slug: string;
@@ -143,6 +156,11 @@ export interface CartItem {
   quantity: number;
   unitPrice: number;
   totalPrice: number;
+  // Convenience aliases for direct access
+  name: string;       // -> product.displayName
+  price: number;      // -> product.price
+  image: string;      // -> product.images[0]
+  variant?: string;   // Optional variant info
 }
 
 export interface Cart {
@@ -297,6 +315,7 @@ export interface Customer {
   phone: string | null;
   acceptsMarketing: boolean;
   createdAt: string;
+  addresses?: CustomerAddress[];
 }
 
 export interface AuthResponse {

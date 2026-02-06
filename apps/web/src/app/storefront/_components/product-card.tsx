@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
-import { Badge, Card } from '@noslag/ui';
+import { Badge, Card } from '@platform/ui';
 import { formatCurrency } from '../_lib/format';
 import { AddToCartButton } from './add-to-cart-button';
 
@@ -94,7 +94,6 @@ export const ProductCard = ({ product, compact }: ProductCardProps) => {
         <div className="mt-auto flex items-center gap-3">
           <AddToCartButton 
             productId={product.id} 
-            productName={product.name}
             className="flex-1"
           />
           <Link

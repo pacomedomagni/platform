@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button, Input, Card, Label } from '@noslag/ui';
+import { Button, Input, Card, Label } from '@platform/ui';
 import { Loader2, Command, ShieldCheck } from 'lucide-react';
 import api from '../../lib/api';
 

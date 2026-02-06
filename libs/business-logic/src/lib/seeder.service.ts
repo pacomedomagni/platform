@@ -9,7 +9,7 @@ export class SeederService implements OnApplicationBootstrap {
   constructor(private readonly schema: SchemaService) {}
 
   async onApplicationBootstrap() {
-    const syncAlways = process.env.SYNC_CORE_DOCTYPES !== 'false';
+    const syncAlways = process.env['SYNC_CORE_DOCTYPES'] !== 'false';
     this.logger.log('Checking for core modules...');
     
     // We run this sequentially to respect dependencies (though currently SchemaService handles basic dependency order if strict)

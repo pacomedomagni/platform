@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Button, Card, Badge } from '@noslag/ui';
+import { Button, Card, Badge } from '@platform/ui';
 
 export default function SetupPage() {
   const steps = [
@@ -40,8 +40,8 @@ export default function SetupPage() {
               </div>
               <p className="text-xs text-slate-500 mt-1">{step.description}</p>
             </div>
-            <Button size="sm" variant="outline" asChild>
-              <Link href={step.href}>Open</Link>
+            <Button size="sm" variant="outline" onClick={() => window.location.href = step.href}>
+              Open
             </Button>
           </div>
         ))}

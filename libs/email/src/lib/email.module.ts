@@ -22,8 +22,8 @@ export class EmailModule {
   }
 
   static forRootAsync(options: {
-    useFactory: (...args: unknown[]) => Promise<EmailModuleOptions> | EmailModuleOptions;
-    inject?: unknown[];
+    useFactory: (...args: any[]) => Promise<EmailModuleOptions> | EmailModuleOptions;
+    inject?: any[];
   }): DynamicModule {
     return {
       module: EmailModule,

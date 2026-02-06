@@ -1,5 +1,5 @@
 'use client';
-import { Card, Button } from '@noslag/ui';
+import { Card, Button } from '@platform/ui';
 import { DollarSign, Users, Activity, ShoppingCart, Package, ClipboardList } from 'lucide-react';
 
 export default function Dashboard() {

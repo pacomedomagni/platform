@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Button, Card, Input, Badge, Spinner } from '@noslag/ui';
+import { Button, Card, Input, Badge, Spinner } from '@platform/ui';
 import { Trash2, Minus, Plus, ShoppingBag } from 'lucide-react';
 import { useCartStore } from '@/lib/cart-store';
 import { formatCurrency } from '../_lib/format';

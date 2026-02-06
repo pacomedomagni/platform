@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Card, Badge } from '@noslag/ui';
+import { Card, Badge } from '@platform/ui';
 import { Package, ChevronRight } from 'lucide-react';
 import { useAuthStore } from '../../../../lib/auth-store';
 import { ordersApi, OrderSummary } from '../../../../lib/store-api';

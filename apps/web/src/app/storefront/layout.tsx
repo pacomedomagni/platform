@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { Metadata, Viewport } from 'next';
-import { Button, Input } from '@noslag/ui';
+import { Button, Input } from '@platform/ui';
 import { Search, User } from 'lucide-react';
 import { StoreProviders } from './_components/store-providers';
 import { CartIcon } from './_components/cart-icon';

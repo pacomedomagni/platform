@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Card } from '@noslag/ui';
+import { Card } from '@platform/ui';
 
 export const ReportPage = ({
   title,

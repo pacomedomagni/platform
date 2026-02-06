@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { FormView, DocTypeDefinition } from '@platform/ui';
-import { getDoc, saveDoc } from '../../../lib/api';
+import { getDoc, saveDoc, getDocType } from '../../../../lib/api';
 
 // We need to fetch the DocType metadata definition to render the form.
 // Since we don't have a dedicated metadata endpoint in the controller yet,

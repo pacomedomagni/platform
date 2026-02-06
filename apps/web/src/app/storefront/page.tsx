@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { Metadata } from 'next';
-import { Badge, Button, Card } from '@noslag/ui';
+import { Badge, Button, Card } from '@platform/ui';
 import { ArrowRight, Check, Sparkles } from 'lucide-react';
 import { bestSellers, featuredProducts, productCategories } from './_data/products';
 import { SectionHeader } from './_components/section-header';

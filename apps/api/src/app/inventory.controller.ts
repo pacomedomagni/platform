@@ -1,6 +1,7 @@
 import { Controller, Get, Query, Req, UseGuards, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import { PrismaService } from '@platform/db';
+import { PrismaService, Prisma } from '@platform/db';
+import { SerialStatus } from '@prisma/client';
 
 @Controller('v1/inventory')
 @UseGuards(AuthGuard('jwt'))
@@ -256,18 +257,35 @@ export class InventoryController {
         where: {
           ...(item ? { itemId: item.id } : {}),
           ...(warehouse ? { warehouseId: warehouse.id } : {}),
-          ...(status ? { status } : {}),
+          ...(status ? { status: status as SerialStatus } : {}),
         },
         orderBy: { serialNo: 'asc' },
-        include: { item: true, warehouse: true, location: true, batch: true },
       });
+
+      // Fetch related entities separately to avoid include type issues
+      const itemIds = [...new Set(serials.map((s) => s.itemId))];
+      const warehouseIds = [...new Set(serials.map((s) => s.warehouseId).filter(Boolean))] as string[];
+      const locationIds = [...new Set(serials.map((s) => s.locationId).filter(Boolean))] as string[];
+      const batchIds = [...new Set(serials.map((s) => s.batchId).filter(Boolean))] as string[];
+
+      const [items, warehouses, locations, batches] = await Promise.all([
+        tx.item.findMany({ where: { id: { in: itemIds } } }),
+        warehouseIds.length > 0 ? tx.warehouse.findMany({ where: { id: { in: warehouseIds } } }) : [],
+        locationIds.length > 0 ? tx.location.findMany({ where: { id: { in: locationIds } } }) : [],
+        batchIds.length > 0 ? tx.batch.findMany({ where: { id: { in: batchIds } } }) : [],
+      ]);
+
+      const itemMap = new Map<string, typeof items[0]>(items.map((i) => [i.id, i] as const));
+      const warehouseMap = new Map<string, typeof warehouses[0]>(warehouses.map((w) => [w.id, w] as const));
+      const locationMap = new Map<string, typeof locations[0]>(locations.map((l) => [l.id, l] as const));
+      const batchMap = new Map<string, typeof batches[0]>(batches.map((b) => [b.id, b] as const));
 
       return serials.map((s) => ({
         serialNo: s.serialNo,
-        itemCode: s.item.code,
-        warehouseCode: s.warehouse?.code ?? null,
-        locationCode: s.location?.code ?? null,
-        batchNo: s.batch?.batchNo ?? null,
+        itemCode: itemMap.get(s.itemId)?.code ?? s.itemId,
+        warehouseCode: s.warehouseId ? warehouseMap.get(s.warehouseId)?.code ?? null : null,
+        locationCode: s.locationId ? locationMap.get(s.locationId)?.code ?? null : null,
+        batchNo: s.batchId ? batchMap.get(s.batchId)?.batchNo ?? null : null,
         status: s.status,
       }));
     });
@@ -385,10 +403,10 @@ export class InventoryController {
         batchIds.length > 0 ? tx.batch.findMany({ where: { id: { in: batchIds } } }) : [],
       ]);
 
-      const itemMap = new Map(items.map((i) => [i.id, i.code]));
-      const warehouseMap = new Map(warehouses.map((w) => [w.id, w.code]));
-      const locationMap = new Map(locations.map((l) => [l.id, l.code]));
-      const batchMap = new Map(batches.map((b) => [b.id, b.batchNo]));
+      const itemMap = new Map<string, string>(items.map((i) => [i.id, i.code] as [string, string]));
+      const warehouseMap = new Map<string, string>(warehouses.map((w) => [w.id, w.code] as [string, string]));
+      const locationMap = new Map<string, string>(locations.map((l) => [l.id, l.code] as [string, string]));
+      const batchMap = new Map<string, string>(batches.map((b) => [b.id, b.batchNo] as [string, string]));
 
       return Array.from(grouped.values()).map((g) => ({
         itemCode: itemMap.get(g.itemId) ?? g.itemId,
@@ -549,10 +567,10 @@ export class InventoryController {
         batchIds.length > 0 ? tx.batch.findMany({ where: { id: { in: batchIds } } }) : [],
       ]);
 
-      const itemMap = new Map(items.map((i) => [i.id, i.code]));
-      const warehouseMap = new Map(warehouses.map((w) => [w.id, w.code]));
-      const locationMap = new Map(locations.map((l) => [l.id, l.code]));
-      const batchMap = new Map(batches.map((b) => [b.id, b.batchNo]));
+      const itemMap = new Map<string, string>(items.map((i) => [i.id, i.code] as [string, string]));
+      const warehouseMap = new Map<string, string>(warehouses.map((w) => [w.id, w.code] as [string, string]));
+      const locationMap = new Map<string, string>(locations.map((l) => [l.id, l.code] as [string, string]));
+      const batchMap = new Map<string, string>(batches.map((b) => [b.id, b.batchNo] as [string, string]));
 
       return Array.from(grouped.values()).map((g) => ({
         itemCode: itemMap.get(g.itemId) ?? g.itemId,

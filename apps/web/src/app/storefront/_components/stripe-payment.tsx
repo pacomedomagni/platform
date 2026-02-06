@@ -12,7 +12,7 @@ import {
   useElements,
 } from '@stripe/react-stripe-js';
 import { loadStripe, Stripe } from '@stripe/stripe-js';
-import { paymentsApi } from '../../lib/store-api';
+import { paymentsApi } from '../../../lib/store-api';
 
 // Stripe promise - loaded once
 let stripePromise: Promise<Stripe | null> | null = null;

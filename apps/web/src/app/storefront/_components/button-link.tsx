@@ -1,5 +1,5 @@
 import Link, { LinkProps } from 'next/link';
-import { cn } from '@noslag/ui';
+import { cn } from '@platform/ui';
 import { ReactNode } from 'react';
 
 type ButtonLinkProps = LinkProps & {

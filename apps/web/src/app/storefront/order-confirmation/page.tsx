@@ -7,9 +7,9 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Card, Badge } from '@noslag/ui';
+import { Card, Badge } from '@platform/ui';
 import { CheckCircle, Package, Truck, Mail, ArrowRight } from 'lucide-react';
-import { ordersApi, OrderDetail } from '../../lib/store-api';
+import { ordersApi, OrderDetail } from '../../../lib/store-api';
 import { formatCurrency } from '../_lib/format';
 
 export default function OrderConfirmationPage() {

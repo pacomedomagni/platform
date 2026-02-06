@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Button, Input, Badge } from '@noslag/ui';
-import api from '../../../lib/api';
+import { Button, Input, Badge } from '@platform/ui';
+import api from '../../../../lib/api';
 import { ReportAlert, ReportCard, ReportEmpty, ReportFilters, ReportPage, ReportTable } from '../_components/report-shell';
 
 type BalanceAccount = {

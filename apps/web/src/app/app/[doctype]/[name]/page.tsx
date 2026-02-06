@@ -1,9 +1,9 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { FormView, DocTypeDefinition } from '@noslag/ui';
+import { FormView, DocTypeDefinition } from '@platform/ui';
 import { Loader2 } from 'lucide-react';
-import api from '../../../lib/api';
+import api from '../../../../lib/api';
 
 export default function DocTypeFormPage() {
     const params = useParams();

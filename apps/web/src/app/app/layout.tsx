@@ -1,5 +1,5 @@
 'use client';
-import { AppShell } from '@noslag/ui';
+import { AppShell } from '@platform/ui';
 import { LayoutDashboard, Box, FileText, Users, Settings, Hammer, Package, ClipboardList, BarChart3 } from 'lucide-react';
 
 const NAV_ITEMS = [

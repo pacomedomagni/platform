@@ -15,6 +15,8 @@ enum StockConsumptionStrategy {
 model Tenant {
   id                       String                   @id @default(uuid())
   name                     String
+  businessName             String?                  // Display name for storefront
+  email                    String?                  // Contact/support email
   domain                   String?                  @unique
   isActive                 Boolean                  @default(true)
   baseCurrency             String                   @default("USD")

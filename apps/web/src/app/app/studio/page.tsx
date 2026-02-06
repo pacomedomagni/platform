@@ -1,5 +1,5 @@
 'use client';
-import { Studio, DocTypeDefinition, Card, Button } from '@noslag/ui';
+import { Studio, DocTypeDefinition, Card, Button } from '@platform/ui';
 import { useState, useEffect } from 'react';
 import api from '../../../lib/api';
 

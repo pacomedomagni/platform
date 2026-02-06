@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Badge, Button, Card, Input, NativeSelect, Spinner } from '@noslag/ui';
+import { Badge, Button, Card, Input, NativeSelect, Spinner } from '@platform/ui';
 import { Filter, SlidersHorizontal, AlertCircle } from 'lucide-react';
 import { SectionHeader } from '../_components/section-header';
 import { ProductCard } from '../_components/product-card';
@@ -34,12 +34,12 @@ export default function ProductsPage() {
       try {
         const data = await productsApi.list({
           search: searchQuery || undefined,
-          category: selectedCategory !== 'all' ? selectedCategory : undefined,
+          categorySlug: selectedCategory !== 'all' ? selectedCategory : undefined,
           limit: 50,
         });
         
         // Sort products locally
-        let sortedProducts = [...data.products];
+        let sortedProducts = [...data.items];
         switch (sortBy) {
           case 'price-asc':
             sortedProducts.sort((a, b) => a.price - b.price);
@@ -49,7 +49,7 @@ export default function ProductsPage() {
             break;
           case 'newest':
             sortedProducts.sort((a, b) => 
-              new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+              new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
             );
             break;
           case 'featured':
@@ -75,9 +75,11 @@ export default function ProductsPage() {
   // Map API product to ProductCard expected format
   const mapProductForCard = (product: StoreProduct) => ({
     id: product.id,
-    name: product.name,
+    name: product.name || product.displayName,
     slug: product.slug,
-    category: product.category || 'Uncategorized',
+    category: typeof product.category === 'string' 
+      ? product.category 
+      : product.category?.name || 'Uncategorized',
     price: product.price,
     compareAt: product.compareAtPrice || undefined,
     rating: 4.5, // Default rating - would come from reviews in a full implementation
@@ -88,7 +90,7 @@ export default function ProductsPage() {
         ? 'New Arrival' as const 
         : undefined,
     description: product.shortDescription || product.description?.substring(0, 100) || '',
-    stockStatus: product.trackInventory && product.quantity === 0 
+    stockStatus: (product.trackInventory && (product.quantity ?? product.stockQuantity) === 0)
       ? 'Low Stock' as const
       : 'In Stock' as const,
     leadTime: '2-4 days',
