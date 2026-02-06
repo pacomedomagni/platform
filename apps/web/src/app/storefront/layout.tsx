@@ -4,6 +4,7 @@ import { Button, Input } from '@platform/ui';
 import { Search, User } from 'lucide-react';
 import { StoreProviders } from './_components/store-providers';
 import { CartIcon } from './_components/cart-icon';
+import { CurrencySwitcher } from './_components/currency-switcher';
 
 export const metadata: Metadata = {
   title: {
@@ -87,6 +88,7 @@ export default function StorefrontLayout({ children }: { children: React.ReactNo
                   placeholder="Search products"
                 />
               </div>
+              <CurrencySwitcher />
               <Link href="/storefront/account" className="hidden items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900 sm:flex">
                 <User className="h-4 w-4" />
                 Account
