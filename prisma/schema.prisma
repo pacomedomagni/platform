@@ -83,6 +83,13 @@ model Tenant {
   // Theme system
   storeThemes StoreTheme[]
 
+  // Marketplace integrations
+  marketplaceConnections     MarketplaceConnection[]
+  marketplaceListings        MarketplaceListing[]
+  marketplaceOrders          MarketplaceOrder[]
+  marketplaceActiveListings  MarketplaceActiveListing[]
+  marketplaceSyncLogs        MarketplaceSyncLog[]
+
   @@map("tenants")
 }
 
@@ -97,6 +104,10 @@ model User {
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   roles String[] @default(["user"])
+
+  // Marketplace listing approvals
+  approvedMarketplaceListings MarketplaceListing[] @relation("MarketplaceListingApprover")
+  rejectedMarketplaceListings MarketplaceListing[] @relation("MarketplaceListingRejecter")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -228,6 +239,7 @@ model Warehouse {
   stockFifoLayers       StockFifoLayer[]
   stockLedgerEntries    StockLedgerEntry[]
   serials               Serial[]
+  marketplaceListings   MarketplaceListing[]
 
   @@unique([tenantId, code])
   @@unique([tenantId, name])
@@ -1086,6 +1098,7 @@ model ProductListing {
   wishlistItems  WishlistItem[]
   priceOverrides ProductPriceOverride[]
   translations   ProductTranslation[]
+  marketplaceListings MarketplaceListing[]
 
   @@unique([tenantId, slug])
   @@unique([tenantId, itemId])
@@ -1391,6 +1404,7 @@ model Order {
   giftCardsUsed      GiftCardTransaction[]
   giftCardsGenerated GiftCard[]            @relation("GiftCardSource")
   shipments          Shipment[]
+  marketplaceOrder   MarketplaceOrder?
 
   @@unique([tenantId, orderNumber])
   @@index([tenantId, customerId])
@@ -2314,4 +2328,292 @@ model StoreTheme {
   @@index([tenantId, isActive])
   @@index([tenantId, isPreset])
   @@map("store_themes")
+}
+
+// ==================== MARKETPLACE INTEGRATIONS ====================
+
+// Marketplace Connection - Each tenant can have multiple eBay/Amazon/etc stores
+model MarketplaceConnection {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Connection details
+  platform    String // "EBAY", "AMAZON", "ETSY", etc.
+  name        String // User-friendly name: "Main eBay Store", "Clearance Store"
+  description String?
+
+  // OAuth Tokens (encrypted)
+  refreshToken      String?
+  accessToken       String?
+  accessTokenExpiry DateTime?
+
+  // Platform-specific configuration (JSON)
+  platformConfig Json @default("{}")
+
+  // eBay-specific fields
+  marketplaceId String? // EBAY_US, EBAY_UK, EBAY_DE
+  siteId        Int?
+
+  // Business Policies (fetched during OAuth)
+  fulfillmentPolicyId String?
+  paymentPolicyId     String?
+  returnPolicyId      String?
+
+  // Inventory Location
+  locationKey String?
+
+  // Status
+  isActive    Boolean @default(true)
+  isConnected Boolean @default(false)
+  isDefault   Boolean @default(false)
+
+  // Sync settings
+  autoSyncInventory Boolean @default(true)
+  autoSyncOrders    Boolean @default(true)
+  lastSyncAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  listings       MarketplaceListing[]
+  orders         MarketplaceOrder[]
+  syncLogs       MarketplaceSyncLog[]
+  activeListings MarketplaceActiveListing[]
+
+  @@unique([tenantId, platform, name])
+  @@index([tenantId, platform])
+  @@index([tenantId, isActive])
+  @@map("marketplace_connections")
+}
+
+// Marketplace Listing - Links NoSlag products to eBay/Amazon listings
+model MarketplaceListing {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Connection
+  connectionId String
+  connection   MarketplaceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  // Link to NoSlag product
+  productListingId String
+  productListing   ProductListing @relation(fields: [productListingId], references: [id], onDelete: Cascade)
+
+  // Optional: Link to specific warehouse for this listing
+  warehouseId String?
+  warehouse   Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
+
+  // Platform identifiers
+  externalOfferId   String? @unique // eBay offer ID, Amazon ASIN, etc.
+  externalListingId String? @unique // Published listing ID
+  externalItemId    String?
+  sku               String // SKU used on platform (may differ from productListing)
+
+  // Listing details (snapshot at time of listing)
+  title       String
+  description String
+  price       Decimal @db.Decimal(18, 2)
+  quantity    Int
+  condition   String
+  categoryId  String
+
+  // Platform-specific fields (JSON)
+  platformData Json @default("{}")
+
+  // Photos (JSON array)
+  photos Json @default("[]")
+
+  // Item Specifics (JSON)
+  itemSpecifics Json?
+
+  // Package details
+  packageType     String?
+  weightValue     Decimal? @db.Decimal(18, 4)
+  weightUnit      String?
+  dimensionLength Decimal? @db.Decimal(18, 4)
+  dimensionWidth  Decimal? @db.Decimal(18, 4)
+  dimensionHeight Decimal? @db.Decimal(18, 4)
+  dimensionUnit   String?
+
+  // Policies (can override connection defaults)
+  fulfillmentPolicyId String?
+  paymentPolicyId     String?
+  returnPolicyId      String?
+
+  // Status
+  status       String // draft, pending_approval, approved, publishing, published, ended, error
+  syncStatus   String @default("pending") // synced, pending, error
+  errorMessage String?
+
+  // Workflow
+  approvedById    String?
+  approvedBy      User?     @relation("MarketplaceListingApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt      DateTime?
+  rejectedById    String?
+  rejectedBy      User?     @relation("MarketplaceListingRejecter", fields: [rejectedById], references: [id], onDelete: SetNull)
+  rejectedAt      DateTime?
+  rejectionReason String?
+
+  // Platform payloads (for debugging)
+  inventoryItemPayload Json?
+  offerPayload         Json?
+  publishResult        Json?
+
+  // Dates
+  publishedAt DateTime?
+  endedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([connectionId, productListingId])
+  @@unique([connectionId, sku])
+  @@index([tenantId, status])
+  @@index([connectionId])
+  @@index([productListingId])
+  @@index([externalListingId])
+  @@map("marketplace_listings")
+}
+
+// Active Listings - Synced from marketplace (read-only mirror)
+model MarketplaceActiveListing {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  connectionId String
+  connection   MarketplaceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  // Platform IDs
+  externalListingId String @unique
+  externalItemId    String?
+  sku               String
+
+  // Basic info
+  title        String
+  currentPrice Decimal @db.Decimal(18, 2)
+  currency     String  @default("USD")
+
+  // Inventory
+  quantityAvailable Int
+  quantitySold      Int @default(0)
+
+  // Metrics
+  watchCount Int @default(0)
+  viewCount  Int @default(0)
+
+  // Status
+  status String // ACTIVE, ENDED, OUT_OF_STOCK
+
+  // Dates
+  startTime DateTime
+  endTime   DateTime?
+
+  // Links
+  viewItemUrl String?
+  categoryId  String
+
+  // Sync
+  lastSyncedAt DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([tenantId, connectionId])
+  @@index([connectionId, status])
+  @@index([sku])
+  @@map("marketplace_active_listings")
+}
+
+// Marketplace Order - Platform orders synced to NoSlag
+model MarketplaceOrder {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  connectionId String
+  connection   MarketplaceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  // Link to NoSlag order (created after sync)
+  orderId String? @unique
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  // Platform identifiers
+  externalOrderId String @unique
+
+  // Buyer info
+  buyerUsername String
+  buyerEmail    String?
+
+  // Shipping address
+  shippingName       String
+  shippingStreet1    String
+  shippingStreet2    String?
+  shippingCity       String
+  shippingState      String?
+  shippingPostalCode String
+  shippingCountry    String
+
+  // Financial
+  subtotal     Decimal @db.Decimal(18, 2)
+  shippingCost Decimal @db.Decimal(18, 2)
+  taxAmount    Decimal @db.Decimal(18, 2)
+  total        Decimal @db.Decimal(18, 2)
+  currency     String  @default("USD")
+
+  // Status
+  externalStatus    String // Platform's status
+  paymentStatus     String
+  fulfillmentStatus String @default("NOT_STARTED")
+
+  // Dates
+  orderDate   DateTime
+  paymentDate DateTime?
+
+  // Sync status
+  syncStatus      String    @default("pending") // synced, pending, error
+  syncedToOrderAt DateTime?
+  errorMessage    String?
+
+  // Items (JSON array - will be normalized to Order → OrderItem)
+  itemsData Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, connectionId])
+  @@index([connectionId, syncStatus])
+  @@index([externalOrderId])
+  @@map("marketplace_orders")
+}
+
+// Sync Logs - Track all sync operations
+model MarketplaceSyncLog {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  connectionId String
+  connection   MarketplaceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  syncType  String // inventory_sync, order_sync, listing_sync
+  direction String // to_marketplace, from_marketplace, bidirectional
+
+  status       String // success, partial, failed
+  itemsTotal   Int    @default(0)
+  itemsSuccess Int    @default(0)
+  itemsFailed  Int    @default(0)
+
+  details      String? // Summary message
+  errorMessage String?
+  metadata     Json? // Detailed info
+
+  startedAt   DateTime @default(now())
+  completedAt DateTime?
+
+  @@index([tenantId, connectionId])
+  @@index([syncType, status])
+  @@map("marketplace_sync_logs")
 }

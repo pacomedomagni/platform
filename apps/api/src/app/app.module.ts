@@ -19,6 +19,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { OperationsModule } from './operations/operations.module';
 import { InventoryManagementModule } from './inventory-management/inventory-management.module';
 import { CurrencyModule } from './currency/currency.module';
+import { MarketplaceIntegrationsModule } from './marketplace-integrations/marketplace-integrations.module';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { SentryInterceptor } from './sentry/sentry.interceptor';
 import { EmailWorker } from './workers/email.worker';
@@ -59,6 +60,7 @@ import { EmailWorker } from './workers/email.worker';
     OperationsModule,
     InventoryManagementModule,
     CurrencyModule,
+    MarketplaceIntegrationsModule,
   ],
   controllers: [AppController, InventoryController, ReportsController],
   providers: [
