@@ -1,15 +1,71 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { Metadata } from 'next';
 import { Badge, Card } from '@platform/ui';
 import { Check, ShieldCheck, Truck } from 'lucide-react';
 import { products } from '../../_data/products';
 import { formatCurrency } from '../../_lib/format';
 import { ProductCard } from '../../_components/product-card';
 import { ButtonLink } from '../../_components/button-link';
+import {
+  generateProductSchema,
+  generateBreadcrumbSchema,
+  serializeJsonLd,
+} from '@/lib/seo/schema';
 
 type ProductPageProps = {
   params: { slug: string };
 };
+
+// Base URL for canonical URLs and schemas
+const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://storefront.example.com';
+
+/**
+ * Generate dynamic metadata for product pages
+ * Improves SEO with product-specific titles, descriptions, and OpenGraph data
+ */
+export async function generateMetadata({ params }: ProductPageProps): Promise<Metadata> {
+  const product = products.find((item) => item.slug === params.slug);
+
+  if (!product) {
+    return {
+      title: 'Product Not Found',
+    };
+  }
+
+  const productUrl = `${BASE_URL}/storefront/products/${product.slug}`;
+  const imageUrl = `${BASE_URL}/og-product-${product.slug}.png`; // Placeholder for actual product image
+
+  return {
+    title: `${product.name} - ${product.category}`,
+    description: product.description,
+    keywords: [product.name, product.category, 'inventory management', 'erp', 'b2b'],
+    alternates: {
+      canonical: productUrl,
+    },
+    openGraph: {
+      title: product.name,
+      description: product.description,
+      type: 'product',
+      url: productUrl,
+      images: [
+        {
+          url: imageUrl,
+          width: 1200,
+          height: 630,
+          alt: product.name,
+        },
+      ],
+      siteName: 'NoSlag Storefront',
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: product.name,
+      description: product.description,
+      images: [imageUrl],
+    },
+  };
+}
 
 export default function ProductPage({ params }: ProductPageProps) {
   const product = products.find((item) => item.slug === params.slug);
@@ -20,15 +76,48 @@ export default function ProductPage({ params }: ProductPageProps) {
 
   const related = products.filter((item) => item.category === product.category && item.id !== product.id).slice(0, 3);
 
+  // Generate JSON-LD schemas for SEO
+  const productUrl = `${BASE_URL}/storefront/products/${product.slug}`;
+  const imageUrl = `${BASE_URL}/og-product-${product.slug}.png`;
+
+  const productSchema = generateProductSchema({
+    name: product.name,
+    description: product.description,
+    image: imageUrl,
+    price: product.price,
+    currency: 'USD',
+    availability: product.stockStatus === 'In Stock' ? 'InStock' : 'OutOfStock',
+    sku: product.id,
+    url: productUrl,
+  });
+
+  const breadcrumbSchema = generateBreadcrumbSchema([
+    { name: 'Home', url: `${BASE_URL}/storefront` },
+    { name: 'Products', url: `${BASE_URL}/storefront/products` },
+    { name: product.name, url: productUrl },
+  ]);
+
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-12 px-6 py-12">
-      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-        <Link href="/storefront" className="hover:text-slate-900">Storefront</Link>
-        <span>/</span>
-        <Link href="/storefront/products" className="hover:text-slate-900">Products</Link>
-        <span>/</span>
-        <span className="text-slate-700">{product.name}</span>
-      </div>
+    <>
+      {/* JSON-LD structured data for Product */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(productSchema) }}
+      />
+      {/* JSON-LD structured data for Breadcrumb */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(breadcrumbSchema) }}
+      />
+
+      <div className="mx-auto w-full max-w-7xl space-y-12 px-6 py-12">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+          <Link href="/storefront" className="hover:text-slate-900">Storefront</Link>
+          <span>/</span>
+          <Link href="/storefront/products" className="hover:text-slate-900">Products</Link>
+          <span>/</span>
+          <span className="text-slate-700">{product.name}</span>
+        </div>
 
       <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr]">
         <Card className="overflow-hidden border-slate-200/70 bg-white p-6 shadow-sm">
@@ -125,6 +214,7 @@ export default function ProductPage({ params }: ProductPageProps) {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }

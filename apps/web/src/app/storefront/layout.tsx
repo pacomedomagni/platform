@@ -5,6 +5,7 @@ import { Search, User } from 'lucide-react';
 import { StoreProviders } from './_components/store-providers';
 import { CartIcon } from './_components/cart-icon';
 import { CurrencySwitcher } from './_components/currency-switcher';
+import { generateOrganizationSchema, serializeJsonLd } from '@/lib/seo/schema';
 
 export const metadata: Metadata = {
   title: {
@@ -56,9 +57,29 @@ const navLinks = [
   { label: 'Support', href: '/storefront#support' },
 ];
 
+const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://storefront.example.com';
+
+// Generate Organization JSON-LD schema for brand identity
+const organizationSchema = generateOrganizationSchema({
+  name: 'NoSlag',
+  url: BASE_URL,
+  logo: `${BASE_URL}/logo.png`,
+  description: 'Premium commerce experiences with ERP-grade control, inventory intelligence, and modern operations tooling.',
+  contactEmail: 'sales@noslag.com',
+  sameAs: [
+    'https://twitter.com/noslag',
+    'https://linkedin.com/company/noslag',
+  ],
+});
+
 export default function StorefrontLayout({ children }: { children: React.ReactNode }) {
   return (
     <StoreProviders>
+      {/* JSON-LD structured data for Organization */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: serializeJsonLd(organizationSchema) }}
+      />
       <div className="min-h-screen bg-slate-50 text-slate-900">
         <header className="sticky top-0 z-30 border-b border-slate-200/70 bg-white/80 backdrop-blur">
           <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-6">

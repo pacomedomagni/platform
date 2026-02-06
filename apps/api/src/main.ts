@@ -12,7 +12,39 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app/app.module';
 import { SentryExceptionFilter } from './app/sentry/sentry.filter';
 
+/**
+ * Validate required environment variables
+ * Exits with error code 1 if any required variables are missing
+ */
+function validateEnvironment(): void {
+  const required = [
+    'DATABASE_URL',
+    'REDIS_HOST',
+    'REDIS_PORT',
+    'KEYCLOAK_ISSUER',
+    'KEYCLOAK_JWKS_URI',
+  ];
+
+  const missing = required.filter((key) => !process.env[key]);
+
+  if (missing.length > 0) {
+    Logger.error(
+      `❌ Missing required environment variables: ${missing.join(', ')}`,
+      'Bootstrap'
+    );
+    Logger.error(
+      '💡 Tip: Copy .env.example to .env and fill in the values',
+      'Bootstrap'
+    );
+    process.exit(1);
+  }
+
+  Logger.log('✅ Environment validation passed', 'Bootstrap');
+}
+
 async function bootstrap() {
+  // Validate environment variables before starting the application
+  validateEnvironment();
   const app = await NestFactory.create(AppModule, {
     // Enable raw body for webhooks (Stripe)
     rawBody: true,
