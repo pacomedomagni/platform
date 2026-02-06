@@ -22,7 +22,7 @@ const TooltipContent = React.forwardRef<
     {...props}
   />
 ));
-TooltipContent.displayName = TooltipPrimitive.Content.displayName;
+TooltipContent.displayName = "TooltipContent";
 
 // Simple tooltip wrapper for convenience
 const SimpleTooltip = ({

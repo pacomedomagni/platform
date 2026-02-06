@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState, useEffect } from 'react';
 import { DocFieldDefinition, DocTypeDefinition } from './types';
 import { Button, Input } from './atoms';

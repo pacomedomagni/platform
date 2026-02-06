@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState } from 'react';
 import { DocTypeDefinition, DocFieldDefinition } from './types';
 import { Button, Input, Card, Badge, NativeSelect, Label, Textarea } from './atoms';

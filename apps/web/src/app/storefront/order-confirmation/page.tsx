@@ -4,15 +4,15 @@
  */
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Card, Badge } from '@platform/ui';
+import { Card, Badge, Spinner } from '@platform/ui';
 import { CheckCircle, Package, Truck, Mail, ArrowRight } from 'lucide-react';
 import { ordersApi, OrderDetail } from '../../../lib/store-api';
 import { formatCurrency } from '../_lib/format';
 
-export default function OrderConfirmationPage() {
+function OrderConfirmationContent() {
   const searchParams = useSearchParams();
   const orderId = searchParams.get('order_id');
   // const paymentIntent = searchParams.get('payment_intent');
@@ -191,5 +191,22 @@ export default function OrderConfirmationPage() {
         </Link>
       </div>
     </div>
+  );
+}
+
+// Wrapper with Suspense boundary for useSearchParams
+export default function OrderConfirmationPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="mx-auto w-full max-w-3xl px-6 py-20">
+          <div className="flex items-center justify-center">
+            <Spinner className="h-8 w-8 text-blue-600" />
+          </div>
+        </div>
+      }
+    >
+      <OrderConfirmationContent />
+    </Suspense>
   );
 }

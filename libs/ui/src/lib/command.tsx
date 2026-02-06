@@ -16,7 +16,7 @@ export const Command = React.forwardRef<
     {...props}
   />
 ))
-Command.displayName = CommandPrimitive.displayName
+Command.displayName = "Command"
 
 export const CommandDialog = ({
   children,
@@ -51,7 +51,7 @@ export const CommandInput = React.forwardRef<
     />
   </div>
 ))
-CommandInput.displayName = CommandPrimitive.Input.displayName
+CommandInput.displayName = "CommandInput"
 
 export const CommandList = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive.List>,
@@ -63,7 +63,7 @@ export const CommandList = React.forwardRef<
     {...props}
   />
 ))
-CommandList.displayName = CommandPrimitive.List.displayName
+CommandList.displayName = "CommandList"
 
 export const CommandEmpty = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive.Empty>,
@@ -75,7 +75,7 @@ export const CommandEmpty = React.forwardRef<
     {...props}
   />
 ))
-CommandEmpty.displayName = CommandPrimitive.Empty.displayName
+CommandEmpty.displayName = "CommandEmpty"
 
 export const CommandGroup = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive.Group>,
@@ -90,7 +90,7 @@ export const CommandGroup = React.forwardRef<
     {...props}
   />
 ))
-CommandGroup.displayName = CommandPrimitive.Group.displayName
+CommandGroup.displayName = "CommandGroup"
 
 export const CommandItem = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive.Item>,
@@ -105,7 +105,7 @@ export const CommandItem = React.forwardRef<
     {...props}
   />
 ))
-CommandItem.displayName = CommandPrimitive.Item.displayName
+CommandItem.displayName = "CommandItem"
 
 export const CommandSeparator = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive.Separator>,
@@ -117,4 +117,4 @@ export const CommandSeparator = React.forwardRef<
     {...props}
   />
 ))
-CommandSeparator.displayName = CommandPrimitive.Separator.displayName
+CommandSeparator.displayName = "CommandSeparator"

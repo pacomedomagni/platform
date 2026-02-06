@@ -1,3 +1,5 @@
+'use client';
+
 import React, { useState } from 'react';
 import { DocFieldDefinition } from './types';
 import { Input, Label, Textarea, NativeSelect } from './atoms';
