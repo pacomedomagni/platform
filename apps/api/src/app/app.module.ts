@@ -15,6 +15,8 @@ import { HealthModule } from './health/health.module';
 import { ProvisioningModule } from './provisioning/provisioning.module';
 import { StorefrontModule } from './storefront/storefront.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { AnalyticsModule } from './analytics/analytics.module';
+import { OperationsModule } from './operations/operations.module';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { SentryInterceptor } from './sentry/sentry.interceptor';
 
@@ -50,6 +52,8 @@ import { SentryInterceptor } from './sentry/sentry.interceptor';
     ProvisioningModule,
     StorefrontModule,
     DashboardModule,
+    AnalyticsModule,
+    OperationsModule,
   ],
   controllers: [AppController, InventoryController, ReportsController],
   providers: [
