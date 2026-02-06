@@ -8,12 +8,16 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Card } from '@platform/ui';
-import { User, Package, MapPin, LogOut, ChevronRight } from 'lucide-react';
+import { User, Package, MapPin, LogOut, ChevronRight, Play } from 'lucide-react';
 import { useAuthStore } from '../../../lib/auth-store';
+import { EmailVerificationBanner } from './_components/email-verification-banner';
+import { OnboardingChecklist } from '../../../components/onboarding/onboarding-checklist';
+import { useOnboardingStore } from '../../../lib/onboarding-store';
 
 export default function AccountPage() {
   const router = useRouter();
   const { customer, isAuthenticated, isLoading, logout } = useAuthStore();
+  const { resetTour } = useOnboardingStore();
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -76,6 +80,14 @@ export default function AccountPage() {
         </button>
       </div>
 
+      {/* Email Verification Banner */}
+      {!customer.emailVerified && (
+        <EmailVerificationBanner email={customer.email} />
+      )}
+
+      {/* Onboarding Checklist */}
+      <OnboardingChecklist />
+
       {/* Profile Card */}
       <Card className="border-slate-200/70 bg-white p-6 shadow-sm">
         <div className="flex items-center gap-4">
@@ -131,6 +143,27 @@ export default function AccountPage() {
           View Orders
         </Link>
       </div>
+
+      {/* Show Tour Again Option */}
+      <Card className="border-slate-200/70 bg-gradient-to-r from-blue-50 to-indigo-50 p-5 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+              <Play className="h-4 w-4 text-blue-600" />
+              Product Tour
+            </h3>
+            <p className="text-sm text-slate-600 mt-1">
+              Need a refresher? Take the interactive tour again
+            </p>
+          </div>
+          <button
+            onClick={() => resetTour()}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm"
+          >
+            Start Tour
+          </button>
+        </div>
+      </Card>
     </div>
   );
 }

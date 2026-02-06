@@ -1,4 +1,4 @@
-import { Injectable, Inject, OnModuleInit, Logger } from '@nestjs/common';
+import { Injectable, Inject, OnModuleInit, Logger, Optional } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
 import { Transporter } from 'nodemailer';
 import {
@@ -10,6 +10,7 @@ import {
   NotificationType,
 } from './email.types';
 import { EmailTemplateService } from './template.service';
+import type { QueueService } from '@platform/queue';
 
 @Injectable()
 export class EmailService implements OnModuleInit {
@@ -19,6 +20,7 @@ export class EmailService implements OnModuleInit {
   constructor(
     @Inject(EMAIL_MODULE_OPTIONS) private readonly options: EmailModuleOptions,
     private readonly templateService: EmailTemplateService,
+    @Optional() @Inject('QueueService') private readonly queueService?: QueueService,
   ) {
     this.transporter = nodemailer.createTransport(options.smtp);
   }
@@ -450,6 +452,36 @@ export class EmailService implements OnModuleInit {
       `,
     });
 
+    // Store Email Verification
+    this.templateService.compileTemplate({
+      name: 'store-email-verification',
+      subject: 'Verify Your Email Address - {{company.name}}',
+      html: `
+        <h2 style="margin: 0 0 20px 0; color: #1e293b;">Verify Your Email Address</h2>
+        <p>Hi {{recipientName}},</p>
+        <p>Thank you for creating an account with {{company.name}}! Please verify your email address to activate your account and unlock all features.</p>
+
+        <p style="margin: 30px 0;">
+          <a href="{{actionUrl}}" class="btn">Verify Email Address</a>
+        </p>
+
+        <p style="color: #64748b; font-size: 14px;">
+          This verification link will expire in 24 hours. If you didn't create an account, you can safely ignore this email.
+        </p>
+
+        <div style="background-color: #eff6ff; border-radius: 8px; padding: 12px; margin-top: 24px;">
+          <p style="margin: 0; color: #1e40af; font-size: 13px;">
+            ✓ Verifying your email ensures you can receive important order updates and notifications.
+          </p>
+        </div>
+
+        <p style="color: #64748b; font-size: 12px; margin-top: 24px;">
+          If the button doesn't work, copy and paste this link into your browser:<br>
+          <a href="{{actionUrl}}" style="color: #2563eb; word-break: break-all;">{{actionUrl}}</a>
+        </p>
+      `,
+    });
+
     // Abandoned Cart Recovery
     this.templateService.compileTemplate({
       name: 'store-abandoned-cart',
@@ -493,6 +525,13 @@ export class EmailService implements OnModuleInit {
         <p style="color: #64748b; font-size: 14px;">
           Items in your cart may sell out. Don't miss out!
         </p>
+
+        {{#if unsubscribeUrl}}
+        <p style="color: #94a3b8; font-size: 11px; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 20px;">
+          You received this email because you have an active cart.
+          <a href="{{unsubscribeUrl}}" style="color: #64748b; text-decoration: underline;">Unsubscribe</a> from marketing emails.
+        </p>
+        {{/if}}
       `,
     });
 
@@ -520,6 +559,12 @@ export class EmailService implements OnModuleInit {
         <p style="color: #64748b; text-align: center; font-size: 14px;">
           Hurry! Popular items sell fast.
         </p>
+
+        {{#if unsubscribeUrl}}
+        <p style="color: #94a3b8; font-size: 11px; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 20px; text-align: center;">
+          <a href="{{unsubscribeUrl}}" style="color: #64748b; text-decoration: underline;">Unsubscribe</a> from marketing emails.
+        </p>
+        {{/if}}
       `,
     });
 
@@ -544,12 +589,41 @@ export class EmailService implements OnModuleInit {
         <p style="color: #64748b; text-align: center; font-size: 14px;">
           Your review helps other shoppers and helps us improve.
         </p>
+
+        {{#if unsubscribeUrl}}
+        <p style="color: #94a3b8; font-size: 11px; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 20px; text-align: center;">
+          <a href="{{unsubscribeUrl}}" style="color: #64748b; text-decoration: underline;">Unsubscribe</a> from marketing emails.
+        </p>
+        {{/if}}
       `,
     });
   }
 
   /**
-   * Send an email
+   * Send an email asynchronously via queue (for non-critical emails)
+   */
+  async sendAsync(emailOptions: SendEmailOptions): Promise<{ jobId: string }> {
+    if (!this.queueService) {
+      this.logger.warn('Queue service not available, falling back to synchronous send');
+      await this.send(emailOptions);
+      return { jobId: 'sync-fallback' };
+    }
+
+    try {
+      const job = await this.queueService.sendEmail({
+        emailOptions,
+      });
+      this.logger.debug(`Email queued with job ID: ${job.id}`);
+      return { jobId: job.id || 'unknown' };
+    } catch (error) {
+      this.logger.error('Failed to queue email, falling back to synchronous send', error);
+      await this.send(emailOptions);
+      return { jobId: 'sync-fallback-error' };
+    }
+  }
+
+  /**
+   * Send an email synchronously (for critical emails like password reset, email verification)
    */
   async send(emailOptions: SendEmailOptions): Promise<SendEmailResult> {
     let html = emailOptions.html;
@@ -667,6 +741,8 @@ export class EmailService implements OnModuleInit {
         return 'store-account-welcome';
       case 'store-password-reset':
         return 'store-password-reset';
+      case 'store-email-verification':
+        return 'store-email-verification';
       case 'store-abandoned-cart':
         return 'store-abandoned-cart';
       case 'store-back-in-stock':
@@ -705,6 +781,7 @@ export class EmailService implements OnModuleInit {
       'store-payment-confirmation': 'Payment Confirmed',
       'store-account-welcome': 'Welcome',
       'store-password-reset': 'Reset Password',
+      'store-email-verification': 'Verify Email',
       'store-abandoned-cart': 'Complete Your Order',
       'store-back-in-stock': 'Back in Stock',
       'store-review-request': 'Leave a Review',
@@ -832,6 +909,18 @@ export class EmailService implements OnModuleInit {
     return this.sendNotification({
       ...context,
       type: 'store-password-reset',
+    });
+  }
+
+  /**
+   * Send storefront email verification email
+   */
+  async sendStoreEmailVerification(
+    context: import('./email.types').NotificationEmailContext,
+  ): Promise<SendEmailResult> {
+    return this.sendNotification({
+      ...context,
+      type: 'store-email-verification',
     });
   }
 

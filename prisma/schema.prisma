@@ -59,6 +59,7 @@ model Tenant {
   storeCustomers        StoreCustomer[]
   storeAddresses        StoreAddress[]
   passwordResets        PasswordReset[]
+  emailVerificationTokens EmailVerificationToken[]
   carts                 Cart[]
   cartItems             CartItem[]
   orders                Order[]
@@ -74,6 +75,10 @@ model Tenant {
   giftCards             GiftCard[]
   giftCardTransactions  GiftCardTransaction[]
   wishlists             Wishlist[]
+
+  // Email compliance
+  storeCustomerPreferences StoreCustomerPreferences[]
+  emailBounces          EmailBounce[]
 
   @@map("tenants")
 }
@@ -1114,6 +1119,16 @@ model StoreCustomer {
   // Marketing preferences
   acceptsMarketing Boolean @default(false)
 
+  // Onboarding tracking
+  onboardingCompleted Boolean @default(false)
+  onboardingStep String? // Current step: welcome, profile, tour, incentive, completed
+  profileCompletionScore Int @default(0) // 0-100
+  lastOnboardingInteraction DateTime?
+  hasViewedProductTour Boolean @default(false)
+  hasAddedToCart Boolean @default(false)
+  hasCompletedFirstPurchase Boolean @default(false)
+  hasAddedShippingAddress Boolean @default(false)
+
   lastLoginAt DateTime?
   isActive    Boolean   @default(true)
 
@@ -1124,8 +1139,10 @@ model StoreCustomer {
   orders          Order[]
   addresses       StoreAddress[]
   passwordResets  PasswordReset[]
+  emailVerificationTokens EmailVerificationToken[]
   reviews         ProductReview[]
   wishlists       Wishlist[]
+  emailPreferences StoreCustomerPreferences?
 
   @@unique([tenantId, email])
   @@index([tenantId, isActive])
@@ -1178,6 +1195,23 @@ model PasswordReset {
   @@index([customerId])
   @@index([token])
   @@map("password_resets")
+}
+
+model EmailVerificationToken {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  customerId String
+  customer   StoreCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([customerId])
+  @@index([token])
+  @@map("email_verification_tokens")
 }
 
 model Cart {
@@ -2171,5 +2205,48 @@ model ContentTranslation {
   @@unique([tenantId, contentKey, languageCode])
   @@index([tenantId, languageCode])
   @@map("content_translations")
+}
+
+// ==========================================
+// Email Compliance & Preferences
+// ==========================================
+
+model StoreCustomerPreferences {
+  id String @id @default(uuid())
+  tenantId String
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId String @unique
+  customer StoreCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Email preferences
+  marketing Boolean @default(true)
+  orderUpdates Boolean @default(true)
+  promotions Boolean @default(true)
+  newsletter Boolean @default(true)
+
+  unsubscribedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, customerId])
+  @@index([tenantId])
+  @@map("store_customer_preferences")
+}
+
+model EmailBounce {
+  id String @id @default(uuid())
+  tenantId String
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  email String
+  type String // hard_bounce, soft_bounce, complaint, spam
+  reason String?
+  bouncedAt DateTime @default(now())
+  suppressed Boolean @default(false)
+
+  @@index([tenantId, email])
+  @@index([suppressed])
+  @@index([tenantId, suppressed])
+  @@map("email_bounces")
 }
 

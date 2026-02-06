@@ -97,6 +97,7 @@ export type NotificationType =
   | 'store-payment-confirmation'
   | 'store-account-welcome'
   | 'store-password-reset'
+  | 'store-email-verification'
   | 'store-abandoned-cart'
   | 'store-back-in-stock'
   | 'store-review-request';

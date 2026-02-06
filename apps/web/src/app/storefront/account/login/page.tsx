@@ -3,25 +3,42 @@
  */
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Card, Input, Label, Button } from '@platform/ui';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { Card, Input, Button, Spinner } from '@platform/ui';
+import { loginSchema, type LoginInput } from '@platform/validation';
 import { useAuthStore } from '../../../../lib/auth-store';
+import { FormField } from '@/components/forms';
+import { AlertCircle } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const redirectUrl = searchParams.get('redirect') || '/storefront/account';
   const { login, isLoading, error, clearError } = useAuthStore();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<LoginInput>({
+    resolver: zodResolver(loginSchema),
+    mode: 'onBlur',
+  });
+
+  useEffect(() => {
     clearError();
-    
+  }, [clearError]);
+
+  const onSubmit = async (data: LoginInput) => {
+    clearError();
+
     try {
-      await login(email, password);
-      router.push('/storefront/account');
+      await login(data.email, data.password);
+      router.push(redirectUrl);
     } catch {
       // Error is handled by the store
     }
@@ -29,65 +46,97 @@ export default function LoginPage() {
 
   return (
     <div className="mx-auto w-full max-w-md px-6 py-20">
-      <div className="text-center mb-8">
+      <header className="text-center mb-8">
         <h1 className="text-3xl font-semibold text-slate-900">Welcome back</h1>
         <p className="text-sm text-slate-500 mt-2">Sign in to your account</p>
-      </div>
+      </header>
 
-      <Card className="border-slate-200/70 bg-white p-8 shadow-sm">
-        <form onSubmit={handleSubmit} className="space-y-6">
+      <Card
+        className="border-slate-200/70 bg-white p-8 shadow-sm"
+        role="main"
+        aria-labelledby="login-heading"
+      >
+        <h2 id="login-heading" className="sr-only">
+          Login Form
+        </h2>
+
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6" noValidate>
           {error && (
-            <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600">
-              {error}
+            <div
+              role="alert"
+              aria-live="assertive"
+              className="flex items-start gap-2 rounded-lg bg-red-50 p-3 text-sm text-red-600"
+            >
+              <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" aria-hidden="true" />
+              <span>{error}</span>
             </div>
           )}
 
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
+          <FormField
+            label="Email"
+            htmlFor="email"
+            error={errors.email?.message}
+            required
+          >
             <Input
-              id="email"
               type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
-              required
+              autoComplete="email"
               className="h-11"
+              disabled={isLoading}
+              {...register('email')}
             />
-          </div>
+          </FormField>
 
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="password">Password</Label>
+          <FormField
+            label="Password"
+            htmlFor="password"
+            error={errors.password?.message}
+            required
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-slate-700">Password</span>
               <Link
                 href="/storefront/account/forgot-password"
-                className="text-sm text-blue-600 hover:text-blue-500"
+                className="text-sm text-blue-600 hover:text-blue-500 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded"
+                tabIndex={0}
               >
                 Forgot password?
               </Link>
             </div>
             <Input
-              id="password"
               type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              required
+              autoComplete="current-password"
               className="h-11"
+              disabled={isLoading}
+              {...register('password')}
             />
-          </div>
+          </FormField>
 
           <Button
             type="submit"
-            disabled={isLoading}
-            className="w-full h-11 bg-gradient-to-r from-indigo-600 via-blue-600 to-amber-400 text-white"
+            disabled={isLoading || isSubmitting}
+            className="w-full h-11 bg-gradient-to-r from-indigo-600 via-blue-600 to-amber-400 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            aria-busy={isLoading || isSubmitting}
           >
-            {isLoading ? 'Signing in...' : 'Sign in'}
+            {isLoading || isSubmitting ? (
+              <>
+                <Spinner className="h-4 w-4 mr-2" aria-hidden="true" />
+                <span>Signing in...</span>
+              </>
+            ) : (
+              'Sign in'
+            )}
           </Button>
         </form>
 
         <div className="mt-6 text-center text-sm text-slate-500">
-          Don't have an account?{' '}
-          <Link href="/storefront/account/register" className="text-blue-600 hover:text-blue-500 font-semibold">
+          Don&apos;t have an account?{' '}
+          <Link
+            href="/storefront/account/register"
+            className="text-blue-600 hover:text-blue-500 font-semibold hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded"
+          >
             Create one
           </Link>
         </div>

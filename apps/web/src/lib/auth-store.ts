@@ -88,6 +88,16 @@ export const useAuthStore = create<AuthState>()(
             token: response.token,
             isAuthenticated: true,
           });
+
+          // Initialize onboarding for new customers
+          if (typeof window !== 'undefined') {
+            // Dynamically import to avoid circular dependencies
+            import('./onboarding-store').then(({ useOnboardingStore }) => {
+              const onboardingStore = useOnboardingStore.getState();
+              // Fetch onboarding status which will trigger wizard if needed
+              setTimeout(() => onboardingStore.fetchStatus(), 500);
+            });
+          }
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Registration failed';
           set({ error: message });

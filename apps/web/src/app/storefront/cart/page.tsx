@@ -10,23 +10,23 @@ import { formatCurrency } from '../_lib/format';
 import { ButtonLink } from '../_components/button-link';
 
 export default function CartPage() {
-  const { 
-    items, 
-    itemCount, 
-    subtotal, 
-    shipping, 
-    tax, 
-    discount, 
-    total, 
+  const {
+    items,
+    itemCount,
+    subtotal,
+    shipping,
+    tax,
+    discount,
+    total,
     couponCode,
-    isLoading, 
-    initializeCart, 
-    updateItem, 
+    isLoading,
+    initializeCart,
+    updateItem,
     removeItem,
     applyCoupon,
     removeCoupon,
   } = useCartStore();
-  
+
   const [promoCode, setPromoCode] = useState('');
   const [promoLoading, setPromoLoading] = useState(false);
   const [promoError, setPromoError] = useState<string | null>(null);
@@ -46,10 +46,10 @@ export default function CartPage() {
 
   const handleApplyCoupon = async () => {
     if (!promoCode.trim()) return;
-    
+
     setPromoLoading(true);
     setPromoError(null);
-    
+
     try {
       await applyCoupon(promoCode);
       setPromoCode('');
@@ -62,8 +62,12 @@ export default function CartPage() {
 
   if (isLoading) {
     return (
-      <div className="mx-auto w-full max-w-7xl flex items-center justify-center py-32 px-6">
-        <Spinner className="h-8 w-8" />
+      <div
+        className="mx-auto w-full max-w-7xl flex items-center justify-center py-32 px-6"
+        role="status"
+        aria-live="polite"
+      >
+        <Spinner className="h-8 w-8" aria-hidden="true" />
         <span className="ml-3 text-slate-600">Loading cart...</span>
       </div>
     );
@@ -72,13 +76,16 @@ export default function CartPage() {
   if (items.length === 0) {
     return (
       <div className="mx-auto w-full max-w-7xl space-y-10 px-6 py-12">
-        <Card className="flex flex-col items-center justify-center p-16 text-center">
-          <ShoppingBag className="h-16 w-16 text-slate-300 mb-6" />
-          <h2 className="text-2xl font-semibold text-slate-900 mb-2">Your cart is empty</h2>
+        <Card
+          className="flex flex-col items-center justify-center p-16 text-center"
+          role="status"
+        >
+          <ShoppingBag className="h-16 w-16 text-slate-300 mb-6" aria-hidden="true" />
+          <h1 className="text-2xl font-semibold text-slate-900 mb-2">Your cart is empty</h1>
           <p className="text-slate-500 mb-6">Looks like you haven&apos;t added any items to your cart yet.</p>
           <ButtonLink
             href="/storefront/products"
-            className="bg-gradient-to-r from-indigo-600 via-blue-600 to-amber-400 text-white shadow-md hover:shadow-lg"
+            className="bg-gradient-to-r from-indigo-600 via-blue-600 to-amber-400 text-white shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
           >
             Start Shopping
           </ButtonLink>
@@ -89,168 +96,216 @@ export default function CartPage() {
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-10 px-6 py-12">
-      <div className="flex items-center justify-between">
+      <header className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-semibold text-slate-900">Your cart</h1>
           <p className="text-sm text-slate-500">Review your items and proceed to checkout.</p>
         </div>
-        <Badge variant="outline" className="bg-white text-slate-600">
+        <Badge
+          variant="outline"
+          className="bg-white text-slate-600"
+          aria-label={`${itemCount} ${itemCount === 1 ? 'item' : 'items'} in cart`}
+        >
           {itemCount} {itemCount === 1 ? 'item' : 'items'}
         </Badge>
-      </div>
+      </header>
 
       <div className="grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
-        <div className="space-y-4">
-          {items.map((item) => (
-            <Card key={item.id} className="flex flex-col gap-4 border-slate-200/70 bg-white p-5 shadow-sm sm:flex-row sm:items-center">
-              <div className="h-24 w-32 rounded-xl bg-gradient-to-br from-blue-50 via-slate-50 to-amber-50 flex items-center justify-center overflow-hidden">
-                {item.image ? (
-                  <Image 
-                    src={item.image} 
-                    alt={item.name} 
-                    width={128} 
-                    height={96} 
-                    className="object-cover w-full h-full"
-                  />
-                ) : (
-                  <div className="h-12 w-12 rounded-2xl bg-white/80 shadow-sm flex items-center justify-center text-xs font-semibold text-slate-500">
-                    {item.name.split(' ').map((word) => word[0]).join('').slice(0, 2)}
-                  </div>
-                )}
-              </div>
-              <div className="flex-1 space-y-2">
-                <div className="flex items-center justify-between">
-                  <Link 
-                    href={`/storefront/products/${item.productId}`}
-                    className="text-base font-semibold text-slate-900 hover:text-blue-600"
-                  >
-                    {item.name}
-                  </Link>
-                  <p className="text-base font-semibold text-slate-900">
-                    {formatCurrency(item.price * item.quantity)}
-                  </p>
-                </div>
-                {item.variant && (
-                  <p className="text-sm text-slate-500">{item.variant}</p>
-                )}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4 text-xs text-slate-500">
-                    <span>Qty</span>
-                    <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1">
-                      <button 
-                        className="text-slate-400 hover:text-slate-600 disabled:opacity-50"
-                        onClick={() => handleQuantityChange(item.id, item.quantity - 1)}
-                        disabled={item.quantity <= 1}
-                      >
-                        <Minus className="h-3 w-3" />
-                      </button>
-                      <span className="text-slate-700 min-w-[20px] text-center">{item.quantity}</span>
-                      <button 
-                        className="text-slate-400 hover:text-slate-600"
-                        onClick={() => handleQuantityChange(item.id, item.quantity + 1)}
-                      >
-                        <Plus className="h-3 w-3" />
-                      </button>
+        <main aria-labelledby="cart-items-heading">
+          <h2 id="cart-items-heading" className="sr-only">
+            Shopping Cart Items
+          </h2>
+          <div className="space-y-4" role="list" aria-label="Cart items">
+            {items.map((item) => (
+              <Card
+                key={item.id}
+                className="flex flex-col gap-4 border-slate-200/70 bg-white p-5 shadow-sm sm:flex-row sm:items-center"
+                role="listitem"
+              >
+                <div
+                  className="h-24 w-32 rounded-xl bg-gradient-to-br from-blue-50 via-slate-50 to-amber-50 flex items-center justify-center overflow-hidden"
+                  aria-hidden="true"
+                >
+                  {item.image ? (
+                    <Image
+                      src={item.image}
+                      alt={item.name}
+                      width={128}
+                      height={96}
+                      className="object-cover w-full h-full"
+                    />
+                  ) : (
+                    <div className="h-12 w-12 rounded-2xl bg-white/80 shadow-sm flex items-center justify-center text-xs font-semibold text-slate-500">
+                      {item.name.split(' ').map((word) => word[0]).join('').slice(0, 2)}
                     </div>
-                    <span className="text-slate-400">
-                      {formatCurrency(item.price)} each
-                    </span>
-                  </div>
-                  <button 
-                    className="text-slate-400 hover:text-red-500 p-1"
-                    onClick={() => handleRemoveItem(item.id)}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-            </Card>
-          ))}
-        </div>
-
-        <Card className="h-fit space-y-5 border-slate-200/70 bg-white p-6 shadow-sm">
-          <div className="space-y-2">
-            <h2 className="text-lg font-semibold text-slate-900">Order summary</h2>
-            <p className="text-sm text-slate-500">Shipping calculated by fulfillment region.</p>
-          </div>
-          <div className="space-y-3 text-sm text-slate-600">
-            <div className="flex items-center justify-between">
-              <span>Subtotal</span>
-              <span className="font-semibold text-slate-900">{formatCurrency(subtotal)}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>Shipping</span>
-              <span className="font-semibold text-slate-900">
-                {shipping > 0 ? formatCurrency(shipping) : 'Calculated at checkout'}
-              </span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span>Tax</span>
-              <span className="font-semibold text-slate-900">
-                {tax > 0 ? formatCurrency(tax) : 'Calculated at checkout'}
-              </span>
-            </div>
-            {discount > 0 && (
-              <div className="flex items-center justify-between text-green-600">
-                <span className="flex items-center gap-2">
-                  Discount
-                  {couponCode && (
-                    <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
-                      {couponCode}
-                      <button 
-                        className="ml-1 hover:text-green-900"
-                        onClick={() => removeCoupon()}
-                      >
-                        ×
-                      </button>
-                    </Badge>
                   )}
+                </div>
+                <div className="flex-1 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Link
+                      href={`/storefront/products/${item.productId}`}
+                      className="text-base font-semibold text-slate-900 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded"
+                    >
+                      {item.name}
+                    </Link>
+                    <p className="text-base font-semibold text-slate-900">
+                      {formatCurrency(item.price * item.quantity)}
+                    </p>
+                  </div>
+                  {item.variant && (
+                    <p className="text-sm text-slate-500">{item.variant}</p>
+                  )}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4 text-xs text-slate-500">
+                      <span id={`quantity-label-${item.id}`}>Qty</span>
+                      <div
+                        className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1"
+                        role="group"
+                        aria-labelledby={`quantity-label-${item.id}`}
+                      >
+                        <button
+                          className="text-slate-400 hover:text-slate-600 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded"
+                          onClick={() => handleQuantityChange(item.id, item.quantity - 1)}
+                          disabled={item.quantity <= 1}
+                          aria-label={`Decrease quantity of ${item.name}`}
+                        >
+                          <Minus className="h-3 w-3" aria-hidden="true" />
+                        </button>
+                        <span
+                          className="text-slate-700 min-w-[20px] text-center"
+                          aria-live="polite"
+                          aria-atomic="true"
+                        >
+                          {item.quantity}
+                        </span>
+                        <button
+                          className="text-slate-400 hover:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded"
+                          onClick={() => handleQuantityChange(item.id, item.quantity + 1)}
+                          aria-label={`Increase quantity of ${item.name}`}
+                        >
+                          <Plus className="h-3 w-3" aria-hidden="true" />
+                        </button>
+                      </div>
+                      <span className="text-slate-400">
+                        {formatCurrency(item.price)} each
+                      </span>
+                    </div>
+                    <button
+                      className="text-slate-400 hover:text-red-500 p-1 focus:outline-none focus:ring-2 focus:ring-red-500 rounded"
+                      onClick={() => handleRemoveItem(item.id)}
+                      aria-label={`Remove ${item.name} from cart`}
+                    >
+                      <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </main>
+
+        <aside aria-labelledby="order-summary-heading">
+          <Card className="h-fit space-y-5 border-slate-200/70 bg-white p-6 shadow-sm">
+            <div className="space-y-2">
+              <h2 id="order-summary-heading" className="text-lg font-semibold text-slate-900">
+                Order summary
+              </h2>
+              <p className="text-sm text-slate-500">Shipping calculated by fulfillment region.</p>
+            </div>
+            <div className="space-y-3 text-sm text-slate-600">
+              <div className="flex items-center justify-between">
+                <span>Subtotal</span>
+                <span className="font-semibold text-slate-900">{formatCurrency(subtotal)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Shipping</span>
+                <span className="font-semibold text-slate-900">
+                  {shipping > 0 ? formatCurrency(shipping) : 'Calculated at checkout'}
                 </span>
-                <span className="font-semibold">-{formatCurrency(discount)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Tax</span>
+                <span className="font-semibold text-slate-900">
+                  {tax > 0 ? formatCurrency(tax) : 'Calculated at checkout'}
+                </span>
+              </div>
+              {discount > 0 && (
+                <div className="flex items-center justify-between text-green-600">
+                  <span className="flex items-center gap-2">
+                    Discount
+                    {couponCode && (
+                      <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200">
+                        {couponCode}
+                        <button
+                          className="ml-1 hover:text-green-900 focus:outline-none focus:ring-2 focus:ring-green-500 rounded"
+                          onClick={() => removeCoupon()}
+                          aria-label={`Remove coupon ${couponCode}`}
+                        >
+                          ×
+                        </button>
+                      </Badge>
+                    )}
+                  </span>
+                  <span className="font-semibold">-{formatCurrency(discount)}</span>
+                </div>
+              )}
+              <div className="flex items-center justify-between border-t border-slate-200 pt-3 text-base font-semibold text-slate-900">
+                <span>Total</span>
+                <span>{formatCurrency(total)}</span>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <ButtonLink
+                href="/storefront/checkout"
+                className="w-full bg-gradient-to-r from-indigo-600 via-blue-600 to-amber-400 text-white shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              >
+                Proceed to checkout
+              </ButtonLink>
+              <Link
+                href="/storefront/products"
+                className="block text-center text-sm font-medium text-slate-500 hover:text-slate-700 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded"
+              >
+                Continue shopping
+              </Link>
+            </div>
+            {!couponCode && (
+              <div className="space-y-2">
+                <label
+                  htmlFor="promo-code"
+                  className="text-xs font-semibold text-slate-500 uppercase tracking-[0.2em]"
+                >
+                  Have a code?
+                </label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="promo-code"
+                    className="h-9"
+                    placeholder="Promo code"
+                    value={promoCode}
+                    onChange={(e) => setPromoCode(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleApplyCoupon()}
+                    aria-describedby={promoError ? 'promo-error' : undefined}
+                    aria-invalid={promoError ? 'true' : 'false'}
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleApplyCoupon}
+                    disabled={promoLoading || !promoCode.trim()}
+                    aria-busy={promoLoading}
+                  >
+                    {promoLoading ? <Spinner className="h-4 w-4" aria-hidden="true" /> : 'Apply'}
+                  </Button>
+                </div>
+                {promoError && (
+                  <p id="promo-error" className="text-xs text-red-500" role="alert">
+                    {promoError}
+                  </p>
+                )}
               </div>
             )}
-            <div className="flex items-center justify-between border-t border-slate-200 pt-3 text-base font-semibold text-slate-900">
-              <span>Total</span>
-              <span>{formatCurrency(total)}</span>
-            </div>
-          </div>
-          <div className="space-y-3">
-            <ButtonLink
-              href="/storefront/checkout"
-              className="w-full bg-gradient-to-r from-indigo-600 via-blue-600 to-amber-400 text-white shadow-md hover:shadow-lg"
-            >
-              Proceed to checkout
-            </ButtonLink>
-            <Link href="/storefront/products" className="block text-center text-sm font-medium text-slate-500 hover:text-slate-700">
-              Continue shopping
-            </Link>
-          </div>
-          {!couponCode && (
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-[0.2em]">Have a code?</p>
-              <div className="flex items-center gap-2">
-                <Input 
-                  className="h-9" 
-                  placeholder="Promo code" 
-                  value={promoCode}
-                  onChange={(e) => setPromoCode(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleApplyCoupon()}
-                />
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={handleApplyCoupon}
-                  disabled={promoLoading || !promoCode.trim()}
-                >
-                  {promoLoading ? <Spinner className="h-4 w-4" /> : 'Apply'}
-                </Button>
-              </div>
-              {promoError && (
-                <p className="text-xs text-red-500">{promoError}</p>
-              )}
-            </div>
-          )}
-        </Card>
+          </Card>
+        </aside>
       </div>
     </div>
   );

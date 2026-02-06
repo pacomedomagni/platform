@@ -33,6 +33,7 @@ const EFFECTIVE_JWT_SECRET = JWT_SECRET || 'dev-only-secret-change-in-production
 const JWT_EXPIRES_IN = '7d';
 const SALT_ROUNDS = 12;
 const RESET_TOKEN_EXPIRY = 1 * 60 * 60 * 1000; // 1 hour
+const VERIFICATION_TOKEN_EXPIRY = 24 * 60 * 60 * 1000; // 24 hours
 
 @Injectable()
 export class CustomerAuthService implements OnModuleInit {
@@ -79,10 +80,11 @@ export class CustomerAuthService implements OnModuleInit {
       },
     });
 
-    // TODO: Send verification email
+    // Send verification email (synchronous - critical)
+    await this.sendVerificationEmail(customer.id, tenantId);
 
-    // Send welcome email
-    this.sendWelcomeEmail(customer.id, tenantId);
+    // Send welcome email (async - non-critical)
+    this.sendWelcomeEmailAsync(customer.id, tenantId);
 
     // Generate token
     const accessToken = this.generateToken(customer.id, tenantId);
@@ -275,6 +277,123 @@ export class CustomerAuthService implements OnModuleInit {
   }
 
   /**
+   * Send verification email to customer
+   */
+  async sendVerificationEmail(customerId: string, tenantId: string) {
+    const customer = await this.prisma.storeCustomer.findFirst({
+      where: { id: customerId, tenantId },
+    });
+
+    if (!customer) {
+      throw new NotFoundException('Customer not found');
+    }
+
+    // Check if already verified
+    if (customer.emailVerified) {
+      throw new BadRequestException('Email already verified');
+    }
+
+    // Generate verification token
+    const token = uuidv4();
+    const expiresAt = new Date(Date.now() + VERIFICATION_TOKEN_EXPIRY);
+
+    // Delete any existing verification tokens for this customer
+    await this.prisma.emailVerificationToken.deleteMany({
+      where: { customerId, tenantId },
+    });
+
+    // Create new verification token
+    await this.prisma.emailVerificationToken.create({
+      data: {
+        tenantId,
+        customerId,
+        token,
+        expiresAt,
+      },
+    });
+
+    // Send verification email
+    this.sendEmailVerificationEmail(customerId, tenantId, token);
+
+    return { success: true, message: 'Verification email sent' };
+  }
+
+  /**
+   * Verify customer email with token
+   */
+  async verifyEmail(tenantId: string, token: string) {
+    const verificationRecord = await this.prisma.emailVerificationToken.findFirst({
+      where: {
+        token,
+        tenantId,
+        expiresAt: { gt: new Date() },
+      },
+      include: {
+        customer: true,
+      },
+    });
+
+    if (!verificationRecord) {
+      throw new BadRequestException('Invalid or expired verification token');
+    }
+
+    // Check if already verified
+    if (verificationRecord.customer.emailVerified) {
+      return { success: true, message: 'Email already verified' };
+    }
+
+    // Update customer as verified and delete the token
+    await this.prisma.$transaction([
+      this.prisma.storeCustomer.update({
+        where: { id: verificationRecord.customerId },
+        data: {
+          emailVerified: true,
+          emailVerifiedAt: new Date(),
+        },
+      }),
+      this.prisma.emailVerificationToken.delete({
+        where: { id: verificationRecord.id },
+      }),
+    ]);
+
+    this.logger.log(`Email verified for customer: ${verificationRecord.customer.email}`);
+
+    return { success: true, message: 'Email verified successfully' };
+  }
+
+  /**
+   * Resend verification email
+   */
+  async resendVerificationEmail(tenantId: string, customerId: string) {
+    const customer = await this.prisma.storeCustomer.findFirst({
+      where: { id: customerId, tenantId, isActive: true },
+    });
+
+    if (!customer) {
+      throw new NotFoundException('Customer not found');
+    }
+
+    if (customer.emailVerified) {
+      throw new BadRequestException('Email already verified');
+    }
+
+    // Check for recent verification emails (rate limiting - 1 per 5 minutes)
+    const recentToken = await this.prisma.emailVerificationToken.findFirst({
+      where: {
+        customerId,
+        tenantId,
+        createdAt: { gt: new Date(Date.now() - 5 * 60 * 1000) }, // 5 minutes ago
+      },
+    });
+
+    if (recentToken) {
+      throw new BadRequestException('Please wait 5 minutes before requesting another verification email');
+    }
+
+    return this.sendVerificationEmail(customerId, tenantId);
+  }
+
+  /**
    * Verify JWT token
    */
   async verifyToken(token: string) {
@@ -445,9 +564,9 @@ export class CustomerAuthService implements OnModuleInit {
   }
 
   /**
-   * Send welcome email to new customer
+   * Send welcome email to new customer asynchronously (non-critical)
    */
-  private async sendWelcomeEmail(customerId: string, tenantId: string) {
+  private async sendWelcomeEmailAsync(customerId: string, tenantId: string) {
     if (!this.emailService) {
       this.logger.warn('Email service not available, skipping welcome email');
       return;
@@ -463,21 +582,26 @@ export class CustomerAuthService implements OnModuleInit {
         return;
       }
 
-      await this.emailService.sendStoreWelcome({
-        type: 'store-account-welcome',
-        tenantId,
-        recipientName: `${customer.firstName} ${customer.lastName}`,
-        recipientEmail: customer.email,
-        actionUrl: `${process.env['STORE_URL'] || process.env['FRONTEND_URL']}/storefront/products`,
-        company: {
-          name: customer.tenant.businessName || customer.tenant.name,
-          supportEmail: customer.tenant.email || 'support@example.com',
+      await this.emailService.sendAsync({
+        to: customer.email,
+        template: 'store-account-welcome',
+        subject: '', // Will be set by template
+        context: {
+          type: 'store-account-welcome',
+          tenantId,
+          recipientName: `${customer.firstName} ${customer.lastName}`,
+          recipientEmail: customer.email,
+          actionUrl: `${process.env['STORE_URL'] || process.env['FRONTEND_URL']}/storefront/products`,
+          company: {
+            name: customer.tenant.businessName || customer.tenant.name,
+            supportEmail: customer.tenant.email || 'support@example.com',
+          },
         },
       });
 
-      this.logger.log(`Welcome email sent to: ${customer.email}`);
+      this.logger.log(`Welcome email queued for: ${customer.email}`);
     } catch (error) {
-      this.logger.error(`Failed to send welcome email to customer ${customerId}:`, error);
+      this.logger.error(`Failed to queue welcome email for customer ${customerId}:`, error);
     }
   }
 
@@ -517,6 +641,45 @@ export class CustomerAuthService implements OnModuleInit {
       this.logger.log(`Password reset email sent to: ${customer.email}`);
     } catch (error) {
       this.logger.error(`Failed to send password reset email to customer ${customerId}:`, error);
+    }
+  }
+
+  /**
+   * Send email verification email
+   */
+  private async sendEmailVerificationEmail(customerId: string, tenantId: string, verificationToken: string) {
+    if (!this.emailService) {
+      this.logger.warn('Email service not available, skipping verification email');
+      return;
+    }
+
+    try {
+      const customer = await this.prisma.storeCustomer.findUnique({
+        where: { id: customerId },
+        include: { tenant: true },
+      });
+
+      if (!customer) {
+        return;
+      }
+
+      const verificationUrl = `${process.env['STORE_URL'] || process.env['FRONTEND_URL']}/storefront/account/verify-email?token=${verificationToken}`;
+
+      await this.emailService.sendStoreEmailVerification({
+        type: 'store-email-verification',
+        tenantId,
+        recipientName: `${customer.firstName} ${customer.lastName}`,
+        recipientEmail: customer.email,
+        actionUrl: verificationUrl,
+        company: {
+          name: customer.tenant.businessName || customer.tenant.name,
+          supportEmail: customer.tenant.email || 'support@example.com',
+        },
+      });
+
+      this.logger.log(`Verification email sent to: ${customer.email}`);
+    } catch (error) {
+      this.logger.error(`Failed to send verification email to customer ${customerId}:`, error);
     }
   }
 }

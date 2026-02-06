@@ -31,19 +31,31 @@ export enum QueueName {
 }
 
 export interface EmailJobData {
-  to: string | string[];
-  cc?: string | string[];
-  bcc?: string | string[];
-  subject: string;
-  template: string;
-  context: Record<string, unknown>;
-  attachments?: Array<{
-    filename: string;
-    path?: string;
-    content?: string | Buffer;
-    contentType?: string;
-  }>;
-  tenantId: string;
+  emailOptions: {
+    to: string | string[] | { name?: string; address: string } | { name?: string; address: string }[];
+    cc?: string | string[] | { name?: string; address: string } | { name?: string; address: string }[];
+    bcc?: string | string[] | { name?: string; address: string } | { name?: string; address: string }[];
+    from?: string | { name?: string; address: string };
+    replyTo?: string | { name?: string; address: string };
+    subject: string;
+    text?: string;
+    html?: string;
+    template?: string;
+    context?: Record<string, unknown>;
+    attachments?: Array<{
+      filename: string;
+      content?: string | Buffer;
+      path?: string;
+      contentType?: string;
+      encoding?: string;
+      cid?: string;
+    }>;
+    headers?: Record<string, string>;
+    priority?: 'high' | 'normal' | 'low';
+    messageId?: string;
+    references?: string[];
+    inReplyTo?: string;
+  };
 }
 
 export interface PdfJobData {

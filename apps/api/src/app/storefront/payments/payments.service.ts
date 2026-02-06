@@ -131,16 +131,16 @@ export class PaymentsService {
 
     this.logger.log(`Payment succeeded for order: ${order.orderNumber}`);
 
-    // Send order confirmation email
-    await this.sendOrderConfirmationEmail(order.id);
+    // Send order confirmation email (async - non-critical)
+    this.sendOrderConfirmationEmailAsync(order.id);
 
     // TODO: Reserve inventory
   }
 
   /**
-   * Send order confirmation email
+   * Send order confirmation email asynchronously (non-critical)
    */
-  private async sendOrderConfirmationEmail(orderId: string) {
+  private async sendOrderConfirmationEmailAsync(orderId: string) {
     if (!this.emailService) {
       this.logger.warn('Email service not available, skipping order confirmation email');
       return;
@@ -165,51 +165,56 @@ export class PaymentsService {
         where: { orderId, status: 'CAPTURED' },
       });
 
-      await this.emailService.sendOrderConfirmation({
-        type: 'store-order-confirmation',
-        tenantId: order.tenantId,
-        recipientName: `${order.shippingFirstName} ${order.shippingLastName}`,
-        recipientEmail: order.email,
-        actionUrl: `${process.env['STORE_URL'] || process.env['FRONTEND_URL']}/storefront/account/orders?order=${order.orderNumber}`,
-        company: {
-          name: order.tenant.businessName || order.tenant.name,
-          supportEmail: order.tenant.email || 'support@example.com',
-        },
-        order: {
-          orderNumber: order.orderNumber,
-          status: order.status,
-          items: order.items.map(item => ({
-            name: item.name,
-            sku: item.sku || undefined,
-            quantity: item.quantity,
-            unitPrice: Number(item.unitPrice),
-            totalPrice: Number(item.totalPrice),
-            image: item.imageUrl || undefined,
-          })),
-          subtotal: Number(order.subtotal),
-          shipping: Number(order.shippingTotal),
-          tax: Number(order.taxTotal),
-          discount: Number(order.discountTotal) > 0 ? Number(order.discountTotal) : undefined,
-          total: Number(order.grandTotal),
-          currency: order.currency,
-          shippingAddress: {
-            name: `${order.shippingFirstName} ${order.shippingLastName}`,
-            line1: order.shippingAddressLine1,
-            line2: order.shippingAddressLine2 || undefined,
-            city: order.shippingCity,
-            state: order.shippingState,
-            postalCode: order.shippingPostalCode,
-            country: order.shippingCountry,
+      await this.emailService.sendAsync({
+        to: order.email,
+        template: 'store-order-confirmation',
+        subject: '', // Will be set by template
+        context: {
+          type: 'store-order-confirmation',
+          tenantId: order.tenantId,
+          recipientName: `${order.shippingFirstName} ${order.shippingLastName}`,
+          recipientEmail: order.email,
+          actionUrl: `${process.env['STORE_URL'] || process.env['FRONTEND_URL']}/storefront/account/orders?order=${order.orderNumber}`,
+          company: {
+            name: order.tenant.businessName || order.tenant.name,
+            supportEmail: order.tenant.email || 'support@example.com',
           },
-          paymentMethod: payment?.cardBrand && payment?.cardLast4 
-            ? `${payment.cardBrand.charAt(0).toUpperCase() + payment.cardBrand.slice(1)} •••• ${payment.cardLast4}`
-            : undefined,
+          order: {
+            orderNumber: order.orderNumber,
+            status: order.status,
+            items: order.items.map(item => ({
+              name: item.name,
+              sku: item.sku || undefined,
+              quantity: item.quantity,
+              unitPrice: Number(item.unitPrice),
+              totalPrice: Number(item.totalPrice),
+              image: item.imageUrl || undefined,
+            })),
+            subtotal: Number(order.subtotal),
+            shipping: Number(order.shippingTotal),
+            tax: Number(order.taxTotal),
+            discount: Number(order.discountTotal) > 0 ? Number(order.discountTotal) : undefined,
+            total: Number(order.grandTotal),
+            currency: order.currency,
+            shippingAddress: {
+              name: `${order.shippingFirstName} ${order.shippingLastName}`,
+              line1: order.shippingAddressLine1,
+              line2: order.shippingAddressLine2 || undefined,
+              city: order.shippingCity,
+              state: order.shippingState,
+              postalCode: order.shippingPostalCode,
+              country: order.shippingCountry,
+            },
+            paymentMethod: payment?.cardBrand && payment?.cardLast4
+              ? `${payment.cardBrand.charAt(0).toUpperCase() + payment.cardBrand.slice(1)} •••• ${payment.cardLast4}`
+              : undefined,
+          },
         },
       });
 
-      this.logger.log(`Order confirmation email sent for order: ${order.orderNumber}`);
+      this.logger.log(`Order confirmation email queued for order: ${order.orderNumber}`);
     } catch (error) {
-      this.logger.error(`Failed to send order confirmation email for order ${orderId}:`, error);
+      this.logger.error(`Failed to queue order confirmation email for order ${orderId}:`, error);
     }
   }
 

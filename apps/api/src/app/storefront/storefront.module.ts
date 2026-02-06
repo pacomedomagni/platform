@@ -15,6 +15,11 @@ import { OrdersController } from './orders/orders.controller';
 import { OrdersService } from './orders/orders.service';
 import { EcommerceModule } from './ecommerce/ecommerce.module';
 import { I18nModule } from './i18n/i18n.module';
+import { EmailPreferencesController } from './email/email-preferences.controller';
+import { EmailPreferencesService } from './email/email-preferences.service';
+import { SendGridWebhookController } from './email/sendgrid-webhook.controller';
+import { OnboardingController } from './onboarding/onboarding.controller';
+import { OnboardingService } from './onboarding/onboarding.service';
 
 @Module({
   imports: [
@@ -44,6 +49,9 @@ import { I18nModule } from './i18n/i18n.module';
     CheckoutController,
     PaymentsController,
     OrdersController,
+    EmailPreferencesController,
+    SendGridWebhookController,
+    OnboardingController,
   ],
   providers: [
     ProductsService,
@@ -52,6 +60,8 @@ import { I18nModule } from './i18n/i18n.module';
     PaymentsService,
     StripeService,
     OrdersService,
+    EmailPreferencesService,
+    OnboardingService,
   ],
   exports: [
     CustomerAuthModule,

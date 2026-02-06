@@ -156,6 +156,47 @@ export class CustomerAuthController {
     return this.authService.resetPassword(tenantId, dto.token, dto.password);
   }
 
+  /**
+   * Verify email with token
+   * POST /api/v1/store/auth/verify-email
+   */
+  @Post('verify-email')
+  async verifyEmail(
+    @Headers('x-tenant-id') tenantId: string,
+    @Body() dto: { token: string }
+  ) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID required');
+    }
+    if (!dto.token) {
+      throw new BadRequestException('Verification token required');
+    }
+    return this.authService.verifyEmail(tenantId, dto.token);
+  }
+
+  /**
+   * Resend verification email
+   * POST /api/v1/store/auth/resend-verification
+   */
+  @Post('resend-verification')
+  async resendVerification(
+    @Headers('x-tenant-id') tenantId: string,
+    @Headers('authorization') authHeader: string
+  ) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID required');
+    }
+
+    const token = this.extractToken(authHeader);
+    const payload = await this.authService.verifyToken(token);
+
+    if (payload.tenantId !== tenantId) {
+      throw new UnauthorizedException('Invalid token');
+    }
+
+    return this.authService.resendVerificationEmail(tenantId, payload.customerId);
+  }
+
   // ============ ADDRESS MANAGEMENT ============
 
   /**

@@ -21,6 +21,7 @@ import { InventoryManagementModule } from './inventory-management/inventory-mana
 import { CurrencyModule } from './currency/currency.module';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { SentryInterceptor } from './sentry/sentry.interceptor';
+import { EmailWorker } from './workers/email.worker';
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { SentryInterceptor } from './sentry/sentry.interceptor';
   controllers: [AppController, InventoryController, ReportsController],
   providers: [
     AppService,
+    EmailWorker,
     // Global rate limiting guard
     {
       provide: APP_GUARD,

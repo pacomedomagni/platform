@@ -398,6 +398,19 @@ export const authApi = {
     });
   },
 
+  verifyEmail: (token: string): Promise<{ message: string }> => {
+    return apiFetch('/v1/store/auth/verify-email', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    });
+  },
+
+  resendVerificationEmail: (): Promise<{ message: string }> => {
+    return apiFetch('/v1/store/auth/resend-verification', {
+      method: 'POST',
+    });
+  },
+
   getAddresses: (): Promise<CustomerAddress[]> => {
     return apiFetch('/v1/store/auth/addresses');
   },

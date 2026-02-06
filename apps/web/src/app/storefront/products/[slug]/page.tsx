@@ -7,6 +7,8 @@ import { products } from '../../_data/products';
 import { formatCurrency } from '../../_lib/format';
 import { ProductCard } from '../../_components/product-card';
 import { ButtonLink } from '../../_components/button-link';
+import { ProductReviews } from './_components/product-reviews';
+import { VariantSelector } from './_components/variant-selector';
 import {
   generateProductSchema,
   generateBreadcrumbSchema,
@@ -151,6 +153,13 @@ export default function ProductPage({ params }: ProductPageProps) {
               <span className="text-xs text-slate-500">{product.rating} · {product.reviews} reviews</span>
             </div>
           </div>
+
+          {/* Variant Selector */}
+          <VariantSelector
+            productSlug={product.slug}
+            productId={product.id}
+            basePrice={product.price}
+          />
           <Card className="space-y-4 border-slate-200/70 bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between text-sm">
               <span className="text-slate-600">Availability</span>
@@ -203,6 +212,12 @@ export default function ProductPage({ params }: ProductPageProps) {
           ))}
         </div>
       </Card>
+
+      {/* Product Reviews */}
+      <div className="space-y-4">
+        <h2 className="text-2xl font-semibold text-slate-900">Customer Reviews</h2>
+        <ProductReviews productId={product.id} productSlug={product.slug} />
+      </div>
 
       {related.length > 0 && (
         <div className="space-y-4">
