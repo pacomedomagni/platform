@@ -1,0 +1,350 @@
+-- =================================================================
+-- Phase 2 E-Commerce Features Migration
+-- Adds: Product Variants, Reviews, Gift Cards, Wishlist
+-- =================================================================
+
+-- =================================================================
+-- 1. PRODUCT VARIANTS SYSTEM
+-- =================================================================
+
+-- Attribute Types (e.g., "Color", "Size", "Material")
+CREATE TABLE "item_attribute_types" (
+  "id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenantId" UUID NOT NULL REFERENCES "tenants"("id") ON DELETE CASCADE,
+  "name" VARCHAR(100) NOT NULL,
+  "displayName" VARCHAR(100) NOT NULL,
+  "sortOrder" INT DEFAULT 0,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE("tenantId", "name")
+);
+
+CREATE INDEX "item_attribute_types_tenantId_idx" ON "item_attribute_types"("tenantId");
+
+-- Attribute Values (e.g., "Red", "Blue", "Small", "Large")
+CREATE TABLE "item_attribute_values" (
+  "id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenantId" UUID NOT NULL REFERENCES "tenants"("id") ON DELETE CASCADE,
+  "attributeTypeId" UUID NOT NULL REFERENCES "item_attribute_types"("id") ON DELETE CASCADE,
+  "value" VARCHAR(100) NOT NULL,
+  "displayValue" VARCHAR(100) NOT NULL,
+  "colorHex" VARCHAR(7), -- For color swatches
+  "sortOrder" INT DEFAULT 0,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE("attributeTypeId", "value")
+);
+
+CREATE INDEX "item_attribute_values_tenantId_idx" ON "item_attribute_values"("tenantId");
+CREATE INDEX "item_attribute_values_attributeTypeId_idx" ON "item_attribute_values"("attributeTypeId");
+
+-- Product Variant (specific combination like "Red, Large")
+CREATE TABLE "product_variants" (
+  "id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenantId" UUID NOT NULL REFERENCES "tenants"("id") ON DELETE CASCADE,
+  "productListingId" UUID NOT NULL REFERENCES "product_listings"("id") ON DELETE CASCADE,
+  
+  -- Variant-specific fields
+  "sku" VARCHAR(100),
+  "barcode" VARCHAR(100),
+  "price" DECIMAL(18, 2), -- NULL means use parent price
+  "compareAtPrice" DECIMAL(18, 2),
+  "costPrice" DECIMAL(18, 2),
+  
+  -- Inventory link (optional, for variant-level stock)
+  "itemId" UUID REFERENCES "items"("id") ON DELETE SET NULL,
+  
+  -- Variant image
+  "imageUrl" TEXT,
+  
+  -- Stock tracking at variant level
+  "stockQty" INT DEFAULT 0,
+  "trackInventory" BOOLEAN DEFAULT true,
+  "allowBackorder" BOOLEAN DEFAULT false,
+  
+  -- Status
+  "isActive" BOOLEAN DEFAULT true,
+  "sortOrder" INT DEFAULT 0,
+  
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX "product_variants_tenantId_idx" ON "product_variants"("tenantId");
+CREATE INDEX "product_variants_productListingId_idx" ON "product_variants"("productListingId");
+CREATE UNIQUE INDEX "product_variants_tenantId_sku_key" ON "product_variants"("tenantId", "sku") WHERE "sku" IS NOT NULL;
+
+-- Product Variant Attributes (junction table)
+CREATE TABLE "product_variant_attributes" (
+  "id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "variantId" UUID NOT NULL REFERENCES "product_variants"("id") ON DELETE CASCADE,
+  "attributeTypeId" UUID NOT NULL REFERENCES "item_attribute_types"("id") ON DELETE CASCADE,
+  "attributeValueId" UUID NOT NULL REFERENCES "item_attribute_values"("id") ON DELETE CASCADE,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE("variantId", "attributeTypeId")
+);
+
+CREATE INDEX "product_variant_attributes_variantId_idx" ON "product_variant_attributes"("variantId");
+
+-- =================================================================
+-- 2. PRODUCT REVIEWS & RATINGS
+-- =================================================================
+
+CREATE TABLE "product_reviews" (
+  "id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenantId" UUID NOT NULL REFERENCES "tenants"("id") ON DELETE CASCADE,
+  "productListingId" UUID NOT NULL REFERENCES "product_listings"("id") ON DELETE CASCADE,
+  "customerId" UUID REFERENCES "store_customers"("id") ON DELETE SET NULL,
+  
+  -- Review content
+  "rating" INT NOT NULL CHECK ("rating" >= 1 AND "rating" <= 5),
+  "title" VARCHAR(255),
+  "content" TEXT,
+  "pros" TEXT,
+  "cons" TEXT,
+  
+  -- Reviewer info (for display)
+  "reviewerName" VARCHAR(100),
+  "reviewerEmail" VARCHAR(255),
+  "isVerifiedPurchase" BOOLEAN DEFAULT false,
+  
+  -- Review images
+  "images" TEXT[], -- Array of image URLs
+  
+  -- Moderation
+  "status" VARCHAR(20) DEFAULT 'pending', -- pending, approved, rejected
+  "moderatedAt" TIMESTAMP(3),
+  "moderatedBy" VARCHAR(255),
+  "moderationNotes" TEXT,
+  
+  -- Helpfulness voting
+  "helpfulCount" INT DEFAULT 0,
+  "notHelpfulCount" INT DEFAULT 0,
+  
+  -- Admin response
+  "adminResponse" TEXT,
+  "adminRespondedAt" TIMESTAMP(3),
+  
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX "product_reviews_tenantId_idx" ON "product_reviews"("tenantId");
+CREATE INDEX "product_reviews_productListingId_idx" ON "product_reviews"("productListingId");
+CREATE INDEX "product_reviews_customerId_idx" ON "product_reviews"("customerId");
+CREATE INDEX "product_reviews_status_idx" ON "product_reviews"("tenantId", "status");
+CREATE INDEX "product_reviews_rating_idx" ON "product_reviews"("productListingId", "rating");
+
+-- Review helpfulness votes
+CREATE TABLE "review_votes" (
+  "id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "reviewId" UUID NOT NULL REFERENCES "product_reviews"("id") ON DELETE CASCADE,
+  "customerId" UUID REFERENCES "store_customers"("id") ON DELETE SET NULL,
+  "sessionToken" VARCHAR(255), -- For anonymous votes
+  "isHelpful" BOOLEAN NOT NULL,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE("reviewId", "customerId"),
+  UNIQUE("reviewId", "sessionToken")
+);
+
+CREATE INDEX "review_votes_reviewId_idx" ON "review_votes"("reviewId");
+
+-- =================================================================
+-- 3. GIFT CARDS
+-- =================================================================
+
+CREATE TABLE "gift_cards" (
+  "id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenantId" UUID NOT NULL REFERENCES "tenants"("id") ON DELETE CASCADE,
+  
+  -- Card details
+  "code" VARCHAR(50) NOT NULL,
+  "pin" VARCHAR(10), -- Optional PIN for security
+  
+  -- Value
+  "initialValue" DECIMAL(18, 2) NOT NULL,
+  "currentBalance" DECIMAL(18, 2) NOT NULL,
+  "currency" VARCHAR(3) DEFAULT 'USD',
+  
+  -- Source
+  "sourceType" VARCHAR(20) NOT NULL, -- purchased, promotional, refund, manual
+  "sourceOrderId" UUID REFERENCES "orders"("id") ON DELETE SET NULL,
+  
+  -- Recipient info
+  "recipientEmail" VARCHAR(255),
+  "recipientName" VARCHAR(100),
+  "senderName" VARCHAR(100),
+  "personalMessage" TEXT,
+  
+  -- Delivery
+  "deliveryMethod" VARCHAR(20) DEFAULT 'email', -- email, print, physical
+  "deliveredAt" TIMESTAMP(3),
+  
+  -- Validity
+  "activatedAt" TIMESTAMP(3),
+  "expiresAt" TIMESTAMP(3),
+  
+  -- Status
+  "status" VARCHAR(20) DEFAULT 'active', -- pending, active, depleted, expired, disabled
+  
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX "gift_cards_tenantId_code_key" ON "gift_cards"("tenantId", "code");
+CREATE INDEX "gift_cards_tenantId_idx" ON "gift_cards"("tenantId");
+CREATE INDEX "gift_cards_status_idx" ON "gift_cards"("tenantId", "status");
+
+-- Gift card transactions
+CREATE TABLE "gift_card_transactions" (
+  "id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenantId" UUID NOT NULL REFERENCES "tenants"("id") ON DELETE CASCADE,
+  "giftCardId" UUID NOT NULL REFERENCES "gift_cards"("id") ON DELETE CASCADE,
+  
+  -- Transaction details
+  "type" VARCHAR(20) NOT NULL, -- redemption, refund, adjustment, activation
+  "amount" DECIMAL(18, 2) NOT NULL, -- Negative for redemptions
+  "balanceBefore" DECIMAL(18, 2) NOT NULL,
+  "balanceAfter" DECIMAL(18, 2) NOT NULL,
+  
+  -- Related order
+  "orderId" UUID REFERENCES "orders"("id") ON DELETE SET NULL,
+  
+  -- Notes
+  "notes" TEXT,
+  "performedBy" VARCHAR(255),
+  
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX "gift_card_transactions_giftCardId_idx" ON "gift_card_transactions"("giftCardId");
+CREATE INDEX "gift_card_transactions_orderId_idx" ON "gift_card_transactions"("orderId");
+
+-- =================================================================
+-- 4. WISHLIST
+-- =================================================================
+
+CREATE TABLE "wishlists" (
+  "id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenantId" UUID NOT NULL REFERENCES "tenants"("id") ON DELETE CASCADE,
+  "customerId" UUID NOT NULL REFERENCES "store_customers"("id") ON DELETE CASCADE,
+  
+  -- Wishlist details
+  "name" VARCHAR(100) DEFAULT 'My Wishlist',
+  "isDefault" BOOLEAN DEFAULT false,
+  "isPublic" BOOLEAN DEFAULT false, -- For sharing
+  "shareToken" VARCHAR(50), -- For public sharing URL
+  
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX "wishlists_tenantId_idx" ON "wishlists"("tenantId");
+CREATE INDEX "wishlists_customerId_idx" ON "wishlists"("customerId");
+CREATE UNIQUE INDEX "wishlists_shareToken_key" ON "wishlists"("shareToken") WHERE "shareToken" IS NOT NULL;
+
+CREATE TABLE "wishlist_items" (
+  "id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "wishlistId" UUID NOT NULL REFERENCES "wishlists"("id") ON DELETE CASCADE,
+  "productListingId" UUID NOT NULL REFERENCES "product_listings"("id") ON DELETE CASCADE,
+  "variantId" UUID REFERENCES "product_variants"("id") ON DELETE SET NULL,
+  
+  -- Price at time of adding (for price drop alerts)
+  "priceWhenAdded" DECIMAL(18, 2),
+  
+  -- Priority/notes
+  "priority" INT DEFAULT 0, -- 1=high, 0=normal
+  "notes" TEXT,
+  
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE("wishlistId", "productListingId", "variantId")
+);
+
+CREATE INDEX "wishlist_items_wishlistId_idx" ON "wishlist_items"("wishlistId");
+CREATE INDEX "wishlist_items_productListingId_idx" ON "wishlist_items"("productListingId");
+
+-- =================================================================
+-- 5. UPDATE EXISTING TABLES
+-- =================================================================
+
+-- Add average rating cache to product_listings
+ALTER TABLE "product_listings" 
+ADD COLUMN IF NOT EXISTS "averageRating" DECIMAL(3, 2) DEFAULT 0,
+ADD COLUMN IF NOT EXISTS "reviewCount" INT DEFAULT 0;
+
+-- Add variant support to cart_items
+ALTER TABLE "cart_items" 
+ADD COLUMN IF NOT EXISTS "variantId" UUID REFERENCES "product_variants"("id") ON DELETE SET NULL;
+
+-- Add variant support to order_items
+ALTER TABLE "order_items"
+ADD COLUMN IF NOT EXISTS "variantId" UUID REFERENCES "product_variants"("id") ON DELETE SET NULL,
+ADD COLUMN IF NOT EXISTS "variantAttributes" JSONB; -- Snapshot of variant attributes
+
+-- Add gift card support to orders
+ALTER TABLE "orders"
+ADD COLUMN IF NOT EXISTS "giftCardDiscount" DECIMAL(18, 2) DEFAULT 0;
+
+-- Add gift card support to payments
+ALTER TABLE "payments"
+ADD COLUMN IF NOT EXISTS "giftCardId" UUID REFERENCES "gift_cards"("id") ON DELETE SET NULL;
+
+-- =================================================================
+-- 6. ENABLE RLS ON NEW TABLES
+-- =================================================================
+
+-- Item attribute types
+ALTER TABLE "item_attribute_types" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "item_attribute_types" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation_policy ON "item_attribute_types"
+  USING ("tenantId" = current_setting('app.tenant', true))
+  WITH CHECK ("tenantId" = current_setting('app.tenant', true));
+
+-- Item attribute values
+ALTER TABLE "item_attribute_values" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "item_attribute_values" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation_policy ON "item_attribute_values"
+  USING ("tenantId" = current_setting('app.tenant', true))
+  WITH CHECK ("tenantId" = current_setting('app.tenant', true));
+
+-- Product variants
+ALTER TABLE "product_variants" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "product_variants" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation_policy ON "product_variants"
+  USING ("tenantId" = current_setting('app.tenant', true))
+  WITH CHECK ("tenantId" = current_setting('app.tenant', true));
+
+-- Product reviews
+ALTER TABLE "product_reviews" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "product_reviews" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation_policy ON "product_reviews"
+  USING ("tenantId" = current_setting('app.tenant', true))
+  WITH CHECK ("tenantId" = current_setting('app.tenant', true));
+
+-- Gift cards
+ALTER TABLE "gift_cards" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "gift_cards" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation_policy ON "gift_cards"
+  USING ("tenantId" = current_setting('app.tenant', true))
+  WITH CHECK ("tenantId" = current_setting('app.tenant', true));
+
+-- Gift card transactions
+ALTER TABLE "gift_card_transactions" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "gift_card_transactions" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation_policy ON "gift_card_transactions"
+  USING ("tenantId" = current_setting('app.tenant', true))
+  WITH CHECK ("tenantId" = current_setting('app.tenant', true));
+
+-- Wishlists
+ALTER TABLE "wishlists" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "wishlists" FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation_policy ON "wishlists"
+  USING ("tenantId" = current_setting('app.tenant', true))
+  WITH CHECK ("tenantId" = current_setting('app.tenant', true));
+
+-- =================================================================
+-- 7. SEED DEFAULT ATTRIBUTE TYPES
+-- =================================================================
+
+-- These will be tenant-specific, but we create templates
+-- Actual seeding happens at tenant provisioning time

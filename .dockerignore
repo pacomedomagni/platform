@@ -1,6 +1,88 @@
+# =================================================================
+# Docker Build Ignore File
+# Excludes unnecessary files from Docker build context
+# =================================================================
+
+# Version Control
 .git
 .gitignore
+
+# Dependencies (will be installed in container)
 node_modules
+.pnp
+.pnp.js
+
+# Build outputs (will be created in container)
 dist
-tmp
+build
+.next
+out
+
+# Testing
 coverage
+.nyc_output
+**/*.spec.ts
+**/*.test.ts
+**/__tests__
+**/test
+**/tests
+cypress
+e2e
+apps/api-e2e
+apps/web-e2e
+
+# Cache
+.cache
+.nx
+.turbo
+*.tsbuildinfo
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment files (use Docker secrets instead)
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Documentation
+docs
+*.md
+!README.md
+
+# Development config files
+*.map
+.editorconfig
+.eslintcache
+.prettierrc
+prettier.config.js
+eslint.config.mjs
+jest.config.ts
+jest.preset.js
+tsconfig.spec.json
+
+# Docker development files
+docker-compose.yml
+docker-compose.override.yml
+docker-compose.staging.yml
+Dockerfile.dev
+docker/
+
+# Temporary files
+tmp
+*.pid
+*.seed
+*.pid.lock

@@ -65,6 +65,15 @@ model Tenant {
   orderItems            OrderItem[]
   payments              Payment[]
   coupons               Coupon[]
+  
+  // Phase 2 E-commerce
+  itemAttributeTypes    ItemAttributeType[]
+  itemAttributeValues   ItemAttributeValue[]
+  productVariants       ProductVariant[]
+  productReviews        ProductReview[]
+  giftCards             GiftCard[]
+  giftCardTransactions  GiftCardTransaction[]
+  wishlists             Wishlist[]
 
   @@map("tenants")
 }
@@ -291,6 +300,7 @@ model Item {
   stockFifoLayers       StockFifoLayer[]
   stockLedgerEntries    StockLedgerEntry[]
   productListing        ProductListing?
+  productVariants       ProductVariant[]
 
   @@unique([tenantId, code])
   @@map("items")
@@ -1014,7 +1024,8 @@ model ProductCategory {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  products ProductListing[]
+  products     ProductListing[]
+  translations CategoryTranslation[]
 
   @@unique([tenantId, slug])
   @@index([tenantId, isActive])
@@ -1052,12 +1063,21 @@ model ProductListing {
   publishedAt   DateTime?
 
   sortOrder Int @default(0)
+  
+  // Review stats (cached for performance)
+  averageRating Decimal? @db.Decimal(3, 2) @default(0)
+  reviewCount   Int      @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  cartItems     CartItem[]
-  orderItems    OrderItem[]
+  cartItems      CartItem[]
+  orderItems     OrderItem[]
+  variants       ProductVariant[]
+  reviews        ProductReview[]
+  wishlistItems  WishlistItem[]
+  priceOverrides ProductPriceOverride[]
+  translations   ProductTranslation[]
 
   @@unique([tenantId, slug])
   @@unique([tenantId, itemId])
@@ -1104,6 +1124,8 @@ model StoreCustomer {
   orders          Order[]
   addresses       StoreAddress[]
   passwordResets  PasswordReset[]
+  reviews         ProductReview[]
+  wishlists       Wishlist[]
 
   @@unique([tenantId, email])
   @@index([tenantId, isActive])
@@ -1216,13 +1238,17 @@ model CartItem {
   productId String
   product   ProductListing @relation(fields: [productId], references: [id], onDelete: Cascade)
 
+  // Optional variant
+  variantId String?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+
   quantity Int     @default(1)
   price    Decimal @db.Decimal(18, 2) // Price at time of adding to cart
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([cartId, productId])
+  @@unique([cartId, productId, variantId])
   @@index([cartId])
   @@map("cart_items")
 }
@@ -1291,6 +1317,7 @@ model Order {
   shippingTotal  Decimal @db.Decimal(18, 2)
   taxTotal       Decimal @db.Decimal(18, 2)
   discountTotal  Decimal @default(0) @db.Decimal(18, 2)
+  giftCardDiscount Decimal @default(0) @db.Decimal(18, 2)
   grandTotal     Decimal @db.Decimal(18, 2)
 
   currency String @default("USD")
@@ -1322,8 +1349,11 @@ model Order {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  items    OrderItem[]
-  payments Payment[]
+  items              OrderItem[]
+  payments           Payment[]
+  giftCardsUsed      GiftCardTransaction[]
+  giftCardsGenerated GiftCard[] @relation("GiftCardSource")
+  shipments          Shipment[]
 
   @@unique([tenantId, orderNumber])
   @@index([tenantId, customerId])
@@ -1343,6 +1373,13 @@ model OrderItem {
 
   productId String?
   product   ProductListing? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  // Optional variant
+  variantId String?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+
+  // Snapshot of variant attributes at time of order
+  variantAttributes Json?
 
   // Snapshot of product at time of order
   sku         String?
@@ -1375,7 +1412,7 @@ model Payment {
   // Payment details
   amount   Decimal @db.Decimal(18, 2)
   currency String  @default("USD")
-  method   String  @default("card") // card, paypal, bank_transfer, etc.
+  method   String  @default("card") // card, paypal, bank_transfer, gift_card, etc.
 
   // Status
   status PaymentStatus @default(PENDING)
@@ -1384,6 +1421,10 @@ model Payment {
   stripePaymentIntentId String?
   stripeChargeId        String?
   stripeRefundId        String?
+
+  // Gift card payment
+  giftCardId String?
+  giftCard   GiftCard? @relation(fields: [giftCardId], references: [id], onDelete: SetNull)
 
   // Card details (last 4 digits only for display)
   cardBrand   String?
@@ -1405,6 +1446,7 @@ model Payment {
 
   @@index([orderId])
   @@index([stripePaymentIntentId])
+  @@index([giftCardId])
   @@map("payments")
 }
 
@@ -1443,3 +1485,691 @@ model Coupon {
   @@index([tenantId, isActive])
   @@map("coupons")
 }
+
+// ==================== PHASE 2: E-COMMERCE ENHANCEMENTS ====================
+
+// Attribute Types (e.g., "Color", "Size", "Material")
+model ItemAttributeType {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name        String // Internal name (e.g., "color")
+  displayName String // Display name (e.g., "Color")
+  sortOrder   Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  values            ItemAttributeValue[]
+  variantAttributes ProductVariantAttribute[]
+  translations      AttributeTranslation[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("item_attribute_types")
+}
+
+// Attribute Values (e.g., "Red", "Blue", "Small", "Large")
+model ItemAttributeValue {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  attributeTypeId String
+  attributeType   ItemAttributeType @relation(fields: [attributeTypeId], references: [id], onDelete: Cascade)
+
+  value        String // Internal value
+  displayValue String // Display value
+  colorHex     String? // For color swatches (e.g., "#FF0000")
+  sortOrder    Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  variantAttributes ProductVariantAttribute[]
+  translations      AttributeTranslation[]
+
+  @@unique([attributeTypeId, value])
+  @@index([tenantId])
+  @@index([attributeTypeId])
+  @@map("item_attribute_values")
+}
+
+// Product Variant (specific combination like "Red, Large")
+model ProductVariant {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  productListingId String
+  productListing   ProductListing @relation(fields: [productListingId], references: [id], onDelete: Cascade)
+
+  // Variant-specific fields
+  sku     String?
+  barcode String?
+  price   Decimal? @db.Decimal(18, 2) // NULL means use parent price
+  compareAtPrice Decimal? @db.Decimal(18, 2)
+  costPrice      Decimal? @db.Decimal(18, 2)
+
+  // Optional link to inventory Item for variant-level stock
+  itemId String?
+  item   Item?   @relation(fields: [itemId], references: [id], onDelete: SetNull)
+
+  // Variant image
+  imageUrl String?
+
+  // Stock tracking at variant level
+  stockQty       Int     @default(0)
+  trackInventory Boolean @default(true)
+  allowBackorder Boolean @default(false)
+
+  // Shipping dimensions
+  weight     Decimal? @db.Decimal(18, 4)
+  weightUnit String   @default("kg")
+
+  // Status
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  attributes     ProductVariantAttribute[]
+  cartItems      CartItem[]
+  orderItems     OrderItem[]
+  wishlistItems  WishlistItem[]
+  priceOverrides VariantPriceOverride[]
+
+  @@index([tenantId])
+  @@index([productListingId])
+  @@map("product_variants")
+}
+
+// Product Variant Attributes (junction table)
+model ProductVariantAttribute {
+  id String @id @default(uuid())
+
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  attributeTypeId String
+  attributeType   ItemAttributeType @relation(fields: [attributeTypeId], references: [id], onDelete: Cascade)
+
+  attributeValueId String
+  attributeValue   ItemAttributeValue @relation(fields: [attributeValueId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([variantId, attributeTypeId])
+  @@index([variantId])
+  @@map("product_variant_attributes")
+}
+
+// Product Reviews & Ratings
+model ProductReview {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  productListingId String
+  productListing   ProductListing @relation(fields: [productListingId], references: [id], onDelete: Cascade)
+
+  customerId String?
+  customer   StoreCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  // Review content
+  rating  Int // 1-5
+  title   String?
+  content String?
+  pros    String?
+  cons    String?
+
+  // Reviewer info (for display)
+  reviewerName       String?
+  reviewerEmail      String?
+  isVerifiedPurchase Boolean @default(false)
+
+  // Review images
+  images String[] // Array of image URLs
+
+  // Moderation
+  status          String    @default("pending") // pending, approved, rejected
+  moderatedAt     DateTime?
+  moderatedBy     String?
+  moderationNotes String?
+
+  // Helpfulness voting
+  helpfulCount    Int @default(0)
+  notHelpfulCount Int @default(0)
+
+  // Admin response
+  adminResponse    String?
+  adminRespondedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  votes ReviewVote[]
+
+  @@index([tenantId])
+  @@index([productListingId])
+  @@index([customerId])
+  @@index([tenantId, status])
+  @@map("product_reviews")
+}
+
+// Review helpfulness votes
+model ReviewVote {
+  id String @id @default(uuid())
+
+  reviewId String
+  review   ProductReview @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  customerId   String?
+  sessionToken String? // For anonymous votes
+
+  isHelpful Boolean
+
+  createdAt DateTime @default(now())
+
+  @@unique([reviewId, customerId])
+  @@index([reviewId])
+  @@map("review_votes")
+}
+
+// Gift Cards
+model GiftCard {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Card details
+  code String
+  pin  String? // Optional PIN for security
+
+  // Value
+  initialValue   Decimal @db.Decimal(18, 2)
+  currentBalance Decimal @db.Decimal(18, 2)
+  currency       String  @default("USD")
+
+  // Source
+  sourceType    String // purchased, promotional, refund, manual
+  sourceOrderId String?
+  sourceOrder   Order?  @relation("GiftCardSource", fields: [sourceOrderId], references: [id], onDelete: SetNull)
+
+  // Recipient info
+  recipientEmail  String?
+  recipientName   String?
+  senderName      String?
+  personalMessage String?
+
+  // Delivery
+  deliveryMethod String    @default("email") // email, print, physical
+  deliveredAt    DateTime?
+
+  // Validity
+  activatedAt DateTime?
+  expiresAt   DateTime?
+
+  // Status
+  status String @default("active") // pending, active, depleted, expired, disabled
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions GiftCardTransaction[]
+  payments     Payment[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@map("gift_cards")
+}
+
+// Gift card transactions
+model GiftCardTransaction {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  giftCardId String
+  giftCard   GiftCard @relation(fields: [giftCardId], references: [id], onDelete: Cascade)
+
+  // Transaction details
+  type          String  // redemption, refund, adjustment, activation
+  amount        Decimal @db.Decimal(18, 2) // Negative for redemptions
+  balanceBefore Decimal @db.Decimal(18, 2)
+  balanceAfter  Decimal @db.Decimal(18, 2)
+
+  // Related order
+  orderId String?
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  // Notes
+  notes       String?
+  performedBy String?
+
+  createdAt DateTime @default(now())
+
+  @@index([giftCardId])
+  @@index([orderId])
+  @@map("gift_card_transactions")
+}
+
+// Wishlist
+model Wishlist {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  customerId String
+  customer   StoreCustomer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Wishlist details
+  name       String  @default("My Wishlist")
+  isDefault  Boolean @default(false)
+  isPublic   Boolean @default(false) // For sharing
+  shareToken String? @unique // For public sharing URL
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items WishlistItem[]
+
+  @@index([tenantId])
+  @@index([customerId])
+  @@map("wishlists")
+}
+
+// Wishlist Items
+model WishlistItem {
+  id String @id @default(uuid())
+
+  wishlistId String
+  wishlist   Wishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+
+  productListingId String
+  productListing   ProductListing @relation(fields: [productListingId], references: [id], onDelete: Cascade)
+
+  variantId String?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
+
+  // Price at time of adding (for price drop alerts)
+  priceWhenAdded Decimal? @db.Decimal(18, 2)
+
+  // Priority/notes
+  priority Int     @default(0) // 1=high, 0=normal
+  notes    String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([wishlistId, productListingId, variantId])
+  @@index([wishlistId])
+  @@index([productListingId])
+  @@map("wishlist_items")
+}
+
+// ==========================================
+// Multi-Currency Support
+// ==========================================
+
+// Store currency configuration
+model StoreCurrency {
+  id       String @id @default(uuid())
+  tenantId String
+
+  currencyCode       String // ISO 4217 (USD, EUR, GBP)
+  symbol             String // $, €, £
+  symbolPosition     String @default("before") // before or after
+  decimalPlaces      Int    @default(2)
+  decimalSeparator   String @default(".")
+  thousandsSeparator String @default(",")
+  exchangeRate       Decimal @db.Decimal(18, 8) @default(1)
+  isBaseCurrency     Boolean @default(false)
+  isEnabled          Boolean @default(true)
+  lastRateUpdate     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, currencyCode])
+  @@index([tenantId])
+  @@map("store_currencies")
+}
+
+// Product price overrides per currency
+model ProductPriceOverride {
+  id       String @id @default(uuid())
+  tenantId String
+
+  productListingId String
+  productListing   ProductListing @relation(fields: [productListingId], references: [id], onDelete: Cascade)
+
+  currencyCode   String
+  price          Decimal @db.Decimal(18, 4)
+  compareAtPrice Decimal? @db.Decimal(18, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([productListingId, currencyCode])
+  @@index([tenantId])
+  @@map("product_price_overrides")
+}
+
+// Variant price overrides per currency
+model VariantPriceOverride {
+  id       String @id @default(uuid())
+  tenantId String
+
+  variantId String
+  variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  currencyCode   String
+  price          Decimal @db.Decimal(18, 4)
+  compareAtPrice Decimal? @db.Decimal(18, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([variantId, currencyCode])
+  @@index([tenantId])
+  @@map("variant_price_overrides")
+}
+
+// ==========================================
+// Shipping System
+// ==========================================
+
+// Shipping carriers
+model ShippingCarrier {
+  id       String @id @default(uuid())
+  tenantId String
+
+  name          String // UPS, FedEx, USPS, DHL
+  code          String // ups, fedex, usps, dhl
+  type          String @default("api") // api, flat, weight, custom
+  isEnabled     Boolean @default(true)
+  apiKey        String? // Encrypted
+  apiSecret     String? // Encrypted
+  accountNumber String?
+  testMode      Boolean @default(true)
+  settings      Json    @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  rates     ShippingRate[]
+  shipments Shipment[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("shipping_carriers")
+}
+
+// Geographic shipping zones
+model ShippingZone {
+  id       String @id @default(uuid())
+  tenantId String
+
+  name      String
+  countries String[] @default([])
+  states    String[] @default([])
+  zipCodes  String[] @default([])
+  isDefault Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  rates ShippingRate[]
+
+  @@index([tenantId])
+  @@map("shipping_zones")
+}
+
+// Shipping rates per zone
+model ShippingRate {
+  id       String @id @default(uuid())
+  tenantId String
+
+  zoneId String
+  zone   ShippingZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+
+  carrierId String?
+  carrier   ShippingCarrier? @relation(fields: [carrierId], references: [id], onDelete: SetNull)
+
+  name                  String
+  description           String?
+  type                  String   @default("flat") // flat, weight, price, carrier
+  price                 Decimal  @db.Decimal(18, 4) @default(0)
+  minOrderAmount        Decimal? @db.Decimal(18, 4)
+  maxOrderAmount        Decimal? @db.Decimal(18, 4)
+  minWeight             Decimal? @db.Decimal(18, 4)
+  maxWeight             Decimal? @db.Decimal(18, 4)
+  freeShippingThreshold Decimal? @db.Decimal(18, 4)
+  estimatedDaysMin      Int?
+  estimatedDaysMax      Int?
+  carrierServiceCode    String?
+  isEnabled             Boolean  @default(true)
+  sortOrder             Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  weightTiers  ShippingWeightTier[]
+  translations ShippingRateTranslation[]
+
+  @@index([tenantId])
+  @@index([zoneId])
+  @@map("shipping_rates")
+}
+
+// Weight-based pricing tiers
+model ShippingWeightTier {
+  id       String @id @default(uuid())
+  tenantId String
+
+  rateId String
+  rate   ShippingRate @relation(fields: [rateId], references: [id], onDelete: Cascade)
+
+  minWeight  Decimal  @db.Decimal(18, 4) @default(0)
+  maxWeight  Decimal? @db.Decimal(18, 4)
+  price      Decimal  @db.Decimal(18, 4)
+  pricePerKg Decimal? @db.Decimal(18, 4)
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@map("shipping_weight_tiers")
+}
+
+// Shipment tracking
+model Shipment {
+  id       String @id @default(uuid())
+  tenantId String
+
+  orderId String
+  order   Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  carrierId String?
+  carrier   ShippingCarrier? @relation(fields: [carrierId], references: [id], onDelete: SetNull)
+
+  carrierName       String
+  trackingNumber    String?
+  trackingUrl       String?
+  status            String   @default("pending") // pending, label_created, in_transit, delivered, failed
+  labelUrl          String?
+  estimatedDelivery DateTime?
+  actualDelivery    DateTime?
+  shippedAt         DateTime?
+  weight            Decimal? @db.Decimal(18, 4)
+  dimensions        Json?    // {length, width, height, unit}
+  cost              Decimal? @db.Decimal(18, 4)
+  metadata          Json     @default("{}")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  events ShipmentEvent[]
+
+  @@index([orderId])
+  @@index([trackingNumber])
+  @@index([tenantId])
+  @@map("shipments")
+}
+
+// Shipment tracking events
+model ShipmentEvent {
+  id       String @id @default(uuid())
+  tenantId String
+
+  shipmentId String
+  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  status      String
+  description String?
+  location    String?
+  occurredAt  DateTime
+  rawData     Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([shipmentId])
+  @@index([tenantId])
+  @@map("shipment_events")
+}
+
+// ==========================================
+// Internationalization (i18n)
+// ==========================================
+
+// Store language configuration
+model StoreLanguage {
+  id       String @id @default(uuid())
+  tenantId String
+
+  languageCode String // ISO 639-1 (en, es, fr)
+  countryCode  String? // ISO 3166-1 for regional variants
+  name         String // "English", "Spanish"
+  nativeName   String? // "English", "Español"
+  isDefault    Boolean @default(false)
+  isEnabled    Boolean @default(true)
+  sortOrder    Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, languageCode, countryCode])
+  @@index([tenantId])
+  @@map("store_languages")
+}
+
+// Product translations
+model ProductTranslation {
+  id       String @id @default(uuid())
+  tenantId String
+
+  productListingId String
+  productListing   ProductListing @relation(fields: [productListingId], references: [id], onDelete: Cascade)
+
+  languageCode     String
+  displayName      String
+  shortDescription String?
+  longDescription  String?
+  metaTitle        String?
+  metaDescription  String?
+  slug             String?
+  badge            String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([productListingId, languageCode])
+  @@index([tenantId])
+  @@index([tenantId, languageCode, slug])
+  @@map("product_translations")
+}
+
+// Category translations
+model CategoryTranslation {
+  id       String @id @default(uuid())
+  tenantId String
+
+  categoryId String
+  category   ProductCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  languageCode    String
+  name            String
+  description     String?
+  slug            String?
+  metaTitle       String?
+  metaDescription String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([categoryId, languageCode])
+  @@index([tenantId])
+  @@map("category_translations")
+}
+
+// Attribute translations (for attribute types and values)
+model AttributeTranslation {
+  id       String @id @default(uuid())
+  tenantId String
+
+  attributeTypeId  String?
+  attributeType    ItemAttributeType? @relation(fields: [attributeTypeId], references: [id], onDelete: Cascade)
+
+  attributeValueId String?
+  attributeValue   ItemAttributeValue? @relation(fields: [attributeValueId], references: [id], onDelete: Cascade)
+
+  languageCode String
+  name         String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@map("attribute_translations")
+}
+
+// Shipping rate translations
+model ShippingRateTranslation {
+  id       String @id @default(uuid())
+  tenantId String
+
+  shippingRateId String
+  shippingRate   ShippingRate @relation(fields: [shippingRateId], references: [id], onDelete: Cascade)
+
+  languageCode String
+  name         String
+  description  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([shippingRateId, languageCode])
+  @@index([tenantId])
+  @@map("shipping_rate_translations")
+}
+
+// Static content translations (UI strings, policies)
+model ContentTranslation {
+  id       String @id @default(uuid())
+  tenantId String
+
+  contentKey  String // e.g., "checkout.title", "policy.returns"
+  languageCode String
+  content     String
+  contentType String @default("text") // text, html, markdown
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, contentKey, languageCode])
+  @@index([tenantId, languageCode])
+  @@map("content_translations")
+}
+

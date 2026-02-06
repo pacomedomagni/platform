@@ -7,17 +7,21 @@ import { CartController } from './cart/cart.controller';
 import { CartService } from './cart/cart.service';
 import { CheckoutController } from './checkout/checkout.controller';
 import { CheckoutService } from './checkout/checkout.service';
-import { CustomerAuthController } from './auth/customer-auth.controller';
-import { CustomerAuthService } from './auth/customer-auth.service';
+import { CustomerAuthModule } from './auth/customer-auth.module';
 import { PaymentsController } from './payments/payments.controller';
 import { PaymentsService } from './payments/payments.service';
 import { StripeService } from './payments/stripe.service';
 import { OrdersController } from './orders/orders.controller';
 import { OrdersService } from './orders/orders.service';
+import { EcommerceModule } from './ecommerce/ecommerce.module';
+import { I18nModule } from './i18n/i18n.module';
 
 @Module({
   imports: [
     DbModule,
+    CustomerAuthModule,
+    EcommerceModule,
+    I18nModule,
     EmailModule.forRoot({
       smtp: {
         host: process.env['SMTP_HOST'] || 'localhost',
@@ -38,7 +42,6 @@ import { OrdersService } from './orders/orders.service';
     ProductsController,
     CartController,
     CheckoutController,
-    CustomerAuthController,
     PaymentsController,
     OrdersController,
   ],
@@ -46,16 +49,15 @@ import { OrdersService } from './orders/orders.service';
     ProductsService,
     CartService,
     CheckoutService,
-    CustomerAuthService,
     PaymentsService,
     StripeService,
     OrdersService,
   ],
   exports: [
+    CustomerAuthModule,
     ProductsService,
     CartService,
     CheckoutService,
-    CustomerAuthService,
     PaymentsService,
     StripeService,
     OrdersService,

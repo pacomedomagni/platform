@@ -8,10 +8,12 @@ import {
   Headers,
   BadRequestException,
   UnauthorizedException,
+  UseGuards,
 } from '@nestjs/common';
 import { OrdersService } from './orders.service';
 import { CustomerAuthService } from '../auth/customer-auth.service';
 import { ListOrdersDto } from './dto';
+import { StoreAdminGuard } from '@platform/auth';
 
 @Controller('api/v1/store/orders')
 export class OrdersController {
@@ -82,6 +84,7 @@ export class OrdersController {
    * GET /api/v1/store/admin/orders
    */
   @Get('admin/all')
+  @UseGuards(StoreAdminGuard)
   async listAllOrders(
     @Headers('x-tenant-id') tenantId: string,
     @Query() query: ListOrdersDto & { search?: string }
@@ -89,7 +92,6 @@ export class OrdersController {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
-    // TODO: Add admin auth guard
     return this.ordersService.listAllOrders(tenantId, query);
   }
 
@@ -98,6 +100,7 @@ export class OrdersController {
    * GET /api/v1/store/admin/orders/:id
    */
   @Get('admin/:id')
+  @UseGuards(StoreAdminGuard)
   async getOrderAdmin(
     @Headers('x-tenant-id') tenantId: string,
     @Param('id') orderId: string
@@ -105,7 +108,6 @@ export class OrdersController {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
-    // TODO: Add admin auth guard
     return this.ordersService.getOrder(tenantId, orderId);
   }
 
@@ -114,6 +116,7 @@ export class OrdersController {
    * PUT /api/v1/store/admin/orders/:id/status
    */
   @Put('admin/:id/status')
+  @UseGuards(StoreAdminGuard)
   async updateOrderStatus(
     @Headers('x-tenant-id') tenantId: string,
     @Param('id') orderId: string,
@@ -122,7 +125,6 @@ export class OrdersController {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
-    // TODO: Add admin auth guard
     return this.ordersService.updateOrderStatus(tenantId, orderId, body.status, {
       carrier: body.carrier,
       trackingNumber: body.trackingNumber,

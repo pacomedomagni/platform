@@ -8,6 +8,7 @@ import {
   Inject,
   Optional,
   Logger,
+  OnModuleInit,
 } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { EmailService } from '@platform/email';
@@ -22,19 +23,31 @@ import {
   AddAddressDto,
 } from './dto';
 
-const JWT_SECRET = process.env['JWT_SECRET'] || 'change-me-in-production';
+// Fail fast if JWT_SECRET is not set in production
+const JWT_SECRET = process.env['JWT_SECRET'];
+if (!JWT_SECRET && process.env['NODE_ENV'] === 'production') {
+  throw new Error('JWT_SECRET environment variable is required in production');
+}
+const EFFECTIVE_JWT_SECRET = JWT_SECRET || 'dev-only-secret-change-in-production';
+
 const JWT_EXPIRES_IN = '7d';
 const SALT_ROUNDS = 12;
 const RESET_TOKEN_EXPIRY = 1 * 60 * 60 * 1000; // 1 hour
 
 @Injectable()
-export class CustomerAuthService {
+export class CustomerAuthService implements OnModuleInit {
   private readonly logger = new Logger(CustomerAuthService.name);
 
   constructor(
     private readonly prisma: PrismaService,
     @Optional() @Inject(EmailService) private readonly emailService?: EmailService
   ) {}
+
+  onModuleInit() {
+    if (!JWT_SECRET && process.env['NODE_ENV'] !== 'production') {
+      this.logger.warn('JWT_SECRET not set - using development default. DO NOT USE IN PRODUCTION!');
+    }
+  }
 
   /**
    * Register a new customer
@@ -266,7 +279,7 @@ export class CustomerAuthService {
    */
   async verifyToken(token: string) {
     try {
-      const payload = jwt.verify(token, JWT_SECRET) as {
+      const payload = jwt.verify(token, EFFECTIVE_JWT_SECRET) as {
         customerId: string;
         tenantId: string;
       };
@@ -413,7 +426,7 @@ export class CustomerAuthService {
   private generateToken(customerId: string, tenantId: string): string {
     return jwt.sign(
       { customerId, tenantId },
-      JWT_SECRET,
+      EFFECTIVE_JWT_SECRET,
       { expiresIn: JWT_EXPIRES_IN }
     );
   }

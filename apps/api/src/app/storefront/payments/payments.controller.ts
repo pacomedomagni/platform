@@ -8,10 +8,12 @@ import {
   Req,
   BadRequestException,
   RawBodyRequest,
+  UseGuards,
 } from '@nestjs/common';
 import { Request } from 'express';
 import { PaymentsService } from './payments.service';
 import { CreateRefundDto } from './dto';
+import { StoreAdminGuard } from '@platform/auth';
 
 @Controller('api/v1/store/payments')
 export class PaymentsController {
@@ -61,6 +63,7 @@ export class PaymentsController {
    * POST /api/v1/store/payments/refund
    */
   @Post('refund')
+  @UseGuards(StoreAdminGuard)
   async createRefund(
     @Headers('x-tenant-id') tenantId: string,
     @Body() dto: CreateRefundDto
@@ -68,7 +71,6 @@ export class PaymentsController {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
-    // TODO: Add admin auth guard
     return this.paymentsService.createRefund(
       tenantId,
       dto.orderId,
