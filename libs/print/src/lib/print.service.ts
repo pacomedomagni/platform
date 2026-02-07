@@ -110,7 +110,19 @@ export class PrintService implements OnModuleInit, OnModuleDestroy {
     const page = await this.browser!.newPage();
 
     try {
-      await page.setContent(html, { waitUntil: 'networkidle0' });
+      // STOR-1: Block SSRF by intercepting all network requests
+      await page.setRequestInterception(true);
+      page.on('request', (request) => {
+        const url = request.url();
+        if (url.startsWith('data:') || url === 'about:blank') {
+          request.continue();
+        } else {
+          this.logger.warn(`Blocked outbound request during PDF generation: ${url}`);
+          request.abort('blockedbyclient');
+        }
+      });
+
+      await page.setContent(html, { waitUntil: 'domcontentloaded' });
 
       const pdfOptions: puppeteer.PDFOptions = {
         format: options?.format || this.options.defaultOptions?.format || 'A4',

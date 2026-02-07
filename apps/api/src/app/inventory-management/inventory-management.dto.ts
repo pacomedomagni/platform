@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsDateString, IsEnum, IsArray, ValidateNested, Min, IsBoolean } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsDateString, IsEnum, IsArray, ValidateNested, IsBoolean } from 'class-validator';
 import { Type } from 'class-transformer';
 
 // ==========================================
@@ -16,8 +16,9 @@ export class StockMovementItemDto {
   @IsString()
   itemCode!: string;
 
+  // Sign validation is handled by the service layer based on movement type.
+  // Negative values are allowed for adjustments.
   @IsNumber()
-  @Min(0.000001)
   quantity!: number;
 
   @IsString()

@@ -12,11 +12,32 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { CheckoutService } from './checkout.service';
+import { CustomerAuthService } from '../auth/customer-auth.service';
 import { CreateCheckoutDto, UpdateCheckoutDto } from './dto';
 
 @Controller('store/checkout')
 export class CheckoutController {
-  constructor(private readonly checkoutService: CheckoutService) {}
+  constructor(
+    private readonly checkoutService: CheckoutService,
+    private readonly customerAuthService: CustomerAuthService,
+  ) {}
+
+  /**
+   * Extract optional customer ID from Bearer token (PAY-1)
+   * Returns undefined for anonymous/guest users
+   */
+  private async getOptionalCustomerId(authHeader?: string, tenantId?: string): Promise<string | undefined> {
+    if (!authHeader || !tenantId) return undefined;
+    try {
+      const [type, token] = authHeader.split(' ');
+      if (type !== 'Bearer' || !token) return undefined;
+      const payload = await this.customerAuthService.verifyToken(token);
+      if (payload.tenantId !== tenantId) return undefined;
+      return payload.customerId;
+    } catch {
+      return undefined;
+    }
+  }
 
   /**
    * Verify order ownership before allowing access
@@ -47,12 +68,13 @@ export class CheckoutController {
   @Throttle({ medium: { limit: 10, ttl: 60000 } }) // 10 checkouts per minute - strict to prevent abuse
   async createCheckout(
     @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-customer-id') customerId: string | undefined,
+    @Headers('authorization') authHeader: string | undefined,
     @Body() dto: CreateCheckoutDto
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
+    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     return this.checkoutService.createCheckout(tenantId, dto, customerId);
   }
 
@@ -65,13 +87,14 @@ export class CheckoutController {
   async getCheckout(
     @Headers('x-tenant-id') tenantId: string,
     @Param('id') orderId: string,
-    @Headers('x-customer-id') customerId?: string,
+    @Headers('authorization') authHeader?: string,
     @Headers('x-customer-email') email?: string
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
 
+    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     // Verify order ownership before allowing access
     await this.verifyOrderOwnership(tenantId, orderId, customerId, email);
 
@@ -87,13 +110,14 @@ export class CheckoutController {
   async getCheckoutByOrderNumber(
     @Headers('x-tenant-id') tenantId: string,
     @Param('orderNumber') orderNumber: string,
-    @Headers('x-customer-id') customerId?: string,
+    @Headers('authorization') authHeader?: string,
     @Headers('x-customer-email') email?: string
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
 
+    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     const order = await this.checkoutService.getCheckoutByOrderNumber(tenantId, orderNumber);
 
     // Verify order ownership
@@ -117,13 +141,14 @@ export class CheckoutController {
     @Headers('x-tenant-id') tenantId: string,
     @Param('id') orderId: string,
     @Body() dto: UpdateCheckoutDto,
-    @Headers('x-customer-id') customerId?: string,
+    @Headers('authorization') authHeader?: string,
     @Headers('x-customer-email') email?: string
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
 
+    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     // Verify order ownership before allowing modifications
     await this.verifyOrderOwnership(tenantId, orderId, customerId, email);
 
@@ -139,13 +164,14 @@ export class CheckoutController {
   async cancelCheckout(
     @Headers('x-tenant-id') tenantId: string,
     @Param('id') orderId: string,
-    @Headers('x-customer-id') customerId?: string,
+    @Headers('authorization') authHeader?: string,
     @Headers('x-customer-email') email?: string
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
 
+    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     // Verify order ownership before allowing cancellation
     await this.verifyOrderOwnership(tenantId, orderId, customerId, email);
 

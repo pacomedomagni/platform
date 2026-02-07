@@ -2,6 +2,9 @@ import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { Response } from 'express';
 import { BackgroundJobService } from './background-job.service';
+import { StockMovementService } from '../inventory-management/stock-movement.service';
+import { MovementType } from '../inventory-management/inventory-management.dto';
+import { AuditLogService } from './audit-log.service';
 
 interface TenantContext {
   tenantId: string;
@@ -26,6 +29,8 @@ export class ImportExportService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly jobService: BackgroundJobService,
+    private readonly stockMovementService: StockMovementService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   // ==========================================
@@ -125,72 +130,83 @@ export class ImportExportService {
     rows: Record<string, unknown>[],
     options: { skipDuplicates?: boolean; updateExisting?: boolean; dryRun?: boolean }
   ): Promise<ImportResult> {
-    const result: ImportResult = { total: rows.length, created: 0, updated: 0, skipped: 0, errors: [] };
+    const result = await this.prisma.$transaction(async (tx) => {
+      const result: ImportResult = { total: rows.length, created: 0, updated: 0, skipped: 0, errors: [] };
 
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      const rowNum = i + 2; // Account for header row
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const rowNum = i + 2; // Account for header row
 
-      try {
-        const code = String(row['code'] || row['sku'] || '').trim();
-        if (!code) {
-          result.errors.push({ row: rowNum, error: 'Missing product code' });
-          continue;
-        }
+        try {
+          const code = String(row['code'] || row['sku'] || '').trim();
+          if (!code) {
+            result.errors.push({ row: rowNum, error: 'Missing product code' });
+            continue;
+          }
 
-        const existing = await this.prisma.item.findFirst({
-          where: { tenantId: ctx.tenantId, code },
-          include: { productListing: true },
-        });
+          const existing = await tx.item.findFirst({
+            where: { tenantId: ctx.tenantId, code },
+            include: { productListing: true },
+          });
 
-        if (existing) {
-          if (options.updateExisting && !options.dryRun) {
-            // Update Item
-            await this.prisma.item.update({
-              where: { id: existing.id },
-              data: {
-                name: String(row['name'] || existing.name),
-              },
-            });
-            
-            // Update ProductListing if it exists and price data provided
-            if (existing.productListing && (row['price'] || row['cost'])) {
-              await this.prisma.productListing.update({
-                where: { id: existing.productListing.id },
+          if (existing) {
+            if (options.updateExisting && !options.dryRun) {
+              // Update Item
+              await tx.item.update({
+                where: { id: existing.id },
                 data: {
-                  price: row['price'] ? parseFloat(String(row['price'])) : undefined,
-                  costPrice: row['cost'] ? parseFloat(String(row['cost'])) : undefined,
+                  name: String(row['name'] || existing.name),
                 },
               });
-            }
-            result.updated++;
-          } else if (options.skipDuplicates) {
-            result.skipped++;
-          } else {
-            result.errors.push({ row: rowNum, error: `Duplicate code: ${code}` });
-          }
-          continue;
-        }
 
-        if (!options.dryRun) {
-          // Create Item only (ProductListing should be created via storefront API)
-          await this.prisma.item.create({
-            data: {
-              tenantId: ctx.tenantId,
-              code,
-              name: String(row['name'] || code),
-              isActive: true,
-            },
+              // Update ProductListing if it exists and price data provided
+              if (existing.productListing && (row['price'] || row['cost'])) {
+                await tx.productListing.update({
+                  where: { id: existing.productListing.id },
+                  data: {
+                    price: row['price'] ? parseFloat(String(row['price'])) : undefined,
+                    costPrice: row['cost'] ? parseFloat(String(row['cost'])) : undefined,
+                  },
+                });
+              }
+              result.updated++;
+            } else if (options.skipDuplicates) {
+              result.skipped++;
+            } else {
+              result.errors.push({ row: rowNum, error: `Duplicate code: ${code}` });
+            }
+            continue;
+          }
+
+          if (!options.dryRun) {
+            // Create Item only (ProductListing should be created via storefront API)
+            await tx.item.create({
+              data: {
+                tenantId: ctx.tenantId,
+                code,
+                name: String(row['name'] || code),
+                isActive: true,
+              },
+            });
+          }
+          result.created++;
+        } catch (error) {
+          result.errors.push({
+            row: rowNum,
+            error: error instanceof Error ? error.message : 'Unknown error',
           });
         }
-        result.created++;
-      } catch (error) {
-        result.errors.push({
-          row: rowNum,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        });
       }
-    }
+
+      return result;
+    }, { timeout: 60000 });
+
+    await this.auditLogService.log(ctx, {
+      action: 'IMPORT_PRODUCTS',
+      docType: 'Product',
+      docName: 'bulk-import',
+      meta: { total: result.total, created: result.created, updated: result.updated, skipped: result.skipped, errors: result.errors.length },
+    });
 
     return result;
   }
@@ -200,62 +216,73 @@ export class ImportExportService {
     rows: Record<string, unknown>[],
     options: { skipDuplicates?: boolean; updateExisting?: boolean; dryRun?: boolean }
   ): Promise<ImportResult> {
-    const result: ImportResult = { total: rows.length, created: 0, updated: 0, skipped: 0, errors: [] };
+    const result = await this.prisma.$transaction(async (tx) => {
+      const result: ImportResult = { total: rows.length, created: 0, updated: 0, skipped: 0, errors: [] };
 
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      const rowNum = i + 2;
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const rowNum = i + 2;
 
-      try {
-        const email = String(row['email'] || '').trim().toLowerCase();
-        if (!email) {
-          result.errors.push({ row: rowNum, error: 'Missing email' });
-          continue;
-        }
+        try {
+          const email = String(row['email'] || '').trim().toLowerCase();
+          if (!email) {
+            result.errors.push({ row: rowNum, error: 'Missing email' });
+            continue;
+          }
 
-        const existing = await this.prisma.storeCustomer.findFirst({
-          where: { tenantId: ctx.tenantId, email },
-        });
+          const existing = await tx.storeCustomer.findFirst({
+            where: { tenantId: ctx.tenantId, email },
+          });
 
-        if (existing) {
-          if (options.updateExisting && !options.dryRun) {
-            await this.prisma.storeCustomer.update({
-              where: { id: existing.id },
+          if (existing) {
+            if (options.updateExisting && !options.dryRun) {
+              await tx.storeCustomer.update({
+                where: { id: existing.id },
+                data: {
+                  firstName: row['firstName'] ? String(row['firstName']) : existing.firstName,
+                  lastName: row['lastName'] ? String(row['lastName']) : existing.lastName,
+                  phone: row['phone'] ? String(row['phone']) : existing.phone,
+                },
+              });
+              result.updated++;
+            } else if (options.skipDuplicates) {
+              result.skipped++;
+            } else {
+              result.errors.push({ row: rowNum, error: `Duplicate email: ${email}` });
+            }
+            continue;
+          }
+
+          if (!options.dryRun) {
+            await tx.storeCustomer.create({
               data: {
-                firstName: row['firstName'] ? String(row['firstName']) : existing.firstName,
-                lastName: row['lastName'] ? String(row['lastName']) : existing.lastName,
-                phone: row['phone'] ? String(row['phone']) : existing.phone,
+                tenantId: ctx.tenantId,
+                email,
+                firstName: row['firstName'] ? String(row['firstName']) : null,
+                lastName: row['lastName'] ? String(row['lastName']) : null,
+                phone: row['phone'] ? String(row['phone']) : null,
+                passwordHash: '', // No password for imported customers
               },
             });
-            result.updated++;
-          } else if (options.skipDuplicates) {
-            result.skipped++;
-          } else {
-            result.errors.push({ row: rowNum, error: `Duplicate email: ${email}` });
           }
-          continue;
-        }
-
-        if (!options.dryRun) {
-          await this.prisma.storeCustomer.create({
-            data: {
-              tenantId: ctx.tenantId,
-              email,
-              firstName: row['firstName'] ? String(row['firstName']) : null,
-              lastName: row['lastName'] ? String(row['lastName']) : null,
-              phone: row['phone'] ? String(row['phone']) : null,
-              passwordHash: '', // No password for imported customers
-            },
+          result.created++;
+        } catch (error) {
+          result.errors.push({
+            row: rowNum,
+            error: error instanceof Error ? error.message : 'Unknown error',
           });
         }
-        result.created++;
-      } catch (error) {
-        result.errors.push({
-          row: rowNum,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        });
       }
-    }
+
+      return result;
+    }, { timeout: 60000 });
+
+    await this.auditLogService.log(ctx, {
+      action: 'IMPORT_CUSTOMERS',
+      docType: 'Customer',
+      docName: 'bulk-import',
+      meta: { total: result.total, created: result.created, updated: result.updated, skipped: result.skipped, errors: result.errors.length },
+    });
 
     return result;
   }
@@ -265,82 +292,94 @@ export class ImportExportService {
     rows: Record<string, unknown>[],
     options: { skipDuplicates?: boolean; updateExisting?: boolean; dryRun?: boolean }
   ): Promise<ImportResult> {
-    const result: ImportResult = { total: rows.length, created: 0, updated: 0, skipped: 0, errors: [] };
+    const result = await this.prisma.$transaction(async (tx) => {
+      const result: ImportResult = { total: rows.length, created: 0, updated: 0, skipped: 0, errors: [] };
 
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      const rowNum = i + 2;
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const rowNum = i + 2;
 
-      try {
-        const code = String(row['code'] || row['sku'] || '').trim();
-        if (!code) {
-          result.errors.push({ row: rowNum, error: 'Missing product code' });
-          continue;
-        }
-
-        const item = await this.prisma.item.findFirst({
-          where: { tenantId: ctx.tenantId, code },
-        });
-
-        if (!item) {
-          result.errors.push({ row: rowNum, error: `Product not found: ${code}` });
-          continue;
-        }
-
-        const quantity = parseFloat(String(row['quantity'] || row['qty'] || 0));
-        const warehouseCode = String(row['warehouse'] || 'MAIN').trim();
-
-        if (!options.dryRun) {
-          // Find or create the warehouse
-          let warehouse = await this.prisma.warehouse.findFirst({
-            where: { tenantId: ctx.tenantId, code: warehouseCode },
-          });
-
-          if (!warehouse) {
-            warehouse = await this.prisma.warehouse.create({
-              data: {
-                tenantId: ctx.tenantId,
-                code: warehouseCode,
-                name: warehouseCode,
-                isActive: true,
-              },
-            });
+        try {
+          const code = String(row['code'] || row['sku'] || '').trim();
+          if (!code) {
+            result.errors.push({ row: rowNum, error: 'Missing product code' });
+            continue;
           }
 
-          // Update or create the warehouse item balance
-          const existingBalance = await this.prisma.warehouseItemBalance.findFirst({
-            where: {
-              tenantId: ctx.tenantId,
-              warehouseId: warehouse.id,
-              itemId: item.id,
-            },
+          const item = await tx.item.findFirst({
+            where: { tenantId: ctx.tenantId, code },
           });
 
-          if (existingBalance) {
-            await this.prisma.warehouseItemBalance.update({
-              where: { id: existingBalance.id },
-              data: { actualQty: quantity },
+          if (!item) {
+            result.errors.push({ row: rowNum, error: `Product not found: ${code}` });
+            continue;
+          }
+
+          const quantity = parseFloat(String(row['quantity'] || row['qty'] || 0));
+          const warehouseCode = String(row['warehouse'] || 'MAIN').trim();
+
+          if (!options.dryRun) {
+            // Find or create the warehouse
+            let warehouse = await tx.warehouse.findFirst({
+              where: { tenantId: ctx.tenantId, code: warehouseCode },
             });
-          } else {
-            await this.prisma.warehouseItemBalance.create({
-              data: {
+
+            if (!warehouse) {
+              warehouse = await tx.warehouse.create({
+                data: {
+                  tenantId: ctx.tenantId,
+                  code: warehouseCode,
+                  name: warehouseCode,
+                  isActive: true,
+                },
+              });
+            }
+
+            // Calculate delta between target quantity and current balance,
+            // then use StockMovementService to create a proper ledger entry
+            const existingBalance = await tx.warehouseItemBalance.findFirst({
+              where: {
                 tenantId: ctx.tenantId,
                 warehouseId: warehouse.id,
                 itemId: item.id,
-                actualQty: quantity,
-                reservedQty: 0,
               },
             });
+
+            const currentQty = existingBalance ? Number(existingBalance.actualQty) : 0;
+            const delta = quantity - currentQty;
+
+            if (delta !== 0) {
+              await this.stockMovementService.createMovement(ctx, {
+                movementType: MovementType.ADJUSTMENT,
+                warehouseCode,
+                items: [{
+                  itemCode: code,
+                  quantity: delta,
+                  rate: 0,
+                }],
+                remarks: `Inventory import adjustment for ${code}`,
+                reference: 'IMPORT',
+              });
+            }
           }
+          result.updated++;
+        } catch (error) {
+          result.errors.push({
+            row: rowNum,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          });
         }
-        result.updated++;
-      } catch (error) {
-        result.errors.push({
-          row: rowNum,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        });
       }
-    }
+
+      return result;
+    }, { timeout: 60000 });
+
+    await this.auditLogService.log(ctx, {
+      action: 'IMPORT_INVENTORY',
+      docType: 'Inventory',
+      docName: 'bulk-import',
+      meta: { total: result.total, created: result.created, updated: result.updated, skipped: result.skipped, errors: result.errors.length },
+    });
 
     return result;
   }

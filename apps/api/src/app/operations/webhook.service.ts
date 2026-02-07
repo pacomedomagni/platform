@@ -1,5 +1,8 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { PrismaService } from '@platform/db';
 import * as crypto from 'crypto';
+import * as url from 'url';
+import * as net from 'net';
 
 interface TenantContext {
   tenantId: string;
@@ -11,48 +14,76 @@ interface WebhookEvent {
   timestamp: Date;
 }
 
-// In-memory webhook record
-interface WebhookRecord {
-  id: string;
-  tenantId: string;
-  name: string;
-  url: string;
-  events: string[];
-  secret: string;
-  headers: Record<string, string>;
-  status: 'active' | 'paused' | 'disabled';
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-// In-memory delivery record
-interface WebhookDeliveryRecord {
-  id: string;
-  webhookId: string;
-  event: string;
-  payload: string;
-  statusCode: number;
-  response: string | null;
-  error: string | null;
-  duration: number;
-  success: boolean;
-  createdAt: Date;
-}
-
 @Injectable()
 export class WebhookService {
   private readonly logger = new Logger(WebhookService.name);
-  
-  // In-memory stores
-  private webhooks: Map<string, WebhookRecord> = new Map();
-  private deliveries: Map<string, WebhookDeliveryRecord> = new Map();
 
-  private generateId(): string {
-    return `wh_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  constructor(private readonly prisma: PrismaService) {}
+
+  // ==========================================
+  // URL Validation (SSRF Protection)
+  // ==========================================
+
+  /**
+   * Validate webhook URL to prevent SSRF attacks.
+   * Rejects non-HTTPS, localhost, private, and link-local addresses.
+   */
+  private validateWebhookUrl(webhookUrl: string): void {
+    let parsed: URL;
+    try {
+      parsed = new URL(webhookUrl);
+    } catch {
+      throw new BadRequestException('Invalid webhook URL');
+    }
+
+    // Require HTTPS
+    if (parsed.protocol !== 'https:') {
+      throw new BadRequestException('Webhook URL must use HTTPS');
+    }
+
+    const hostname = parsed.hostname.toLowerCase();
+
+    // Block localhost
+    if (hostname === 'localhost' || hostname === 'localhost.localdomain') {
+      throw new BadRequestException('Webhook URL must not point to localhost');
+    }
+
+    // Block IP-based addresses that are private/reserved
+    if (net.isIP(hostname)) {
+      const blockedPatterns = [
+        /^127\./, // loopback
+        /^0\.0\.0\.0$/, // unspecified
+        /^::1$/, // IPv6 loopback
+        /^10\./, // 10.0.0.0/8 private
+        /^172\.(1[6-9]|2[0-9]|3[01])\./, // 172.16.0.0/12 private
+        /^192\.168\./, // 192.168.0.0/16 private
+        /^169\.254\./, // 169.254.0.0/16 link-local
+        /^fc00:/i, // IPv6 unique local
+        /^fd/i, // IPv6 unique local
+        /^fe80:/i, // IPv6 link-local
+      ];
+
+      for (const pattern of blockedPatterns) {
+        if (pattern.test(hostname)) {
+          throw new BadRequestException(
+            'Webhook URL must not point to a private or reserved IP address',
+          );
+        }
+      }
+    }
   }
 
-  private generateDeliveryId(): string {
-    return `del_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  // ==========================================
+  // Response Sanitization (WH-3)
+  // ==========================================
+
+  /**
+   * Strip the secret field from webhook objects.
+   * Replaces it with a masked placeholder.
+   */
+  private sanitize<T extends { secret?: string }>(webhook: T): Omit<T, 'secret'> & { secretMasked: string } {
+    const { secret, ...rest } = webhook;
+    return { ...rest, secretMasked: '****' };
   }
 
   // ==========================================
@@ -62,21 +93,34 @@ export class WebhookService {
   /**
    * List all webhooks for tenant
    */
-  async findMany(ctx: TenantContext): Promise<WebhookRecord[]> {
-    const webhooks: WebhookRecord[] = [];
-    this.webhooks.forEach(webhook => {
-      if (webhook.tenantId === ctx.tenantId) {
-        webhooks.push(webhook);
-      }
+  async findMany(ctx: TenantContext) {
+    const webhooks = await this.prisma.webhook.findMany({
+      where: { tenantId: ctx.tenantId },
+      orderBy: { createdAt: 'desc' },
     });
-    return webhooks.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    return webhooks.map(w => this.sanitize(w));
   }
 
   /**
    * Get webhook by ID
    */
-  async findOne(ctx: TenantContext, id: string): Promise<WebhookRecord> {
-    const webhook = this.webhooks.get(id);
+  async findOne(ctx: TenantContext, id: string) {
+    const webhook = await this.prisma.webhook.findUnique({
+      where: { id },
+    });
+    if (!webhook || webhook.tenantId !== ctx.tenantId) {
+      throw new NotFoundException(`Webhook '${id}' not found`);
+    }
+    return this.sanitize(webhook);
+  }
+
+  /**
+   * Internal: get webhook by ID with full secret (not sanitized)
+   */
+  private async findOneInternal(ctx: TenantContext, id: string) {
+    const webhook = await this.prisma.webhook.findUnique({
+      where: { id },
+    });
     if (!webhook || webhook.tenantId !== ctx.tenantId) {
       throw new NotFoundException(`Webhook '${id}' not found`);
     }
@@ -95,26 +139,26 @@ export class WebhookService {
       secret?: string;
       headers?: Record<string, string>;
     }
-  ): Promise<WebhookRecord> {
-    const id = this.generateId();
-    const secret = data.secret || crypto.randomBytes(32).toString('hex');
-    
-    const webhook: WebhookRecord = {
-      id,
-      tenantId: ctx.tenantId,
-      name: data.name,
-      url: data.url,
-      events: data.events,
-      secret,
-      headers: data.headers || {},
-      status: 'active',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+  ) {
+    this.validateWebhookUrl(data.url);
 
-    this.webhooks.set(id, webhook);
-    this.logger.debug(`Created webhook ${id} for tenant ${ctx.tenantId}`);
-    
+    const secret = data.secret || crypto.randomBytes(32).toString('hex');
+
+    const webhook = await this.prisma.webhook.create({
+      data: {
+        tenantId: ctx.tenantId,
+        name: data.name,
+        url: data.url,
+        events: data.events,
+        secret,
+        headers: data.headers || {},
+        status: 'active',
+      },
+    });
+
+    this.logger.debug(`Created webhook ${webhook.id} for tenant ${ctx.tenantId}`);
+
+    // Return full secret only on create
     return webhook;
   }
 
@@ -132,42 +176,47 @@ export class WebhookService {
       headers?: Record<string, string>;
       status?: 'active' | 'paused' | 'disabled';
     }
-  ): Promise<WebhookRecord> {
-    const webhook = await this.findOne(ctx, id);
+  ) {
+    await this.findOneInternal(ctx, id); // Ensure it exists and belongs to tenant
 
-    const updated: WebhookRecord = {
-      ...webhook,
-      name: data.name ?? webhook.name,
-      url: data.url ?? webhook.url,
-      events: data.events ?? webhook.events,
-      secret: data.secret ?? webhook.secret,
-      headers: data.headers ?? webhook.headers,
-      status: data.status ?? webhook.status,
-      updatedAt: new Date(),
-    };
+    if (data.url) {
+      this.validateWebhookUrl(data.url);
+    }
 
-    this.webhooks.set(id, updated);
+    const updated = await this.prisma.webhook.update({
+      where: { id },
+      data: {
+        ...(data.name !== undefined && { name: data.name }),
+        ...(data.url !== undefined && { url: data.url }),
+        ...(data.events !== undefined && { events: data.events }),
+        ...(data.secret !== undefined && { secret: data.secret }),
+        ...(data.headers !== undefined && { headers: data.headers }),
+        ...(data.status !== undefined && { status: data.status }),
+      },
+    });
+
     this.logger.debug(`Updated webhook ${id}`);
-    
-    return updated;
+
+    return this.sanitize(updated);
   }
 
   /**
    * Delete a webhook
    */
   async delete(ctx: TenantContext, id: string): Promise<{ deleted: boolean }> {
-    await this.findOne(ctx, id); // Ensure it exists
-    
-    // Delete associated deliveries
-    this.deliveries.forEach((delivery, deliveryId) => {
-      if (delivery.webhookId === id) {
-        this.deliveries.delete(deliveryId);
-      }
+    await this.findOneInternal(ctx, id); // Ensure it exists and belongs to tenant
+
+    // Delete associated deliveries first
+    await this.prisma.webhookDelivery.deleteMany({
+      where: { webhookId: id },
     });
-    
-    this.webhooks.delete(id);
+
+    await this.prisma.webhook.delete({
+      where: { id },
+    });
+
     this.logger.debug(`Deleted webhook ${id}`);
-    
+
     return { deleted: true };
   }
 
@@ -182,46 +231,44 @@ export class WebhookService {
     ctx: TenantContext,
     webhookId: string,
     options: { page?: number; limit?: number } = {}
-  ): Promise<{ data: WebhookDeliveryRecord[]; total: number }> {
-    await this.findOne(ctx, webhookId); // Ensure webhook exists
-    
+  ) {
+    await this.findOneInternal(ctx, webhookId); // Ensure webhook exists and belongs to tenant
+
     const page = options.page || 1;
     const limit = options.limit || 20;
-    const offset = (page - 1) * limit;
+    const skip = (page - 1) * limit;
 
-    const allDeliveries: WebhookDeliveryRecord[] = [];
-    this.deliveries.forEach(delivery => {
-      if (delivery.webhookId === webhookId) {
-        allDeliveries.push(delivery);
-      }
-    });
+    const [data, total] = await Promise.all([
+      this.prisma.webhookDelivery.findMany({
+        where: { webhookId },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.webhookDelivery.count({
+        where: { webhookId },
+      }),
+    ]);
 
-    // Sort by createdAt descending
-    allDeliveries.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-
-    return {
-      data: allDeliveries.slice(offset, offset + limit),
-      total: allDeliveries.length,
-    };
+    return { data, total };
   }
 
   /**
    * Retry a failed delivery
    */
   async retryDelivery(ctx: TenantContext, deliveryId: string): Promise<{ retried: boolean }> {
-    const delivery = this.deliveries.get(deliveryId);
+    const delivery = await this.prisma.webhookDelivery.findUnique({
+      where: { id: deliveryId },
+    });
     if (!delivery) {
       throw new NotFoundException(`Delivery '${deliveryId}' not found`);
     }
 
-    const webhook = this.webhooks.get(delivery.webhookId);
-    if (!webhook || webhook.tenantId !== ctx.tenantId) {
-      throw new NotFoundException(`Webhook not found`);
-    }
+    const webhook = await this.findOneInternal(ctx, delivery.webhookId);
 
     const event: WebhookEvent = {
       event: delivery.event,
-      payload: JSON.parse(delivery.payload).data || {},
+      payload: (typeof delivery.payload === 'string' ? JSON.parse(delivery.payload) : delivery.payload as any).data || {},
       timestamp: new Date(),
     };
 
@@ -241,9 +288,13 @@ export class WebhookService {
     successful: number;
     failed: number;
   }> {
-    const webhooks = await this.findMany(ctx);
+    // Get unsanitized webhooks for delivery (need secret for signing)
+    const webhooks = await this.prisma.webhook.findMany({
+      where: { tenantId: ctx.tenantId, status: 'active' },
+    });
+
     const activeWebhooks = webhooks.filter(
-      w => w.status === 'active' && w.events.includes(event.event)
+      w => (w.events as string[]).includes(event.event)
     );
 
     const results = await Promise.allSettled(
@@ -260,7 +311,7 @@ export class WebhookService {
   /**
    * Deliver a webhook
    */
-  private async deliverWebhook(webhook: WebhookRecord, event: WebhookEvent): Promise<void> {
+  private async deliverWebhook(webhook: any, event: WebhookEvent): Promise<void> {
     const payload = JSON.stringify({
       event: event.event,
       timestamp: event.timestamp.toISOString(),
@@ -273,12 +324,13 @@ export class WebhookService {
       .update(payload)
       .digest('hex');
 
+    const webhookHeaders = (webhook.headers || {}) as Record<string, string>;
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'X-Webhook-Signature': `sha256=${signature}`,
       'X-Webhook-Event': event.event,
       'X-Webhook-Timestamp': event.timestamp.toISOString(),
-      ...webhook.headers,
+      ...webhookHeaders,
     };
 
     const startTime = Date.now();
@@ -301,19 +353,18 @@ export class WebhookService {
 
     const duration = Date.now() - startTime;
 
-    // Record delivery
-    const deliveryId = this.generateDeliveryId();
-    this.deliveries.set(deliveryId, {
-      id: deliveryId,
-      webhookId: webhook.id,
-      event: event.event,
-      payload,
-      statusCode: response?.status || 0,
-      response: responseText,
-      error,
-      duration,
-      success: response?.ok || false,
-      createdAt: new Date(),
+    // Record delivery in database
+    await this.prisma.webhookDelivery.create({
+      data: {
+        webhookId: webhook.id,
+        event: event.event,
+        payload,
+        statusCode: response?.status || 0,
+        response: responseText,
+        error,
+        duration,
+        success: response?.ok || false,
+      },
     });
 
     if (!response?.ok) {
@@ -332,7 +383,7 @@ export class WebhookService {
     success: boolean;
     message: string;
   }> {
-    const webhook = await this.findOne(ctx, id);
+    const webhook = await this.findOneInternal(ctx, id);
 
     const testEvent: WebhookEvent = {
       event: 'test.ping',
@@ -367,7 +418,7 @@ export class WebhookService {
     name: string;
     url: string;
     status: string;
-    events: string[];
+    events: unknown;
     totalDeliveries: number;
     last24Hours: {
       total: number;
@@ -375,35 +426,44 @@ export class WebhookService {
       failed: number;
     };
   }>> {
-    const webhooks = await this.findMany(ctx);
+    const webhooks = await this.prisma.webhook.findMany({
+      where: { tenantId: ctx.tenantId },
+    });
     const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-    return webhooks.map(webhook => {
-      const allDeliveries: WebhookDeliveryRecord[] = [];
-      const last24HoursDeliveries: WebhookDeliveryRecord[] = [];
+    const stats = await Promise.all(
+      webhooks.map(async (webhook) => {
+        const [totalDeliveries, last24Total, last24Successful, last24Failed] = await Promise.all([
+          this.prisma.webhookDelivery.count({
+            where: { webhookId: webhook.id },
+          }),
+          this.prisma.webhookDelivery.count({
+            where: { webhookId: webhook.id, createdAt: { gte: oneDayAgo } },
+          }),
+          this.prisma.webhookDelivery.count({
+            where: { webhookId: webhook.id, createdAt: { gte: oneDayAgo }, success: true },
+          }),
+          this.prisma.webhookDelivery.count({
+            where: { webhookId: webhook.id, createdAt: { gte: oneDayAgo }, success: false },
+          }),
+        ]);
 
-      this.deliveries.forEach(delivery => {
-        if (delivery.webhookId === webhook.id) {
-          allDeliveries.push(delivery);
-          if (delivery.createdAt >= oneDayAgo) {
-            last24HoursDeliveries.push(delivery);
-          }
-        }
-      });
+        return {
+          id: webhook.id,
+          name: webhook.name,
+          url: webhook.url,
+          status: webhook.status,
+          events: webhook.events,
+          totalDeliveries,
+          last24Hours: {
+            total: last24Total,
+            successful: last24Successful,
+            failed: last24Failed,
+          },
+        };
+      })
+    );
 
-      return {
-        id: webhook.id,
-        name: webhook.name,
-        url: webhook.url,
-        status: webhook.status,
-        events: webhook.events,
-        totalDeliveries: allDeliveries.length,
-        last24Hours: {
-          total: last24HoursDeliveries.length,
-          successful: last24HoursDeliveries.filter(d => d.success).length,
-          failed: last24HoursDeliveries.filter(d => !d.success).length,
-        },
-      };
-    });
+    return stats;
   }
 }

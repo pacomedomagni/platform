@@ -41,12 +41,13 @@ export class ApiKeyGuard implements CanActivate {
     const expectedApiKey = process.env['PROVISION_API_KEY'];
 
     if (!expectedApiKey) {
-      // If no API key is configured, deny access in production
-      if (process.env['NODE_ENV'] === 'production') {
-        throw new UnauthorizedException('API key authentication not configured');
+      const env = process.env['NODE_ENV'];
+      // Only bypass API key requirement in development and test
+      if (env === 'development' || env === 'test') {
+        return true;
       }
-      // In development, allow access without API key
-      return true;
+      // All other environments (production, staging, etc.) require API key
+      throw new UnauthorizedException('API key authentication not configured');
     }
 
     if (!apiKey) {

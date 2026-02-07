@@ -1,5 +1,6 @@
 import { Controller, Post, Body, Headers, BadRequestException, Logger } from '@nestjs/common';
 import { EmailPreferencesService } from './email-preferences.service';
+import { PrismaService } from '@platform/db';
 import * as crypto from 'crypto';
 
 interface SendGridEvent {
@@ -12,13 +13,30 @@ interface SendGridEvent {
   timestamp: number;
   type?: string;
   bounce_classification?: string;
+  custom_args?: Record<string, string>;
 }
 
 @Controller('webhooks/sendgrid')
 export class SendGridWebhookController {
   private readonly logger = new Logger(SendGridWebhookController.name);
 
-  constructor(private readonly preferencesService: EmailPreferencesService) {}
+  private readonly verificationKey: string;
+
+  constructor(
+    private readonly preferencesService: EmailPreferencesService,
+    private readonly prisma: PrismaService,
+  ) {
+    const key = process.env['SENDGRID_WEBHOOK_VERIFICATION_KEY'];
+    const env = process.env['NODE_ENV'];
+
+    if (!key && (env === 'production' || env === 'staging')) {
+      throw new Error(
+        'SENDGRID_WEBHOOK_VERIFICATION_KEY must be set in production/staging environments',
+      );
+    }
+
+    this.verificationKey = key || '';
+  }
 
   /**
    * Handle SendGrid webhook events
@@ -33,18 +51,16 @@ export class SendGridWebhookController {
     @Headers('X-Twilio-Email-Event-Webhook-Timestamp') timestamp: string,
     @Body() events: SendGridEvent[],
   ) {
-    // Verify webhook signature (optional but recommended)
-    if (process.env['SENDGRID_WEBHOOK_VERIFICATION_KEY']) {
-      const isValid = this.verifySignature(
-        JSON.stringify(events),
-        signature,
-        timestamp,
-      );
+    // Verify webhook signature (mandatory)
+    const isValid = this.verifySignature(
+      JSON.stringify(events),
+      signature,
+      timestamp,
+    );
 
-      if (!isValid) {
-        this.logger.warn('Invalid SendGrid webhook signature');
-        throw new BadRequestException('Invalid signature');
-      }
+    if (!isValid) {
+      this.logger.warn('Invalid SendGrid webhook signature');
+      throw new BadRequestException('Invalid signature');
     }
 
     this.logger.log(`Processing ${events.length} SendGrid events`);
@@ -69,31 +85,32 @@ export class SendGridWebhookController {
    * Process individual SendGrid event
    */
   private async processEvent(event: SendGridEvent) {
-    const { email, event: eventType, reason } = event;
+    const { email, event: eventType, reason, custom_args } = event;
+    const tenantId = custom_args?.tenantId || null;
 
     this.logger.debug(
-      `Processing ${eventType} event for ${email}`,
+      `Processing ${eventType} event for ${email} (tenant: ${tenantId || 'unknown'})`,
     );
 
     switch (eventType) {
       case 'bounce':
-        await this.handleBounce(email, event);
+        await this.handleBounce(email, event, tenantId);
         break;
 
       case 'dropped':
-        await this.handleDropped(email, event);
+        await this.handleDropped(email, event, tenantId);
         break;
 
       case 'spamreport':
-        await this.handleSpamReport(email, event);
+        await this.handleSpamReport(email, event, tenantId);
         break;
 
       case 'unsubscribe':
-        await this.handleUnsubscribe(email);
+        await this.handleUnsubscribe(email, tenantId);
         break;
 
       case 'group_unsubscribe':
-        await this.handleGroupUnsubscribe(email);
+        await this.handleGroupUnsubscribe(email, tenantId);
         break;
 
       default:
@@ -105,7 +122,7 @@ export class SendGridWebhookController {
   /**
    * Handle bounce event
    */
-  private async handleBounce(email: string, event: SendGridEvent) {
+  private async handleBounce(email: string, event: SendGridEvent, tenantId: string | null) {
     // Determine if it's a hard or soft bounce
     const isHardBounce =
       event.status?.startsWith('5') ||
@@ -114,13 +131,12 @@ export class SendGridWebhookController {
 
     const bounceType = isHardBounce ? 'hard_bounce' : 'soft_bounce';
 
-    // Try to extract tenantId from custom args or use a default
-    // In production, you'd want to include tenantId in SendGrid custom_args
-    const tenantId = await this.getTenantIdFromEmail(email);
+    // Use tenantId from custom_args, fall back to tenant-scoped DB lookup
+    const resolvedTenantId = tenantId || await this.getTenantIdFromEmail(email);
 
-    if (tenantId) {
+    if (resolvedTenantId) {
       await this.preferencesService.recordBounce(
-        tenantId,
+        resolvedTenantId,
         email,
         bounceType,
         event.reason || `Status: ${event.status}`,
@@ -135,12 +151,12 @@ export class SendGridWebhookController {
   /**
    * Handle dropped event (email was not sent)
    */
-  private async handleDropped(email: string, event: SendGridEvent) {
-    const tenantId = await this.getTenantIdFromEmail(email);
+  private async handleDropped(email: string, event: SendGridEvent, tenantId: string | null) {
+    const resolvedTenantId = tenantId || await this.getTenantIdFromEmail(email);
 
-    if (tenantId) {
+    if (resolvedTenantId) {
       await this.preferencesService.recordBounce(
-        tenantId,
+        resolvedTenantId,
         email,
         'hard_bounce',
         event.reason || 'Email dropped by SendGrid',
@@ -153,22 +169,22 @@ export class SendGridWebhookController {
   /**
    * Handle spam report
    */
-  private async handleSpamReport(email: string, event: SendGridEvent) {
-    const tenantId = await this.getTenantIdFromEmail(email);
+  private async handleSpamReport(email: string, event: SendGridEvent, tenantId: string | null) {
+    const resolvedTenantId = tenantId || await this.getTenantIdFromEmail(email);
 
-    if (tenantId) {
+    if (resolvedTenantId) {
       // Record as complaint/spam
       await this.preferencesService.recordBounce(
-        tenantId,
+        resolvedTenantId,
         email,
         'spam',
         'User marked email as spam',
       );
 
       // Also unsubscribe the user from all emails
-      const customer = await this.getCustomerByEmail(tenantId, email);
+      const customer = await this.getCustomerByEmail(resolvedTenantId, email);
       if (customer) {
-        await this.preferencesService.unsubscribe(tenantId, customer.id, 'all');
+        await this.preferencesService.unsubscribe(resolvedTenantId, customer.id, 'all');
       }
     }
 
@@ -178,13 +194,13 @@ export class SendGridWebhookController {
   /**
    * Handle unsubscribe event
    */
-  private async handleUnsubscribe(email: string) {
-    const tenantId = await this.getTenantIdFromEmail(email);
+  private async handleUnsubscribe(email: string, tenantId: string | null) {
+    const resolvedTenantId = tenantId || await this.getTenantIdFromEmail(email);
 
-    if (tenantId) {
-      const customer = await this.getCustomerByEmail(tenantId, email);
+    if (resolvedTenantId) {
+      const customer = await this.getCustomerByEmail(resolvedTenantId, email);
       if (customer) {
-        await this.preferencesService.unsubscribe(tenantId, customer.id, 'all');
+        await this.preferencesService.unsubscribe(resolvedTenantId, customer.id, 'all');
       }
     }
 
@@ -194,10 +210,10 @@ export class SendGridWebhookController {
   /**
    * Handle group unsubscribe (unsubscribe from specific category)
    */
-  private async handleGroupUnsubscribe(email: string) {
+  private async handleGroupUnsubscribe(email: string, tenantId: string | null) {
     // For now, treat group unsubscribe same as full unsubscribe
     // In future, you could map SendGrid unsubscribe groups to preference types
-    await this.handleUnsubscribe(email);
+    await this.handleUnsubscribe(email, tenantId);
   }
 
   /**
@@ -209,21 +225,16 @@ export class SendGridWebhookController {
     timestamp: string,
   ): boolean {
     try {
-      const verificationKey = process.env['SENDGRID_WEBHOOK_VERIFICATION_KEY'];
-      if (!verificationKey) {
-        return true; // Skip verification if key not configured
+      if (!this.verificationKey) {
+        return false; // Reject if key not configured
       }
 
-      const timestampedPayload = timestamp + payload;
-      const expectedSignature = crypto
-        .createHmac('sha256', verificationKey)
-        .update(timestampedPayload)
-        .digest('base64');
+      // SendGrid uses ECDSA with a public key, not HMAC
+      const publicKey = this.verificationKey;
+      const verifier = crypto.createVerify('sha256');
+      verifier.update(timestamp + payload);
 
-      return crypto.timingSafeEqual(
-        Buffer.from(signature),
-        Buffer.from(expectedSignature),
-      );
+      return verifier.verify(publicKey, signature, 'base64');
     } catch (error) {
       this.logger.error('Signature verification failed:', error);
       return false;
@@ -239,11 +250,10 @@ export class SendGridWebhookController {
    */
   private async getTenantIdFromEmail(email: string): Promise<string | null> {
     try {
-      // Import PrismaService dynamically to avoid circular deps
-      const { PrismaService } = await import('@platform/db');
-      const prisma = new PrismaService();
-
-      const customer = await prisma.storeCustomer.findFirst({
+      // Note: This fallback lookup is only used when custom_args.tenantId
+      // is not available. It may match the first tenant found for this email.
+      // Prefer passing tenantId via SendGrid custom_args for accurate scoping.
+      const customer = await this.prisma.storeCustomer.findFirst({
         where: { email: email.toLowerCase() },
         select: { tenantId: true },
       });
@@ -260,10 +270,7 @@ export class SendGridWebhookController {
    */
   private async getCustomerByEmail(tenantId: string, email: string) {
     try {
-      const { PrismaService } = await import('@platform/db');
-      const prisma = new PrismaService();
-
-      return prisma.storeCustomer.findFirst({
+      return this.prisma.storeCustomer.findFirst({
         where: {
           tenantId,
           email: email.toLowerCase(),

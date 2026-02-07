@@ -21,10 +21,73 @@ import {
 export class StorageService {
   private readonly logger = new Logger(StorageService.name);
 
+  /** Safe MIME types allowed for upload (STOR-3) */
+  private static readonly ALLOWED_MIME_TYPES: ReadonlySet<string> = new Set([
+    // Images
+    'image/jpeg',
+    'image/png',
+    'image/gif',
+    'image/webp',
+    'image/svg+xml',
+    'image/bmp',
+    'image/tiff',
+    // Documents
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/vnd.oasis.opendocument.text',
+    'application/vnd.oasis.opendocument.spreadsheet',
+    'application/vnd.oasis.opendocument.presentation',
+    // Text
+    'text/plain',
+    'text/csv',
+    'text/html',
+    'text/xml',
+    'application/json',
+    // Archives
+    'application/zip',
+    'application/gzip',
+    // Fallback
+    'application/octet-stream',
+  ]);
+
+  /** Magic-byte signatures for common file types (STOR-3) */
+  private static readonly MAGIC_BYTES: Array<{ mime: string; bytes: number[]; offset?: number }> = [
+    { mime: 'image/jpeg', bytes: [0xff, 0xd8, 0xff] },
+    { mime: 'image/png', bytes: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] },
+    { mime: 'image/gif', bytes: [0x47, 0x49, 0x46, 0x38] },
+    { mime: 'image/webp', bytes: [0x57, 0x45, 0x42, 0x50], offset: 8 },
+    { mime: 'image/bmp', bytes: [0x42, 0x4d] },
+    { mime: 'application/pdf', bytes: [0x25, 0x50, 0x44, 0x46] },
+    { mime: 'application/zip', bytes: [0x50, 0x4b, 0x03, 0x04] },
+    { mime: 'application/gzip', bytes: [0x1f, 0x8b] },
+  ];
+
   constructor(
     @Inject(STORAGE_MODULE_OPTIONS) private readonly options: StorageModuleOptions,
     @Inject(STORAGE_PROVIDER) private readonly provider: StorageProvider,
   ) {}
+
+  /**
+   * STOR-2: Sanitize a storage key to prevent path traversal attacks
+   */
+  private sanitizeKey(key: string): string {
+    if (key.includes('..')) {
+      throw new Error('Invalid storage key: path traversal ("..") is not allowed');
+    }
+    if (key.startsWith('/')) {
+      throw new Error('Invalid storage key: absolute paths are not allowed');
+    }
+    if (key.includes('\0')) {
+      throw new Error('Invalid storage key: null bytes are not allowed');
+    }
+    // Normalize path separators (backslash to forward slash)
+    return key.replace(/\\/g, '/');
+  }
 
   /**
    * Generate a unique storage key for a file
@@ -63,11 +126,48 @@ export class StorageService {
   }
 
   /**
+   * STOR-3: Detect MIME type from buffer magic bytes
+   */
+  private detectMimeFromBuffer(data: Buffer): string | null {
+    for (const sig of StorageService.MAGIC_BYTES) {
+      const offset = sig.offset ?? 0;
+      if (data.length < offset + sig.bytes.length) continue;
+      const match = sig.bytes.every((b, i) => data[offset + i] === b);
+      if (match) return sig.mime;
+    }
+    return null;
+  }
+
+  /**
+   * STOR-3: Validate MIME type against allowlist and check for mismatches
+   * between declared and detected types
+   */
+  private validateMimeType(data: Buffer, declaredContentType: string): void {
+    // Validate declared content type against allowlist
+    if (!StorageService.ALLOWED_MIME_TYPES.has(declaredContentType)) {
+      throw new Error(
+        `Content type "${declaredContentType}" is not in the allowed MIME types list`,
+      );
+    }
+
+    // Detect actual MIME type from buffer magic bytes
+    const detectedMime = this.detectMimeFromBuffer(data);
+    if (detectedMime && detectedMime !== declaredContentType) {
+      this.logger.warn(
+        `MIME type mismatch: declared="${declaredContentType}", detected="${detectedMime}" from file magic bytes. ` +
+        `The file may have been mislabeled.`,
+      );
+    }
+  }
+
+  /**
    * Upload a file from a buffer
    */
   async upload(key: string, data: Buffer, options?: UploadOptions): Promise<UploadResult> {
+    key = this.sanitizeKey(key);
     const contentType = options?.contentType || 'application/octet-stream';
     this.validateFile(data, contentType);
+    this.validateMimeType(data, contentType);
     return this.provider.upload(key, data, options);
   }
 
@@ -95,6 +195,7 @@ export class StorageService {
    * Download a file as a buffer
    */
   async download(key: string): Promise<Buffer> {
+    key = this.sanitizeKey(key);
     return this.provider.download(key);
   }
 
@@ -109,6 +210,7 @@ export class StorageService {
    * Delete a file
    */
   async delete(key: string): Promise<void> {
+    key = this.sanitizeKey(key);
     return this.provider.delete(key);
   }
 
@@ -123,6 +225,7 @@ export class StorageService {
    * Check if a file exists
    */
   async exists(key: string): Promise<boolean> {
+    key = this.sanitizeKey(key);
     return this.provider.exists(key);
   }
 

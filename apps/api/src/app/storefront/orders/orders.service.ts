@@ -1,8 +1,20 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { Prisma } from '@prisma/client';
 import { ListOrdersDto } from './dto';
+
+// PAY-13: Valid order status transitions
+const VALID_ORDER_TRANSITIONS: Record<string, string[]> = {
+  PENDING: ['CONFIRMED', 'CANCELLED'],
+  CONFIRMED: ['PROCESSING', 'SHIPPED', 'CANCELLED'],
+  PROCESSING: ['SHIPPED', 'CANCELLED'],
+  SHIPPED: ['DELIVERED', 'RETURNED'],
+  DELIVERED: ['RETURNED', 'REFUNDED'],
+  CANCELLED: [],
+  RETURNED: ['REFUNDED'],
+  REFUNDED: [],
+};
 
 @Injectable()
 export class OrdersService {
@@ -223,6 +235,14 @@ export class OrdersService {
 
     if (!order) {
       throw new NotFoundException('Order not found');
+    }
+
+    // PAY-13: Validate status transition
+    const allowedTransitions = VALID_ORDER_TRANSITIONS[order.status] || [];
+    if (!allowedTransitions.includes(status)) {
+      throw new BadRequestException(
+        `Invalid status transition: ${order.status} → ${status}. Allowed: ${allowedTransitions.join(', ') || 'none'}`
+      );
     }
 
     const updateData: any = { status };

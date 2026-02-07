@@ -2,6 +2,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { v4 as uuidv4 } from 'uuid';
+import * as crypto from 'crypto';
 import {
   CreateGiftCardDto,
   RedeemGiftCardDto,
@@ -321,12 +322,12 @@ export class GiftCardsService {
     let code = '';
     for (let i = 0; i < 16; i++) {
       if (i > 0 && i % 4 === 0) code += '-';
-      code += chars.charAt(Math.floor(Math.random() * chars.length));
+      code += chars.charAt(crypto.randomInt(chars.length));
     }
     return code;
   }
 
   private generatePin(): string {
-    return Math.floor(1000 + Math.random() * 9000).toString();
+    return crypto.randomInt(1000, 10000).toString();
   }
 }

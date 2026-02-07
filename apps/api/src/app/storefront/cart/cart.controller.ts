@@ -12,11 +12,32 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { CartService } from './cart.service';
+import { CustomerAuthService } from '../auth/customer-auth.service';
 import { AddToCartDto, UpdateCartItemDto, ApplyCouponDto, MergeCartDto } from './dto';
 
 @Controller('store/cart')
 export class CartController {
-  constructor(private readonly cartService: CartService) {}
+  constructor(
+    private readonly cartService: CartService,
+    private readonly customerAuthService: CustomerAuthService,
+  ) {}
+
+  /**
+   * Extract optional customer ID from Bearer token (PAY-1)
+   * Returns undefined for anonymous/guest users
+   */
+  private async getOptionalCustomerId(authHeader?: string, tenantId?: string): Promise<string | undefined> {
+    if (!authHeader || !tenantId) return undefined;
+    try {
+      const [type, token] = authHeader.split(' ');
+      if (type !== 'Bearer' || !token) return undefined;
+      const payload = await this.customerAuthService.verifyToken(token);
+      if (payload.tenantId !== tenantId) return undefined;
+      return payload.customerId;
+    } catch {
+      return undefined;
+    }
+  }
 
   /**
    * Verify cart ownership before allowing access
@@ -47,12 +68,13 @@ export class CartController {
   @Throttle({ medium: { limit: 30, ttl: 60000 } }) // 30 requests per minute
   async getCart(
     @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-customer-id') customerId?: string,
+    @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
+    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     return this.cartService.getOrCreateCart(tenantId, customerId, sessionToken);
   }
 
@@ -65,13 +87,14 @@ export class CartController {
   async getCartById(
     @Headers('x-tenant-id') tenantId: string,
     @Param('id') cartId: string,
-    @Headers('x-customer-id') customerId?: string,
+    @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
 
+    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     // Verify cart ownership before allowing access
     await this.verifyCartOwnership(tenantId, cartId, customerId, sessionToken);
 
@@ -88,13 +111,14 @@ export class CartController {
     @Headers('x-tenant-id') tenantId: string,
     @Param('id') cartId: string,
     @Body() dto: AddToCartDto,
-    @Headers('x-customer-id') customerId?: string,
+    @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
 
+    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     // Verify cart ownership before allowing modifications
     await this.verifyCartOwnership(tenantId, cartId, customerId, sessionToken);
 
@@ -112,13 +136,14 @@ export class CartController {
     @Param('id') cartId: string,
     @Param('itemId') itemId: string,
     @Body() dto: UpdateCartItemDto,
-    @Headers('x-customer-id') customerId?: string,
+    @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
 
+    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     // Verify cart ownership before allowing modifications
     await this.verifyCartOwnership(tenantId, cartId, customerId, sessionToken);
 
@@ -135,13 +160,14 @@ export class CartController {
     @Headers('x-tenant-id') tenantId: string,
     @Param('id') cartId: string,
     @Param('itemId') itemId: string,
-    @Headers('x-customer-id') customerId?: string,
+    @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
 
+    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     // Verify cart ownership before allowing modifications
     await this.verifyCartOwnership(tenantId, cartId, customerId, sessionToken);
 
@@ -158,13 +184,14 @@ export class CartController {
     @Headers('x-tenant-id') tenantId: string,
     @Param('id') cartId: string,
     @Body() dto: ApplyCouponDto,
-    @Headers('x-customer-id') customerId?: string,
+    @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
 
+    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     // Verify cart ownership before allowing coupon application
     await this.verifyCartOwnership(tenantId, cartId, customerId, sessionToken);
 
@@ -180,13 +207,14 @@ export class CartController {
   async removeCoupon(
     @Headers('x-tenant-id') tenantId: string,
     @Param('id') cartId: string,
-    @Headers('x-customer-id') customerId?: string,
+    @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
 
+    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     // Verify cart ownership before allowing modifications
     await this.verifyCartOwnership(tenantId, cartId, customerId, sessionToken);
 
@@ -201,14 +229,15 @@ export class CartController {
   @Throttle({ medium: { limit: 10, ttl: 60000 } }) // 10 requests per minute
   async mergeCart(
     @Headers('x-tenant-id') tenantId: string,
-    @Headers('x-customer-id') customerId: string,
+    @Headers('authorization') authHeader: string,
     @Body() dto: MergeCartDto
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
+    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     if (!customerId) {
-      throw new BadRequestException('Customer ID required for cart merge');
+      throw new BadRequestException('Authentication required for cart merge');
     }
     if (!dto.sessionToken) {
       throw new BadRequestException('Session token required for cart merge');
@@ -225,13 +254,14 @@ export class CartController {
   async clearCart(
     @Headers('x-tenant-id') tenantId: string,
     @Param('id') cartId: string,
-    @Headers('x-customer-id') customerId?: string,
+    @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
 
+    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     // Verify cart ownership before allowing deletion
     await this.verifyCartOwnership(tenantId, cartId, customerId, sessionToken);
 

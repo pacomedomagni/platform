@@ -43,11 +43,24 @@ export class EbayClientService {
     }
   ) {
     try {
-      const response = await client.sell.inventory.createOrReplaceInventoryItem(sku, data);
+      const response = await client.sell.inventory.createOrReplaceInventoryItem(sku, data as any);
       this.logger.log(`Created/updated inventory item: ${sku}`);
       return response;
     } catch (error) {
       this.logger.error(`Failed to create/update inventory item ${sku}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete an inventory item (for rollback on publish failure)
+   */
+  async deleteInventoryItem(client: eBayApi, sku: string) {
+    try {
+      await client.sell.inventory.deleteInventoryItem(sku);
+      this.logger.log(`Deleted inventory item: ${sku}`);
+    } catch (error) {
+      this.logger.error(`Failed to delete inventory item ${sku}`, error);
       throw error;
     }
   }
@@ -208,7 +221,7 @@ export class EbayClientService {
    */
   async getFulfillmentPolicies(client: eBayApi, marketplaceId: string) {
     try {
-      const response = await client.sell.account.getFulfillmentPolicies({ marketplace_id: marketplaceId });
+      const response = await client.sell.account.getFulfillmentPolicies(marketplaceId as any);
       return response.fulfillmentPolicies || [];
     } catch (error) {
       this.logger.error('Failed to fetch fulfillment policies', error);
@@ -221,7 +234,7 @@ export class EbayClientService {
    */
   async getPaymentPolicies(client: eBayApi, marketplaceId: string) {
     try {
-      const response = await client.sell.account.getPaymentPolicies({ marketplace_id: marketplaceId });
+      const response = await client.sell.account.getPaymentPolicies(marketplaceId as any);
       return response.paymentPolicies || [];
     } catch (error) {
       this.logger.error('Failed to fetch payment policies', error);
@@ -234,7 +247,7 @@ export class EbayClientService {
    */
   async getReturnPolicies(client: eBayApi, marketplaceId: string) {
     try {
-      const response = await client.sell.account.getReturnPolicies({ marketplace_id: marketplaceId });
+      const response = await client.sell.account.getReturnPolicies(marketplaceId as any);
       return response.returnPolicies || [];
     } catch (error) {
       this.logger.error('Failed to fetch return policies', error);

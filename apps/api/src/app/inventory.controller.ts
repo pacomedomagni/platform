@@ -301,6 +301,7 @@ export class InventoryController {
   ) {
     const tenantId = req.user?.tenantId;
     if (!tenantId) throw new BadRequestException('Missing tenantId');
+    this.ensureInventoryAccess(req.user);
 
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
@@ -432,6 +433,7 @@ export class InventoryController {
   ) {
     const tenantId = req.user?.tenantId;
     if (!tenantId) throw new BadRequestException('Missing tenantId');
+    this.ensureInventoryAccess(req.user);
 
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
@@ -596,6 +598,7 @@ export class InventoryController {
   ) {
     const tenantId = req.user?.tenantId;
     if (!tenantId) throw new BadRequestException('Missing tenantId');
+    this.ensureInventoryAccess(req.user);
 
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
@@ -668,6 +671,7 @@ export class InventoryController {
   ) {
     const tenantId = req.user?.tenantId;
     if (!tenantId) throw new BadRequestException('Missing tenantId');
+    this.ensureInventoryAccess(req.user);
 
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;

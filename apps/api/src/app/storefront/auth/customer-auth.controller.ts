@@ -220,6 +220,10 @@ export class CustomerAuthController {
     const token = this.extractToken(authHeader);
     const payload = await this.authService.verifyToken(token);
 
+    if (payload.tenantId !== tenantId) {
+      throw new UnauthorizedException('Invalid token');
+    }
+
     return this.authService.getAddresses(tenantId, payload.customerId);
   }
 
@@ -239,6 +243,10 @@ export class CustomerAuthController {
 
     const token = this.extractToken(authHeader);
     const payload = await this.authService.verifyToken(token);
+
+    if (payload.tenantId !== tenantId) {
+      throw new UnauthorizedException('Invalid token');
+    }
 
     return this.authService.addAddress(tenantId, payload.customerId, dto);
   }
@@ -260,6 +268,10 @@ export class CustomerAuthController {
 
     const token = this.extractToken(authHeader);
     const payload = await this.authService.verifyToken(token);
+
+    if (payload.tenantId !== tenantId) {
+      throw new UnauthorizedException('Invalid token');
+    }
 
     return this.authService.updateAddress(
       tenantId,
@@ -285,6 +297,10 @@ export class CustomerAuthController {
 
     const token = this.extractToken(authHeader);
     const payload = await this.authService.verifyToken(token);
+
+    if (payload.tenantId !== tenantId) {
+      throw new UnauthorizedException('Invalid token');
+    }
 
     return this.authService.deleteAddress(tenantId, payload.customerId, addressId);
   }

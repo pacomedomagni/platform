@@ -49,6 +49,19 @@ export class PaymentsService {
       throw new BadRequestException('Webhook signature verification failed');
     }
 
+    // PAY-8: Check for duplicate webhook event
+    const existingEvent = await this.prisma.processedWebhookEvent.findUnique({
+      where: { eventId: event.id },
+    });
+    if (existingEvent) {
+      this.logger.log(`Duplicate webhook event skipped: ${event.id}`);
+      return { received: true, duplicate: true };
+    }
+    // Record event as processed before handling
+    await this.prisma.processedWebhookEvent.create({
+      data: { eventId: event.id, eventType: event.type },
+    });
+
     this.logger.log(`Processing webhook event: ${event.type}`);
 
     switch (event.type) {
@@ -100,6 +113,22 @@ export class PaymentsService {
 
     if (!order) {
       this.logger.warn(`Order not found for PaymentIntent: ${paymentIntent.id}`);
+      return;
+    }
+
+    // PAY-6: Verify payment amount matches order total
+    const expectedAmountCents = Math.round(Number(order.grandTotal) * 100);
+    if (Math.abs(paymentIntent.amount - expectedAmountCents) > 1) {
+      this.logger.error(
+        `Payment amount mismatch for order ${order.orderNumber}: ` +
+        `expected ${expectedAmountCents} cents, got ${paymentIntent.amount} cents`
+      );
+      await this.prisma.order.update({
+        where: { id: orderId },
+        data: {
+          paymentStatus: 'FAILED',
+        },
+      });
       return;
     }
 
@@ -543,8 +572,11 @@ export class PaymentsService {
       throw new BadRequestException('Order payment must be captured before refunding');
     }
 
-    // Generate deterministic idempotency key to prevent duplicate refunds on retry
-    const idempotencyKey = `refund_${tenantId}_${orderId}_${amount || 'full'}`;
+    // PAY-9: Generate unique idempotency key including refund count to prevent collisions
+    const existingRefundCount = await this.prisma.payment.count({
+      where: { orderId, status: { in: ['REFUNDED', 'PARTIALLY_REFUNDED'] } },
+    });
+    const idempotencyKey = `refund_${tenantId}_${orderId}_${amount || 'full'}_${existingRefundCount + 1}`;
 
     const refund = await this.stripeService.createRefund(
       order.stripePaymentIntentId,

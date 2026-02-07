@@ -78,7 +78,7 @@ export class FailedOperationsService {
             in: [OperationStatus.PENDING, OperationStatus.RETRYING],
           },
           nextRetryAt: { lte: now },
-          attemptCount: { lt: this.prisma.raw('max_attempts') },
+          attemptCount: { lt: 5 },
         },
         take: batchSize,
         orderBy: { nextRetryAt: 'asc' },
@@ -214,9 +214,9 @@ export class FailedOperationsService {
 
     // Import StockMovementService dynamically to avoid circular dependency
     const { StockMovementService } = await import(
-      '../../inventory-management/stock-movement.service'
+      '../inventory-management/stock-movement.service'
     );
-    const stockMovementService = new StockMovementService(this.prisma, null as any);
+    const stockMovementService = new StockMovementService(this.prisma);
 
     const warehouse = await this.prisma.warehouse.findUnique({
       where: { id: warehouseId },
@@ -274,17 +274,60 @@ export class FailedOperationsService {
    * Retry email send
    */
   private async retryEmailSend(operation: any): Promise<void> {
-    // TODO: Implement email retry logic
-    // This would integrate with EmailService
-    this.logger.log(`Email send retry not yet implemented for ${operation.referenceId}`);
+    const payload = operation.payload as any;
+    const { emailOptions } = payload;
+
+    if (!emailOptions) {
+      throw new Error('Email payload missing emailOptions');
+    }
+
+    const { EmailService } = await import('@platform/email');
+    const { EmailTemplateService } = await import('@platform/email');
+    const templateService = new EmailTemplateService();
+    const emailService = new EmailService(
+      emailOptions.smtpOptions || { smtp: {} },
+      templateService,
+    );
+
+    await emailService.send(emailOptions);
+
+    this.logger.log(`Successfully retried email send for ${operation.referenceId}`);
   }
 
   /**
    * Retry webhook delivery
    */
   private async retryWebhookDelivery(operation: any): Promise<void> {
-    // TODO: Implement webhook retry logic
-    this.logger.log(`Webhook delivery retry not yet implemented for ${operation.referenceId}`);
+    const payload = operation.payload as any;
+    const { webhookId, event: webhookEvent } = payload;
+
+    if (!webhookId || !webhookEvent) {
+      throw new Error('Webhook payload missing webhookId or event');
+    }
+
+    const { WebhookService } = await import(
+      '../operations/webhook.service'
+    );
+    const webhookService = new WebhookService(this.prisma);
+
+    const webhook = await this.prisma.webhook.findUnique({
+      where: { id: webhookId },
+    });
+
+    if (!webhook) {
+      throw new Error(`Webhook ${webhookId} not found`);
+    }
+
+    await webhookService.triggerEvent(
+      { tenantId: operation.tenantId },
+      {
+        event: webhookEvent.event,
+        payload: webhookEvent.payload || {},
+        timestamp: new Date(),
+      },
+    );
+
+    this.logger.log(`Successfully retried webhook delivery for ${operation.referenceId}`);
   }
 
   /**

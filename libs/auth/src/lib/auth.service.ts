@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import * as jwt from 'jsonwebtoken';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 
 const SALT_ROUNDS = 12;
 
@@ -26,25 +27,18 @@ export class AuthService {
     async validateUser(email: string, pass: string): Promise<any> {
         const user = await this.db.user.findUnique({ where: { email } });
         if (user && user.password) {
-            // Check if password is bcrypt hashed (starts with $2b$ or $2a$)
-            const isBcryptHash = user.password.startsWith('$2b$') || user.password.startsWith('$2a$');
-            
-            let isValid = false;
-            if (isBcryptHash) {
-                isValid = await this.verifyPassword(pass, user.password);
-            } else {
-                // Legacy plain-text comparison (for migration) - rehash on successful login
-                isValid = user.password === pass;
-                if (isValid) {
-                    // Upgrade to bcrypt hash
-                    const hashedPassword = await this.hashPassword(pass);
-                    await this.db.user.update({
-                        where: { id: user.id },
-                        data: { password: hashedPassword }
-                    });
-                }
+            // Detect bcrypt format: $2a$, $2b$, $2y$ are all valid prefixes
+            const isBcryptHash = /^\$2[aby]\$/.test(user.password);
+
+            if (!isBcryptHash) {
+                // Legacy plaintext password detected - force password reset
+                throw new UnauthorizedException(
+                    'Your password must be reset. Please use the forgot password flow.'
+                );
             }
-            
+
+            const isValid = await this.verifyPassword(pass, user.password);
+
             if (isValid) {
                 const { password, ...result } = user;
                 return result;
@@ -58,17 +52,26 @@ export class AuthService {
         if (!jwtSecret) {
             throw new Error('JWT_SECRET must be set when ENABLE_DEV_PASSWORD_LOGIN=true');
         }
-        const payload = { 
+        const payload = {
             username: user.email,
             email: user.email,
             sub: user.id,
             tenant_id: user.tenantId,
-            roles: user.roles 
+            roles: user.roles,
+            iss: 'admin',
+            aud: 'admin',
         };
-        
+
         return {
             access_token: jwt.sign(payload, jwtSecret, { expiresIn: '1d' }),
-            user: user
+            user: {
+                id: user.id,
+                email: user.email,
+                firstName: user.firstName,
+                lastName: user.lastName,
+                tenantId: user.tenantId,
+                roles: user.roles,
+            },
         };
     }
 }

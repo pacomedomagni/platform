@@ -13,8 +13,17 @@ export class JwtTenantGuard extends AuthGuard('jwt') {
     const userTenantId = request.user?.tenantId;
     const headerTenantId = request.headers?.['x-tenant-id'];
 
-    if (userTenantId && headerTenantId && userTenantId !== headerTenantId) {
-      throw new ForbiddenException('Tenant mismatch');
+    if (userTenantId) {
+      // Authenticated user: always use JWT tenantId
+      if (headerTenantId && userTenantId !== headerTenantId) {
+        throw new ForbiddenException('Tenant mismatch');
+      }
+      request.tenantId = userTenantId;
+    } else if (headerTenantId && process.env['ALLOW_TENANT_HEADER'] === 'true') {
+      // No JWT tenantId but header allowed in dev mode
+      request.tenantId = headerTenantId;
+    } else {
+      throw new ForbiddenException('Tenant context required');
     }
 
     return true;

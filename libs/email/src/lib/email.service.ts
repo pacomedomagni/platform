@@ -1,5 +1,6 @@
-import { Injectable, Inject, OnModuleInit, Logger, Optional } from '@nestjs/common';
+import { Injectable, Inject, OnModuleInit, Logger, Optional, BadRequestException } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
+import * as path from 'path';
 import { Transporter } from 'nodemailer';
 import {
   EmailModuleOptions,
@@ -639,6 +640,32 @@ export class EmailService implements OnModuleInit {
     } else if (html && emailOptions.context) {
       // Wrap plain HTML with layout
       html = this.templateService.wrapWithLayout(html, emailOptions.context);
+    }
+
+    // Validate attachment paths to prevent path traversal attacks
+    if (emailOptions.attachments) {
+      const SYSTEM_PATHS = ['/etc', '/proc', '/sys', '/dev', '/var', '/tmp', '/root', '/home'];
+      for (const att of emailOptions.attachments) {
+        if (att.path) {
+          const normalizedPath = path.normalize(att.path);
+          if (normalizedPath.includes('..')) {
+            throw new BadRequestException(
+              `Attachment path contains path traversal sequence: ${att.path}`,
+            );
+          }
+          if (normalizedPath.startsWith('/')) {
+            throw new BadRequestException(
+              `Attachment path must not be an absolute path: ${att.path}`,
+            );
+          }
+          const absoluteResolved = path.resolve(normalizedPath);
+          if (SYSTEM_PATHS.some(sp => absoluteResolved.startsWith(sp))) {
+            throw new BadRequestException(
+              `Attachment path points to a restricted system directory: ${att.path}`,
+            );
+          }
+        }
+      }
     }
 
     const mailOptions: nodemailer.SendMailOptions = {

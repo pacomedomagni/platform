@@ -2,7 +2,6 @@
 import {
   Injectable,
   UnauthorizedException,
-  ConflictException,
   NotFoundException,
   BadRequestException,
   Inject,
@@ -23,14 +22,19 @@ import {
   AddAddressDto,
 } from './dto';
 
-// Fail fast if JWT_SECRET is not set in production
+// Fail fast if JWT_SECRET is not set outside dev/test
 const JWT_SECRET = process.env['JWT_SECRET'];
-if (!JWT_SECRET && process.env['NODE_ENV'] === 'production') {
-  throw new Error('JWT_SECRET environment variable is required in production');
+const NODE_ENV = process.env['NODE_ENV'];
+const ALLOW_FALLBACK_SECRET = NODE_ENV === 'development' || NODE_ENV === 'test';
+
+if (!JWT_SECRET && !ALLOW_FALLBACK_SECRET) {
+  throw new Error(
+    'JWT_SECRET environment variable is required in all environments except development and test'
+  );
 }
 const EFFECTIVE_JWT_SECRET = JWT_SECRET || 'dev-only-secret-change-in-production';
 
-const JWT_EXPIRES_IN = '7d';
+const JWT_EXPIRES_IN = '24h';
 const SALT_ROUNDS = 12;
 const RESET_TOKEN_EXPIRY = 1 * 60 * 60 * 1000; // 1 hour
 const VERIFICATION_TOKEN_EXPIRY = 24 * 60 * 60 * 1000; // 24 hours
@@ -45,7 +49,7 @@ export class CustomerAuthService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
-    if (!JWT_SECRET && process.env['NODE_ENV'] !== 'production') {
+    if (!JWT_SECRET && ALLOW_FALLBACK_SECRET) {
       this.logger.warn('JWT_SECRET not set - using development default. DO NOT USE IN PRODUCTION!');
     }
   }
@@ -60,7 +64,11 @@ export class CustomerAuthService implements OnModuleInit {
     });
 
     if (existing) {
-      throw new ConflictException('Email already registered');
+      // Return generic success to prevent email enumeration
+      this.logger.warn(`Registration attempt for existing email in tenant ${tenantId}`);
+      return {
+        message: 'Registration initiated. Please check your email for verification.',
+      };
     }
 
     // Hash password
@@ -123,7 +131,7 @@ export class CustomerAuthService implements OnModuleInit {
     });
 
     // Generate token
-    const accessToken = this.generateToken(customer.id, tenantId);
+    const accessToken = this.generateToken(customer.id, tenantId, customer.tokenVersion ?? 0);
 
     return {
       customer: this.mapCustomerToResponse(customer),
@@ -196,10 +204,17 @@ export class CustomerAuthService implements OnModuleInit {
     // Hash new password
     const passwordHash = await bcrypt.hash(dto.newPassword, SALT_ROUNDS);
 
-    await this.prisma.storeCustomer.update({
-      where: { id: customerId },
-      data: { passwordHash },
-    });
+    // Increment tokenVersion to revoke existing tokens + invalidate pending reset tokens
+    await this.prisma.$transaction([
+      this.prisma.storeCustomer.update({
+        where: { id: customerId },
+        data: { passwordHash, tokenVersion: { increment: 1 } },
+      }),
+      this.prisma.passwordReset.updateMany({
+        where: { customerId, usedAt: null },
+        data: { usedAt: new Date() },
+      }),
+    ]);
 
     return { success: true, message: 'Password updated successfully' };
   }
@@ -262,13 +277,14 @@ export class CustomerAuthService implements OnModuleInit {
     const passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
 
     // Update password and mark token as used
+    // Increment tokenVersion to revoke existing tokens + invalidate ALL pending reset tokens
     await this.prisma.$transaction([
       this.prisma.storeCustomer.update({
         where: { id: resetRecord.customerId },
-        data: { passwordHash },
+        data: { passwordHash, tokenVersion: { increment: 1 } },
       }),
-      this.prisma.passwordReset.update({
-        where: { id: resetRecord.id },
+      this.prisma.passwordReset.updateMany({
+        where: { customerId: resetRecord.customerId, usedAt: null },
         data: { usedAt: new Date() },
       }),
     ]);
@@ -398,12 +414,30 @@ export class CustomerAuthService implements OnModuleInit {
    */
   async verifyToken(token: string) {
     try {
-      const payload = jwt.verify(token, EFFECTIVE_JWT_SECRET) as {
+      const payload = jwt.verify(token, EFFECTIVE_JWT_SECRET, {
+        issuer: 'storefront',
+        audience: 'storefront',
+      }) as {
         customerId: string;
         tenantId: string;
+        tokenVersion?: number;
       };
+
+      // Verify token version hasn't been revoked (AUTH-9)
+      if (payload.tokenVersion !== undefined) {
+        const customer = await this.prisma.storeCustomer.findUnique({
+          where: { id: payload.customerId },
+          select: { tokenVersion: true },
+        });
+
+        if (customer && customer.tokenVersion !== payload.tokenVersion) {
+          throw new UnauthorizedException('Token has been revoked');
+        }
+      }
+
       return payload;
-    } catch {
+    } catch (error) {
+      if (error instanceof UnauthorizedException) throw error;
       throw new UnauthorizedException('Invalid token');
     }
   }
@@ -542,11 +576,11 @@ export class CustomerAuthService implements OnModuleInit {
 
   // ============ HELPERS ============
 
-  private generateToken(customerId: string, tenantId: string): string {
+  private generateToken(customerId: string, tenantId: string, tokenVersion = 0): string {
     return jwt.sign(
-      { customerId, tenantId },
+      { customerId, tenantId, tokenVersion },
       EFFECTIVE_JWT_SECRET,
-      { expiresIn: JWT_EXPIRES_IN }
+      { expiresIn: JWT_EXPIRES_IN, issuer: 'storefront', audience: 'storefront' }
     );
   }
 

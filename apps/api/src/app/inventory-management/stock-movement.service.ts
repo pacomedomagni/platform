@@ -20,6 +20,18 @@ export class StockMovementService {
     const postingDate = dto.postingDate ? new Date(dto.postingDate) : new Date();
     const postingTs = new Date();
 
+    // Validate posting date: reject dates more than 1 year in the past or in the future
+    const now = new Date();
+    const oneYearAgo = new Date(now);
+    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+
+    if (postingDate > now) {
+      throw new BadRequestException('Posting date cannot be in the future');
+    }
+    if (postingDate < oneYearAgo) {
+      throw new BadRequestException('Posting date cannot be more than 1 year in the past');
+    }
+
     return this.prisma.$transaction(async (tx) => {
       // Validate warehouse
       const warehouse = await tx.warehouse.findFirst({
@@ -171,6 +183,28 @@ export class StockMovementService {
                 `Insufficient stock for ${item.code}. Available: ${availableQty}, Required: ${qty.abs()}`
               );
             }
+
+            // Bin-level negative stock check
+            if (fromLocation) {
+              const binBalance = await tx.binBalance.findFirst({
+                where: {
+                  tenantId: ctx.tenantId,
+                  itemId: item.id,
+                  warehouseId: warehouse.id,
+                  locationId: fromLocation.id,
+                },
+              });
+
+              const binQty = binBalance
+                ? new Prisma.Decimal(binBalance.actualQty)
+                : new Prisma.Decimal(0);
+
+              if (binQty.add(qty).lessThan(0)) {
+                throw new BadRequestException(
+                  `Insufficient bin stock for ${item.code} at location ${itemDto.locationCode}. Bin available: ${binQty}, Required: ${qty.abs()}`
+                );
+              }
+            }
           }
         }
 
@@ -283,44 +317,134 @@ export class StockMovementService {
    * Query stock movements
    */
   async queryMovements(ctx: TenantContext, query: StockMovementQueryDto) {
-    const limit = query.limit || 50;
-    const offset = query.offset || 0;
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.tenant', ${ctx.tenantId}, true)`;
 
-    const where: any = { tenantId: ctx.tenantId };
+      const limit = query.limit || 50;
+      const offset = query.offset || 0;
 
-    if (query.movementType) {
-      where.voucherType = this.getVoucherType(query.movementType);
-    }
+      const where: any = { tenantId: ctx.tenantId };
 
-    if (query.warehouseCode) {
-      const warehouse = await this.prisma.warehouse.findFirst({
-        where: { tenantId: ctx.tenantId, code: query.warehouseCode },
-      });
-      if (warehouse) {
-        where.warehouseId = warehouse.id;
+      if (query.movementType) {
+        where.voucherType = this.getVoucherType(query.movementType);
       }
-    }
 
-    if (query.itemCode) {
-      const item = await this.prisma.item.findFirst({
-        where: { tenantId: ctx.tenantId, code: query.itemCode },
-      });
-      if (item) {
-        where.itemId = item.id;
+      if (query.warehouseCode) {
+        const warehouse = await tx.warehouse.findFirst({
+          where: { tenantId: ctx.tenantId, code: query.warehouseCode },
+        });
+        if (warehouse) {
+          where.warehouseId = warehouse.id;
+        }
       }
-    }
 
-    if (query.fromDate || query.toDate) {
-      where.postingDate = {};
-      if (query.fromDate) where.postingDate.gte = new Date(query.fromDate);
-      if (query.toDate) where.postingDate.lte = new Date(query.toDate);
-    }
+      if (query.itemCode) {
+        const item = await tx.item.findFirst({
+          where: { tenantId: ctx.tenantId, code: query.itemCode },
+        });
+        if (item) {
+          where.itemId = item.id;
+        }
+      }
 
-    const [entries, total] = await Promise.all([
-      this.prisma.stockLedgerEntry.findMany({
+      if (query.fromDate || query.toDate) {
+        where.postingDate = {};
+        if (query.fromDate) where.postingDate.gte = new Date(query.fromDate);
+        if (query.toDate) where.postingDate.lte = new Date(query.toDate);
+      }
+
+      const [entries, total] = await Promise.all([
+        tx.stockLedgerEntry.findMany({
+          where,
+          include: {
+            item: true,
+            warehouse: true,
+            fromLocation: true,
+            toLocation: true,
+            batch: true,
+          },
+          orderBy: { postingTs: 'desc' },
+          take: limit,
+          skip: offset,
+        }),
+        tx.stockLedgerEntry.count({ where }),
+      ]);
+
+      return {
+        data: entries.map(e => ({
+          id: e.id,
+          postingDate: e.postingDate.toISOString().split('T')[0],
+          postingTs: e.postingTs,
+          voucherType: e.voucherType,
+          voucherNo: e.voucherNo,
+          itemCode: e.item.code,
+          itemName: e.item.name,
+          warehouseCode: e.warehouse.code,
+          fromLocation: e.fromLocation?.code,
+          toLocation: e.toLocation?.code,
+          batchNo: e.batch?.batchNo,
+          qty: Number(e.qty),
+          rate: Number(e.valuationRate),
+          value: Number(e.stockValueDifference),
+        })),
+        total,
+        limit,
+        offset,
+      };
+    });
+  }
+
+  /**
+   * Get movement summary by type
+   */
+  async getMovementSummary(ctx: TenantContext, startDate?: Date, endDate?: Date) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.tenant', ${ctx.tenantId}, true)`;
+
+      const where: any = { tenantId: ctx.tenantId };
+      if (startDate || endDate) {
+        where.postingDate = {};
+        if (startDate) where.postingDate.gte = startDate;
+        if (endDate) where.postingDate.lte = endDate;
+      }
+
+      const entries = await tx.stockLedgerEntry.findMany({
         where,
+        select: { voucherType: true, qty: true, stockValueDifference: true },
+      });
+
+      const summary: Record<string, { count: number; totalQty: number; totalValue: number }> = {};
+
+      for (const entry of entries) {
+        if (!summary[entry.voucherType]) {
+          summary[entry.voucherType] = { count: 0, totalQty: 0, totalValue: 0 };
+        }
+        summary[entry.voucherType].count++;
+        summary[entry.voucherType].totalQty += Math.abs(Number(entry.qty));
+        summary[entry.voucherType].totalValue += Math.abs(Number(entry.stockValueDifference));
+      }
+
+      return summary;
+    });
+  }
+
+  /**
+   * Get recent movements for an item
+   */
+  async getItemMovements(ctx: TenantContext, itemCode: string, limit = 20) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.tenant', ${ctx.tenantId}, true)`;
+
+      const item = await tx.item.findFirst({
+        where: { tenantId: ctx.tenantId, code: itemCode },
+      });
+      if (!item) {
+        throw new NotFoundException(`Item not found: ${itemCode}`);
+      }
+
+      const entries = await tx.stockLedgerEntry.findMany({
+        where: { tenantId: ctx.tenantId, itemId: item.id },
         include: {
-          item: true,
           warehouse: true,
           fromLocation: true,
           toLocation: true,
@@ -328,108 +452,30 @@ export class StockMovementService {
         },
         orderBy: { postingTs: 'desc' },
         take: limit,
-        skip: offset,
-      }),
-      this.prisma.stockLedgerEntry.count({ where }),
-    ]);
+      });
 
-    return {
-      data: entries.map(e => ({
-        id: e.id,
-        postingDate: e.postingDate.toISOString().split('T')[0],
-        postingTs: e.postingTs,
-        voucherType: e.voucherType,
-        voucherNo: e.voucherNo,
-        itemCode: e.item.code,
-        itemName: e.item.name,
-        warehouseCode: e.warehouse.code,
-        fromLocation: e.fromLocation?.code,
-        toLocation: e.toLocation?.code,
-        batchNo: e.batch?.batchNo,
-        qty: Number(e.qty),
-        rate: Number(e.valuationRate),
-        value: Number(e.stockValueDifference),
-      })),
-      total,
-      limit,
-      offset,
-    };
-  }
+      // Calculate running balance
+      let runningQty = 0;
+      const movements = entries.reverse().map(e => {
+        runningQty += Number(e.qty);
+        return {
+          id: e.id,
+          postingDate: e.postingDate.toISOString().split('T')[0],
+          voucherType: e.voucherType,
+          voucherNo: e.voucherNo,
+          warehouseCode: e.warehouse.code,
+          qty: Number(e.qty),
+          runningBalance: runningQty,
+          rate: Number(e.valuationRate),
+        };
+      }).reverse();
 
-  /**
-   * Get movement summary by type
-   */
-  async getMovementSummary(ctx: TenantContext, startDate?: Date, endDate?: Date) {
-    const where: any = { tenantId: ctx.tenantId };
-    if (startDate || endDate) {
-      where.postingDate = {};
-      if (startDate) where.postingDate.gte = startDate;
-      if (endDate) where.postingDate.lte = endDate;
-    }
-
-    const entries = await this.prisma.stockLedgerEntry.findMany({
-      where,
-      select: { voucherType: true, qty: true, stockValueDifference: true },
-    });
-
-    const summary: Record<string, { count: number; totalQty: number; totalValue: number }> = {};
-
-    for (const entry of entries) {
-      if (!summary[entry.voucherType]) {
-        summary[entry.voucherType] = { count: 0, totalQty: 0, totalValue: 0 };
-      }
-      summary[entry.voucherType].count++;
-      summary[entry.voucherType].totalQty += Math.abs(Number(entry.qty));
-      summary[entry.voucherType].totalValue += Math.abs(Number(entry.stockValueDifference));
-    }
-
-    return summary;
-  }
-
-  /**
-   * Get recent movements for an item
-   */
-  async getItemMovements(ctx: TenantContext, itemCode: string, limit = 20) {
-    const item = await this.prisma.item.findFirst({
-      where: { tenantId: ctx.tenantId, code: itemCode },
-    });
-    if (!item) {
-      throw new NotFoundException(`Item not found: ${itemCode}`);
-    }
-
-    const entries = await this.prisma.stockLedgerEntry.findMany({
-      where: { tenantId: ctx.tenantId, itemId: item.id },
-      include: {
-        warehouse: true,
-        fromLocation: true,
-        toLocation: true,
-        batch: true,
-      },
-      orderBy: { postingTs: 'desc' },
-      take: limit,
-    });
-
-    // Calculate running balance
-    let runningQty = 0;
-    const movements = entries.reverse().map(e => {
-      runningQty += Number(e.qty);
       return {
-        id: e.id,
-        postingDate: e.postingDate.toISOString().split('T')[0],
-        voucherType: e.voucherType,
-        voucherNo: e.voucherNo,
-        warehouseCode: e.warehouse.code,
-        qty: Number(e.qty),
-        runningBalance: runningQty,
-        rate: Number(e.valuationRate),
+        itemCode: item.code,
+        itemName: item.name,
+        movements,
       };
-    }).reverse();
-
-    return {
-      itemCode: item.code,
-      itemName: item.name,
-      movements,
-    };
+    });
   }
 
   // ==========================================

@@ -2,6 +2,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { v4 as uuidv4 } from 'uuid';
+import * as crypto from 'crypto';
 import {
   CreateWishlistDto,
   AddWishlistItemDto,
@@ -95,7 +96,7 @@ export class WishlistService {
         customerId,
         name: dto.name || 'My Wishlist',
         isPublic: dto.isPublic ?? false,
-        shareToken: dto.isPublic ? uuidv4().substring(0, 8) : null,
+        shareToken: dto.isPublic ? crypto.randomBytes(16).toString('hex') : null,
         isDefault: !dto.name, // First unnamed wishlist is default
       },
     });
@@ -116,7 +117,7 @@ export class WishlistService {
         ...(dto.name && { name: dto.name }),
         ...(dto.isPublic !== undefined && {
           isPublic: dto.isPublic,
-          shareToken: dto.isPublic ? (wishlist.shareToken || uuidv4().substring(0, 8)) : null,
+          shareToken: dto.isPublic ? (wishlist.shareToken || crypto.randomBytes(16).toString('hex')) : null,
         }),
       },
     });

@@ -30,58 +30,60 @@ export class BatchSerialService {
    * Create a new batch
    */
   async createBatch(ctx: TenantContext, dto: CreateBatchDto) {
-    const item = await this.prisma.item.findFirst({
-      where: { tenantId: ctx.tenantId, code: dto.itemCode },
+    return this.prisma.$transaction(async (tx) => {
+      const item = await tx.item.findFirst({
+        where: { tenantId: ctx.tenantId, code: dto.itemCode },
+      });
+
+      if (!item) {
+        throw new NotFoundException(`Item not found: ${dto.itemCode}`);
+      }
+
+      if (!item.hasBatch) {
+        throw new BadRequestException(`Item ${dto.itemCode} does not support batch tracking`);
+      }
+
+      const existing = await tx.batch.findFirst({
+        where: { tenantId: ctx.tenantId, itemId: item.id, batchNo: dto.batchNo },
+      });
+
+      if (existing) {
+        throw new BadRequestException(`Batch ${dto.batchNo} already exists for item ${dto.itemCode}`);
+      }
+
+      const batch = await tx.batch.create({
+        data: {
+          tenantId: ctx.tenantId,
+          itemId: item.id,
+          batchNo: dto.batchNo,
+          mfgDate: dto.mfgDate ? new Date(dto.mfgDate) : null,
+          expDate: dto.expDate ? new Date(dto.expDate) : null,
+        },
+        include: { item: true },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          tenantId: ctx.tenantId,
+          userId: ctx.userId,
+          action: 'create',
+          docType: 'Batch',
+          docName: batch.batchNo,
+          meta: { itemCode: dto.itemCode, batchNo: dto.batchNo },
+        },
+      });
+
+      return {
+        id: batch.id,
+        itemCode: batch.item.code,
+        itemName: batch.item.name,
+        batchNo: batch.batchNo,
+        mfgDate: batch.mfgDate?.toISOString().split('T')[0],
+        expDate: batch.expDate?.toISOString().split('T')[0],
+        isActive: batch.isActive,
+        createdAt: batch.createdAt,
+      };
     });
-
-    if (!item) {
-      throw new NotFoundException(`Item not found: ${dto.itemCode}`);
-    }
-
-    if (!item.hasBatch) {
-      throw new BadRequestException(`Item ${dto.itemCode} does not support batch tracking`);
-    }
-
-    const existing = await this.prisma.batch.findFirst({
-      where: { tenantId: ctx.tenantId, itemId: item.id, batchNo: dto.batchNo },
-    });
-
-    if (existing) {
-      throw new BadRequestException(`Batch ${dto.batchNo} already exists for item ${dto.itemCode}`);
-    }
-
-    const batch = await this.prisma.batch.create({
-      data: {
-        tenantId: ctx.tenantId,
-        itemId: item.id,
-        batchNo: dto.batchNo,
-        mfgDate: dto.mfgDate ? new Date(dto.mfgDate) : null,
-        expDate: dto.expDate ? new Date(dto.expDate) : null,
-      },
-      include: { item: true },
-    });
-
-    await this.prisma.auditLog.create({
-      data: {
-        tenantId: ctx.tenantId,
-        userId: ctx.userId,
-        action: 'create',
-        docType: 'Batch',
-        docName: batch.batchNo,
-        meta: { itemCode: dto.itemCode, batchNo: dto.batchNo },
-      },
-    });
-
-    return {
-      id: batch.id,
-      itemCode: batch.item.code,
-      itemName: batch.item.name,
-      batchNo: batch.batchNo,
-      mfgDate: batch.mfgDate?.toISOString().split('T')[0],
-      expDate: batch.expDate?.toISOString().split('T')[0],
-      isActive: batch.isActive,
-      createdAt: batch.createdAt,
-    };
   }
 
   /**
@@ -97,6 +99,12 @@ export class BatchSerialService {
       throw new NotFoundException(`Batch not found`);
     }
 
+    const beforeValues = {
+      mfgDate: batch.mfgDate?.toISOString().split('T')[0] ?? null,
+      expDate: batch.expDate?.toISOString().split('T')[0] ?? null,
+      isActive: batch.isActive,
+    };
+
     const updated = await this.prisma.batch.update({
       where: { id: batchId },
       data: {
@@ -105,6 +113,28 @@ export class BatchSerialService {
         isActive: dto.isActive,
       },
       include: { item: true },
+    });
+
+    const afterValues = {
+      mfgDate: updated.mfgDate?.toISOString().split('T')[0] ?? null,
+      expDate: updated.expDate?.toISOString().split('T')[0] ?? null,
+      isActive: updated.isActive,
+    };
+
+    await this.prisma.auditLog.create({
+      data: {
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        action: 'UPDATE_BATCH',
+        docType: 'Batch',
+        docName: batch.batchNo,
+        meta: {
+          batchId,
+          itemCode: batch.item.code,
+          before: beforeValues,
+          after: afterValues,
+        },
+      },
     });
 
     return {
@@ -282,188 +312,192 @@ export class BatchSerialService {
    * Create a single serial
    */
   async createSerial(ctx: TenantContext, dto: CreateSerialDto) {
-    const item = await this.prisma.item.findFirst({
-      where: { tenantId: ctx.tenantId, code: dto.itemCode },
-    });
-
-    if (!item) {
-      throw new NotFoundException(`Item not found: ${dto.itemCode}`);
-    }
-
-    if (!item.hasSerial) {
-      throw new BadRequestException(`Item ${dto.itemCode} does not support serial tracking`);
-    }
-
-    const existing = await this.prisma.serial.findFirst({
-      where: { tenantId: ctx.tenantId, serialNo: dto.serialNo },
-    });
-
-    if (existing) {
-      throw new BadRequestException(`Serial number ${dto.serialNo} already exists`);
-    }
-
-    // Resolve warehouse and location if provided
-    let warehouseId = null;
-    let locationId = null;
-    let batchId = null;
-
-    if (dto.warehouseCode) {
-      const warehouse = await this.prisma.warehouse.findFirst({
-        where: { tenantId: ctx.tenantId, code: dto.warehouseCode },
+    return this.prisma.$transaction(async (tx) => {
+      const item = await tx.item.findFirst({
+        where: { tenantId: ctx.tenantId, code: dto.itemCode },
       });
-      if (!warehouse) {
-        throw new BadRequestException(`Warehouse not found: ${dto.warehouseCode}`);
-      }
-      warehouseId = warehouse.id;
 
-      if (dto.locationCode) {
-        const location = await this.prisma.location.findFirst({
-          where: { tenantId: ctx.tenantId, warehouseId: warehouse.id, code: dto.locationCode },
+      if (!item) {
+        throw new NotFoundException(`Item not found: ${dto.itemCode}`);
+      }
+
+      if (!item.hasSerial) {
+        throw new BadRequestException(`Item ${dto.itemCode} does not support serial tracking`);
+      }
+
+      const existing = await tx.serial.findFirst({
+        where: { tenantId: ctx.tenantId, serialNo: dto.serialNo },
+      });
+
+      if (existing) {
+        throw new BadRequestException(`Serial number ${dto.serialNo} already exists`);
+      }
+
+      // Resolve warehouse and location if provided
+      let warehouseId = null;
+      let locationId = null;
+      let batchId = null;
+
+      if (dto.warehouseCode) {
+        const warehouse = await tx.warehouse.findFirst({
+          where: { tenantId: ctx.tenantId, code: dto.warehouseCode },
         });
-        if (!location) {
-          throw new BadRequestException(`Location not found: ${dto.locationCode}`);
+        if (!warehouse) {
+          throw new BadRequestException(`Warehouse not found: ${dto.warehouseCode}`);
         }
-        locationId = location.id;
-      }
-    }
+        warehouseId = warehouse.id;
 
-    if (dto.batchNo) {
-      const batch = await this.prisma.batch.findFirst({
-        where: { tenantId: ctx.tenantId, itemId: item.id, batchNo: dto.batchNo },
+        if (dto.locationCode) {
+          const location = await tx.location.findFirst({
+            where: { tenantId: ctx.tenantId, warehouseId: warehouse.id, code: dto.locationCode },
+          });
+          if (!location) {
+            throw new BadRequestException(`Location not found: ${dto.locationCode}`);
+          }
+          locationId = location.id;
+        }
+      }
+
+      if (dto.batchNo) {
+        const batch = await tx.batch.findFirst({
+          where: { tenantId: ctx.tenantId, itemId: item.id, batchNo: dto.batchNo },
+        });
+        if (!batch) {
+          throw new BadRequestException(`Batch not found: ${dto.batchNo}`);
+        }
+        batchId = batch.id;
+      }
+
+      const serial = await tx.serial.create({
+        data: {
+          tenantId: ctx.tenantId,
+          itemId: item.id,
+          serialNo: dto.serialNo,
+          status: SerialStatus.AVAILABLE,
+          warehouseId,
+          locationId,
+          batchId,
+        },
+        include: { item: true, warehouse: true, location: true, batch: true },
       });
-      if (!batch) {
-        throw new BadRequestException(`Batch not found: ${dto.batchNo}`);
-      }
-      batchId = batch.id;
-    }
 
-    const serial = await this.prisma.serial.create({
-      data: {
-        tenantId: ctx.tenantId,
-        itemId: item.id,
-        serialNo: dto.serialNo,
-        status: SerialStatus.AVAILABLE,
-        warehouseId,
-        locationId,
-        batchId,
-      },
-      include: { item: true, warehouse: true, location: true, batch: true },
+      await tx.auditLog.create({
+        data: {
+          tenantId: ctx.tenantId,
+          userId: ctx.userId,
+          action: 'create',
+          docType: 'Serial',
+          docName: serial.serialNo,
+          meta: { itemCode: dto.itemCode, serialNo: dto.serialNo },
+        },
+      });
+
+      return {
+        id: serial.id,
+        itemCode: serial.item.code,
+        itemName: serial.item.name,
+        serialNo: serial.serialNo,
+        status: serial.status,
+        warehouseCode: serial.warehouse?.code,
+        locationCode: serial.location?.code,
+        batchNo: serial.batch?.batchNo,
+        createdAt: serial.createdAt,
+      };
     });
-
-    await this.prisma.auditLog.create({
-      data: {
-        tenantId: ctx.tenantId,
-        userId: ctx.userId,
-        action: 'create',
-        docType: 'Serial',
-        docName: serial.serialNo,
-        meta: { itemCode: dto.itemCode, serialNo: dto.serialNo },
-      },
-    });
-
-    return {
-      id: serial.id,
-      itemCode: serial.item.code,
-      itemName: serial.item.name,
-      serialNo: serial.serialNo,
-      status: serial.status,
-      warehouseCode: serial.warehouse?.code,
-      locationCode: serial.location?.code,
-      batchNo: serial.batch?.batchNo,
-      createdAt: serial.createdAt,
-    };
   }
 
   /**
    * Create multiple serials in bulk
    */
   async createSerialsBulk(ctx: TenantContext, dto: CreateSerialBulkDto) {
-    const item = await this.prisma.item.findFirst({
-      where: { tenantId: ctx.tenantId, code: dto.itemCode },
-    });
-
-    if (!item) {
-      throw new NotFoundException(`Item not found: ${dto.itemCode}`);
-    }
-
-    if (!item.hasSerial) {
-      throw new BadRequestException(`Item ${dto.itemCode} does not support serial tracking`);
-    }
-
-    // Check for duplicates
-    const existing = await this.prisma.serial.findMany({
-      where: { tenantId: ctx.tenantId, serialNo: { in: dto.serialNos } },
-      select: { serialNo: true },
-    });
-
-    if (existing.length > 0) {
-      throw new BadRequestException(
-        `Serial numbers already exist: ${existing.map(e => e.serialNo).join(', ')}`
-      );
-    }
-
-    // Resolve warehouse and location
-    let warehouseId = null;
-    let locationId = null;
-    let batchId = null;
-
-    if (dto.warehouseCode) {
-      const warehouse = await this.prisma.warehouse.findFirst({
-        where: { tenantId: ctx.tenantId, code: dto.warehouseCode },
+    return this.prisma.$transaction(async (tx) => {
+      const item = await tx.item.findFirst({
+        where: { tenantId: ctx.tenantId, code: dto.itemCode },
       });
-      if (!warehouse) {
-        throw new BadRequestException(`Warehouse not found: ${dto.warehouseCode}`);
-      }
-      warehouseId = warehouse.id;
 
-      if (dto.locationCode) {
-        const location = await this.prisma.location.findFirst({
-          where: { tenantId: ctx.tenantId, warehouseId: warehouse.id, code: dto.locationCode },
+      if (!item) {
+        throw new NotFoundException(`Item not found: ${dto.itemCode}`);
+      }
+
+      if (!item.hasSerial) {
+        throw new BadRequestException(`Item ${dto.itemCode} does not support serial tracking`);
+      }
+
+      // Check for duplicates
+      const existing = await tx.serial.findMany({
+        where: { tenantId: ctx.tenantId, serialNo: { in: dto.serialNos } },
+        select: { serialNo: true },
+      });
+
+      if (existing.length > 0) {
+        throw new BadRequestException(
+          `Serial numbers already exist: ${existing.map(e => e.serialNo).join(', ')}`
+        );
+      }
+
+      // Resolve warehouse and location
+      let warehouseId = null;
+      let locationId = null;
+      let batchId = null;
+
+      if (dto.warehouseCode) {
+        const warehouse = await tx.warehouse.findFirst({
+          where: { tenantId: ctx.tenantId, code: dto.warehouseCode },
         });
-        if (!location) {
-          throw new BadRequestException(`Location not found: ${dto.locationCode}`);
+        if (!warehouse) {
+          throw new BadRequestException(`Warehouse not found: ${dto.warehouseCode}`);
         }
-        locationId = location.id;
-      }
-    }
+        warehouseId = warehouse.id;
 
-    if (dto.batchNo) {
-      const batch = await this.prisma.batch.findFirst({
-        where: { tenantId: ctx.tenantId, itemId: item.id, batchNo: dto.batchNo },
+        if (dto.locationCode) {
+          const location = await tx.location.findFirst({
+            where: { tenantId: ctx.tenantId, warehouseId: warehouse.id, code: dto.locationCode },
+          });
+          if (!location) {
+            throw new BadRequestException(`Location not found: ${dto.locationCode}`);
+          }
+          locationId = location.id;
+        }
+      }
+
+      if (dto.batchNo) {
+        const batch = await tx.batch.findFirst({
+          where: { tenantId: ctx.tenantId, itemId: item.id, batchNo: dto.batchNo },
+        });
+        if (!batch) {
+          throw new BadRequestException(`Batch not found: ${dto.batchNo}`);
+        }
+        batchId = batch.id;
+      }
+
+      const result = await tx.serial.createMany({
+        data: dto.serialNos.map(serialNo => ({
+          tenantId: ctx.tenantId,
+          itemId: item.id,
+          serialNo,
+          status: SerialStatus.AVAILABLE,
+          warehouseId,
+          locationId,
+          batchId,
+        })),
       });
-      if (!batch) {
-        throw new BadRequestException(`Batch not found: ${dto.batchNo}`);
-      }
-      batchId = batch.id;
-    }
 
-    const result = await this.prisma.serial.createMany({
-      data: dto.serialNos.map(serialNo => ({
-        tenantId: ctx.tenantId,
-        itemId: item.id,
-        serialNo,
-        status: SerialStatus.AVAILABLE,
-        warehouseId,
-        locationId,
-        batchId,
-      })),
+      await tx.auditLog.create({
+        data: {
+          tenantId: ctx.tenantId,
+          userId: ctx.userId,
+          action: 'bulk_create',
+          docType: 'Serial',
+          docName: `${dto.serialNos.length} serials`,
+          meta: { itemCode: dto.itemCode, count: dto.serialNos.length },
+        },
+      });
+
+      return {
+        created: result.count,
+        itemCode: dto.itemCode,
+      };
     });
-
-    await this.prisma.auditLog.create({
-      data: {
-        tenantId: ctx.tenantId,
-        userId: ctx.userId,
-        action: 'bulk_create',
-        docType: 'Serial',
-        docName: `${dto.serialNos.length} serials`,
-        meta: { itemCode: dto.itemCode, count: dto.serialNos.length },
-      },
-    });
-
-    return {
-      created: result.count,
-      itemCode: dto.itemCode,
-    };
   }
 
   /**
@@ -477,6 +511,12 @@ export class BatchSerialService {
     if (!serial) {
       throw new NotFoundException('Serial not found');
     }
+
+    const beforeValues = {
+      status: serial.status,
+      warehouseId: serial.warehouseId,
+      locationId: serial.locationId,
+    };
 
     const updateData: any = {};
 
@@ -513,6 +553,28 @@ export class BatchSerialService {
       where: { id: serialId },
       data: updateData,
       include: { item: true, warehouse: true, location: true, batch: true },
+    });
+
+    const afterValues = {
+      status: updated.status,
+      warehouseId: updated.warehouseId,
+      locationId: updated.locationId,
+    };
+
+    await this.prisma.auditLog.create({
+      data: {
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        action: 'UPDATE_SERIAL',
+        docType: 'Serial',
+        docName: serial.serialNo,
+        meta: {
+          serialId,
+          serialNo: serial.serialNo,
+          before: beforeValues,
+          after: afterValues,
+        },
+      },
     });
 
     return {

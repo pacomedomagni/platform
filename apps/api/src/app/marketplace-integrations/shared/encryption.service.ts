@@ -14,17 +14,16 @@ export class EncryptionService {
   private readonly saltLength = 64;
 
   /**
-   * Get encryption key from environment
+   * Get encryption key from environment, derived with the given salt
    */
-  private getKey(): Buffer {
+  private getKey(salt: Buffer): Buffer {
     const secret = process.env['ENCRYPTION_KEY'] || process.env['JWT_SECRET'] || 'default-dev-key-change-in-production';
 
     if (process.env.NODE_ENV === 'production' && secret === 'default-dev-key-change-in-production') {
       throw new Error('ENCRYPTION_KEY must be set in production');
     }
 
-    // Derive a key using scrypt
-    const salt = Buffer.from('noslag-marketplace-salt'); // Static salt for key derivation
+    // Derive a key using scrypt with per-encryption random salt
     return scryptSync(secret, salt, this.keyLength);
   }
 
@@ -35,7 +34,8 @@ export class EncryptionService {
   encrypt(plaintext: string): string {
     if (!plaintext) return '';
 
-    const key = this.getKey();
+    const salt = randomBytes(this.saltLength);
+    const key = this.getKey(salt);
     const iv = randomBytes(this.ivLength);
 
     const cipher = createCipheriv(this.algorithm, key, iv);
@@ -45,8 +45,8 @@ export class EncryptionService {
 
     const tag = cipher.getAuthTag();
 
-    // Combine IV + encrypted + tag, then base64 encode
-    const combined = Buffer.concat([iv, Buffer.from(encrypted, 'hex'), tag]);
+    // Combine salt + IV + encrypted + tag, then base64 encode
+    const combined = Buffer.concat([salt, iv, Buffer.from(encrypted, 'hex'), tag]);
     return combined.toString('base64');
   }
 
@@ -57,13 +57,15 @@ export class EncryptionService {
     if (!encryptedData) return '';
 
     try {
-      const key = this.getKey();
       const combined = Buffer.from(encryptedData, 'base64');
 
-      // Extract IV, encrypted data, and auth tag
-      const iv = combined.slice(0, this.ivLength);
+      // Extract salt, IV, encrypted data, and auth tag
+      const salt = combined.slice(0, this.saltLength);
+      const iv = combined.slice(this.saltLength, this.saltLength + this.ivLength);
       const tag = combined.slice(-this.tagLength);
-      const encrypted = combined.slice(this.ivLength, -this.tagLength);
+      const encrypted = combined.slice(this.saltLength + this.ivLength, -this.tagLength);
+
+      const key = this.getKey(salt);
 
       const decipher = createDecipheriv(this.algorithm, key, iv);
       decipher.setAuthTag(tag);

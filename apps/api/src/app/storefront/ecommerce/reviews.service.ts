@@ -152,9 +152,9 @@ export class ReviewsService {
     return this.mapReviewToResponse(review);
   }
 
-  async voteReview(reviewId: string, customerId: string | null, sessionToken: string | null, dto: ReviewVoteDto) {
-    const review = await this.prisma.productReview.findUnique({
-      where: { id: reviewId },
+  async voteReview(tenantId: string, reviewId: string, customerId: string | null, sessionToken: string | null, dto: ReviewVoteDto) {
+    const review = await this.prisma.productReview.findFirst({
+      where: { id: reviewId, tenantId },
     });
 
     if (!review || review.status !== 'approved') {

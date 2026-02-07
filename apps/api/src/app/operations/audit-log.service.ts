@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { Response } from 'express';
+import * as fs from 'fs';
+import * as path from 'path';
 
 interface TenantContext {
   tenantId: string;
@@ -37,6 +39,23 @@ export class AuditLogService {
       });
     } catch (error) {
       this.logger.error(`Failed to create audit log: ${error}`);
+      // Fallback: write the failed audit entry to a local JSON log file
+      try {
+        const fallbackPath = path.join(process.cwd(), 'audit-log-fallback.json');
+        const fallbackEntry = JSON.stringify({
+          timestamp: new Date().toISOString(),
+          tenantId: ctx.tenantId,
+          userId: ctx.userId,
+          action: entry.action,
+          docType: entry.docType,
+          docName: entry.docName,
+          meta: entry.meta || null,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        fs.appendFileSync(fallbackPath, fallbackEntry + '\n', 'utf-8');
+      } catch (fallbackError) {
+        this.logger.error(`Failed to write audit log fallback: ${fallbackError}`);
+      }
       // Don't throw - audit logging should not break the main operation
     }
   }
@@ -154,7 +173,14 @@ export class AuditLogService {
 
     for (const log of logs) {
       csvRows.push(
-        `"${log.id}","${log.action}","${log.docType}","${log.docName}","${log.userId || ''}","${log.createdAt.toISOString()}"`
+        [
+          this.escapeCsvField(String(log.id)),
+          this.escapeCsvField(String(log.action)),
+          this.escapeCsvField(String(log.docType)),
+          this.escapeCsvField(String(log.docName)),
+          this.escapeCsvField(String(log.userId || '')),
+          this.escapeCsvField(log.createdAt.toISOString()),
+        ].join(',')
       );
     }
 
@@ -220,6 +246,20 @@ export class AuditLogService {
         count: u._count.userId,
       })),
     };
+  }
+
+  /**
+   * Escape a CSV field to prevent injection attacks.
+   * - Replaces `"` with `""` and wraps in quotes.
+   * - Prefixes cells starting with `=`, `+`, `-`, `@` with a single quote
+   *   to prevent formula injection.
+   */
+  private escapeCsvField(value: string): string {
+    let escaped = value.replace(/"/g, '""');
+    if (/^[=+\-@]/.test(escaped)) {
+      escaped = "'" + escaped;
+    }
+    return `"${escaped}"`;
   }
 
   /**

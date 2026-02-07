@@ -13,6 +13,7 @@ import { EbayTokenResponse, EbayBusinessPolicies } from '../shared/marketplace.t
 export class EbayStoreService {
   private readonly logger = new Logger(EbayStoreService.name);
   private readonly clientCache = new Map<string, { client: eBayApi; expiry: number }>();
+  private readonly refreshLocks = new Map<string, Promise<any>>();
   private readonly TOKEN_BUFFER_MS = 60000; // Refresh 1 min before expiry
 
   constructor(
@@ -211,8 +212,19 @@ export class EbayStoreService {
       return client;
     }
 
-    // Refresh the token
-    const tokens = await this.refreshAccessToken(refreshToken);
+    // Refresh the token (with mutex to prevent concurrent refreshes)
+    const existingLock = this.refreshLocks.get(connectionId);
+    if (existingLock) {
+      await existingLock;
+      // After waiting, retry getClient to use the refreshed token
+      return this.getClient(connectionId);
+    }
+
+    const refreshPromise = this.refreshAccessToken(refreshToken)
+      .finally(() => this.refreshLocks.delete(connectionId));
+    this.refreshLocks.set(connectionId, refreshPromise);
+
+    const tokens = await refreshPromise;
 
     client.OAuth2.setCredentials({
       access_token: tokens.access_token,
@@ -279,9 +291,9 @@ export class EbayStoreService {
     try {
       // Fetch policies
       const [fulfillmentPolicies, paymentPolicies, returnPolicies] = await Promise.all([
-        client.sell.account.getFulfillmentPolicies({ marketplace_id: connection.marketplaceId }),
-        client.sell.account.getPaymentPolicies({ marketplace_id: connection.marketplaceId }),
-        client.sell.account.getReturnPolicies({ marketplace_id: connection.marketplaceId }),
+        client.sell.account.getFulfillmentPolicies(connection.marketplaceId as any),
+        client.sell.account.getPaymentPolicies(connection.marketplaceId as any),
+        client.sell.account.getReturnPolicies(connection.marketplaceId as any),
       ]);
 
       // Use first policy of each type (or let user select later)
@@ -382,7 +394,7 @@ export class EbayStoreService {
       );
     }
 
-    await this.prisma.marketplaceConnection.delete({ where: { id: connectionId } });
+    await this.prisma.marketplaceConnection.delete({ where: { id: connectionId, tenantId } });
     this.clientCache.delete(connectionId);
     this.logger.log(`Deleted connection ${connectionId}`);
   }

@@ -1,4 +1,6 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import * as crypto from 'crypto';
+import { PrismaService } from '@platform/db';
 import { EbayStoreService } from './ebay-store.service';
 import eBayApi from 'ebay-api';
 
@@ -9,15 +11,14 @@ import eBayApi from 'ebay-api';
 @Injectable()
 export class EbayAuthService {
   private readonly logger = new Logger(EbayAuthService.name);
-  private readonly pendingOAuthStates = new Map<string, {
-    connectionId: string;
-    tenantId: string;
-    expiresAt: number;
-  }>();
+  private cleanupInterval: ReturnType<typeof setInterval>;
 
-  constructor(private ebayStore: EbayStoreService) {
+  constructor(
+    private ebayStore: EbayStoreService,
+    private prisma: PrismaService
+  ) {
     // Clean up expired OAuth states every 10 minutes
-    setInterval(() => this.cleanupExpiredStates(), 10 * 60 * 1000);
+    this.cleanupInterval = setInterval(() => this.cleanupExpiredStates(), 10 * 60 * 1000);
   }
 
   /**
@@ -38,11 +39,14 @@ export class EbayAuthService {
     const state = this.generateState();
     const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
 
-    // Store state with connection info
-    this.pendingOAuthStates.set(state, {
-      connectionId,
-      tenantId,
-      expiresAt,
+    // Store state with connection info in database (id IS the state value)
+    await this.prisma.oAuthState.create({
+      data: {
+        id: state,
+        connectionId,
+        tenantId,
+        expiresAt: new Date(expiresAt),
+      },
     });
 
     // Generate OAuth URL
@@ -79,14 +83,16 @@ export class EbayAuthService {
    * Handle OAuth callback and exchange code for tokens
    */
   async handleCallback(code: string, state: string) {
-    // Verify state
-    const stateData = this.pendingOAuthStates.get(state);
+    // Verify state from database
+    const stateData = await this.prisma.oAuthState.findUnique({
+      where: { id: state },
+    });
     if (!stateData) {
       throw new BadRequestException('Invalid or expired OAuth state');
     }
 
-    if (Date.now() > stateData.expiresAt) {
-      this.pendingOAuthStates.delete(state);
+    if (new Date() > stateData.expiresAt) {
+      await this.prisma.oAuthState.delete({ where: { id: state } });
       throw new BadRequestException('OAuth state expired. Please try again.');
     }
 
@@ -106,8 +112,8 @@ export class EbayAuthService {
       // Fetch and save business policies
       await this.ebayStore.fetchAndSaveBusinessPolicies(connectionId);
 
-      // Clean up state
-      this.pendingOAuthStates.delete(state);
+      // Clean up state from database
+      await this.prisma.oAuthState.delete({ where: { id: state } });
 
       this.logger.log(`Successfully connected eBay store for connection ${connectionId}`);
 
@@ -154,18 +160,15 @@ export class EbayAuthService {
    * Generate random state for CSRF protection
    */
   private generateState(): string {
-    return Math.random().toString(36).substring(2) + Date.now().toString(36);
+    return crypto.randomBytes(32).toString('hex');
   }
 
   /**
    * Clean up expired OAuth states
    */
-  private cleanupExpiredStates() {
-    const now = Date.now();
-    for (const [state, data] of this.pendingOAuthStates.entries()) {
-      if (now > data.expiresAt) {
-        this.pendingOAuthStates.delete(state);
-      }
-    }
+  private async cleanupExpiredStates() {
+    await this.prisma.oAuthState.deleteMany({
+      where: { expiresAt: { lt: new Date() } },
+    });
   }
 }

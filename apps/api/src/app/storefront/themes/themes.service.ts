@@ -209,7 +209,7 @@ export class ThemesService implements OnModuleInit {
     // Merge colors if partial update
     let updatedColors = existing.colors;
     if (dto.colors) {
-      updatedColors = { ...existing.colors, ...dto.colors };
+      updatedColors = { ...(existing.colors as object), ...(dto.colors as object) };
     }
 
     const updateData: Prisma.StoreThemeUpdateInput = {

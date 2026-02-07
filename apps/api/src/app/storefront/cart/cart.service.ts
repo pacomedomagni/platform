@@ -34,6 +34,8 @@ export class CartService {
           tenantId,
           customerId,
           status: 'active',
+          // PAY-14: Filter out expired carts
+          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
         },
         include: this.cartInclude,
       });
@@ -50,6 +52,8 @@ export class CartService {
           tenantId,
           sessionToken,
           status: 'active',
+          // PAY-14: Filter out expired carts
+          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
         },
         include: this.cartInclude,
       });
@@ -85,6 +89,8 @@ export class CartService {
         id: cartId,
         tenantId,
         status: 'active',
+        // PAY-14: Filter out expired carts
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
       },
       include: this.cartInclude,
     });
@@ -105,6 +111,8 @@ export class CartService {
         tenantId,
         sessionToken,
         status: 'active',
+        // PAY-14: Filter out expired carts
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
       },
       include: this.cartInclude,
     });
@@ -184,10 +192,10 @@ export class CartService {
       // Upsert cart item atomically
       await tx.cartItem.upsert({
         where: {
-          tenantId_cartId_productId: {
-            tenantId,
+          cartId_productId_variantId: {
             cartId,
             productId: dto.productId,
+            variantId: (dto as any).variantId || null,
           },
         },
         update: {
@@ -563,10 +571,10 @@ export class CartService {
         for (const item of anonymousCart.items) {
           await tx.cartItem.upsert({
             where: {
-              tenantId_cartId_productId: {
-                tenantId,
+              cartId_productId_variantId: {
                 cartId: customerCart.id,
                 productId: item.productId,
+                variantId: item.variantId || null,
               },
             },
             update: {
@@ -803,17 +811,26 @@ export class CartService {
 
     if (!cart) return;
 
-    // Calculate subtotal
-    let subtotal = 0;
+    // PAY-12: Fetch tenant-specific rates (fall back to defaults)
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: cart.tenantId },
+      select: { defaultTaxRate: true, defaultShippingRate: true, freeShippingThreshold: true },
+    });
+    const taxRate = tenant ? Number(tenant.defaultTaxRate) : DEFAULT_TAX_RATE;
+    const shippingRate = tenant ? Number(tenant.defaultShippingRate) : DEFAULT_SHIPPING_RATE;
+    const freeThreshold = tenant ? Number(tenant.freeShippingThreshold) : FREE_SHIPPING_THRESHOLD;
+
+    // PAY-11: Calculate in integer cents to avoid floating-point errors
+    let subtotalCents = 0;
     for (const item of cart.items) {
-      subtotal += Number(item.price) * item.quantity;
+      subtotalCents += Math.round(Number(item.price) * 100) * item.quantity;
     }
 
-    // Calculate shipping
-    const shippingTotal = subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : DEFAULT_SHIPPING_RATE;
+    // Calculate shipping in cents
+    const shippingCents = subtotalCents >= Math.round(freeThreshold * 100) ? 0 : Math.round(shippingRate * 100);
 
-    // Calculate discount
-    let discountAmount = 0;
+    // Calculate discount in cents
+    let discountCents = 0;
     if (cart.couponCode) {
       const coupon = await this.prisma.coupon.findFirst({
         where: { tenantId: cart.tenantId, code: cart.couponCode },
@@ -821,38 +838,38 @@ export class CartService {
 
       if (coupon) {
         if (coupon.discountType === 'percentage') {
-          discountAmount = subtotal * (Number(coupon.discountValue) / 100);
+          discountCents = Math.round(subtotalCents * (Number(coupon.discountValue) / 100));
         } else {
-          discountAmount = Number(coupon.discountValue);
+          discountCents = Math.round(Number(coupon.discountValue) * 100);
         }
 
-        // Apply maximum discount cap
         if (coupon.maximumDiscount) {
-          discountAmount = Math.min(discountAmount, Number(coupon.maximumDiscount));
+          discountCents = Math.min(discountCents, Math.round(Number(coupon.maximumDiscount) * 100));
         }
 
-        // Don't let discount exceed subtotal
-        discountAmount = Math.min(discountAmount, subtotal);
+        discountCents = Math.min(discountCents, subtotalCents);
       }
     }
 
-    // Calculate tax (on subtotal - discount)
-    const taxableAmount = subtotal - discountAmount;
-    const taxTotal = taxableAmount * DEFAULT_TAX_RATE;
+    // Calculate tax in cents (on subtotal - discount)
+    const taxableCents = subtotalCents - discountCents;
+    const taxCents = Math.round(taxableCents * taxRate);
 
-    // Calculate grand total
-    const grandTotal = subtotal - discountAmount + shippingTotal + taxTotal;
+    // Calculate grand total in cents
+    const grandTotalCents = subtotalCents - discountCents + shippingCents + taxCents;
 
-    // Update cart
+    // Convert back to dollars for storage
     await this.prisma.cart.update({
       where: { id: cartId },
       data: {
-        subtotal,
-        shippingTotal,
-        taxTotal,
-        discountAmount,
-        grandTotal,
+        subtotal: subtotalCents / 100,
+        shippingTotal: shippingCents / 100,
+        taxTotal: taxCents / 100,
+        discountAmount: discountCents / 100,
+        grandTotal: grandTotalCents / 100,
         lastActivityAt: new Date(),
+        // PAY-14: Extend expiry on activity
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
   }
@@ -875,17 +892,26 @@ export class CartService {
 
     if (!cart) return;
 
-    // Calculate subtotal
-    let subtotal = 0;
+    // PAY-12: Fetch tenant-specific rates (fall back to defaults)
+    const tenant = await tx.tenant.findUnique({
+      where: { id: cart.tenantId },
+      select: { defaultTaxRate: true, defaultShippingRate: true, freeShippingThreshold: true },
+    });
+    const taxRate = tenant ? Number(tenant.defaultTaxRate) : DEFAULT_TAX_RATE;
+    const shippingRate = tenant ? Number(tenant.defaultShippingRate) : DEFAULT_SHIPPING_RATE;
+    const freeThreshold = tenant ? Number(tenant.freeShippingThreshold) : FREE_SHIPPING_THRESHOLD;
+
+    // PAY-11: Calculate in integer cents to avoid floating-point errors
+    let subtotalCents = 0;
     for (const item of cart.items) {
-      subtotal += Number(item.price) * item.quantity;
+      subtotalCents += Math.round(Number(item.price) * 100) * item.quantity;
     }
 
-    // Calculate shipping
-    const shippingTotal = subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : DEFAULT_SHIPPING_RATE;
+    // Calculate shipping in cents
+    const shippingCents = subtotalCents >= Math.round(freeThreshold * 100) ? 0 : Math.round(shippingRate * 100);
 
-    // Calculate discount
-    let discountAmount = 0;
+    // Calculate discount in cents
+    let discountCents = 0;
     if (cart.couponCode) {
       const coupon = await tx.coupon.findFirst({
         where: { tenantId: cart.tenantId, code: cart.couponCode },
@@ -893,38 +919,38 @@ export class CartService {
 
       if (coupon) {
         if (coupon.discountType === 'percentage') {
-          discountAmount = subtotal * (Number(coupon.discountValue) / 100);
+          discountCents = Math.round(subtotalCents * (Number(coupon.discountValue) / 100));
         } else {
-          discountAmount = Number(coupon.discountValue);
+          discountCents = Math.round(Number(coupon.discountValue) * 100);
         }
 
-        // Apply maximum discount cap
         if (coupon.maximumDiscount) {
-          discountAmount = Math.min(discountAmount, Number(coupon.maximumDiscount));
+          discountCents = Math.min(discountCents, Math.round(Number(coupon.maximumDiscount) * 100));
         }
 
-        // Don't let discount exceed subtotal
-        discountAmount = Math.min(discountAmount, subtotal);
+        discountCents = Math.min(discountCents, subtotalCents);
       }
     }
 
-    // Calculate tax (on subtotal - discount)
-    const taxableAmount = subtotal - discountAmount;
-    const taxTotal = taxableAmount * DEFAULT_TAX_RATE;
+    // Calculate tax in cents (on subtotal - discount)
+    const taxableCents = subtotalCents - discountCents;
+    const taxCents = Math.round(taxableCents * taxRate);
 
-    // Calculate grand total
-    const grandTotal = subtotal - discountAmount + shippingTotal + taxTotal;
+    // Calculate grand total in cents
+    const grandTotalCents = subtotalCents - discountCents + shippingCents + taxCents;
 
-    // Update cart
+    // Convert back to dollars for storage
     await tx.cart.update({
       where: { id: cartId },
       data: {
-        subtotal,
-        shippingTotal,
-        taxTotal,
-        discountAmount,
-        grandTotal,
+        subtotal: subtotalCents / 100,
+        shippingTotal: shippingCents / 100,
+        taxTotal: taxCents / 100,
+        discountAmount: discountCents / 100,
+        grandTotal: grandTotalCents / 100,
         lastActivityAt: new Date(),
+        // PAY-14: Extend expiry on activity
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
   }
@@ -949,6 +975,7 @@ export class CartService {
   private mapCartToResponse(cart: any) {
     return {
       id: cart.id,
+      customerId: cart.customerId,
       sessionToken: cart.sessionToken,
       items: cart.items.map((item: any) => {
         const availableQty = item.product.item.warehouseItemBalances.reduce(

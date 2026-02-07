@@ -12,6 +12,7 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { VariantsService } from './variants.service';
 import { ReviewsService } from './reviews.service';
 import { GiftCardsService } from './gift-cards.service';
@@ -180,13 +181,15 @@ export class EcommerceController {
 
   @Post('reviews/:reviewId/vote')
   async voteReview(
+    @Headers('x-tenant-id') tenantId: string,
     @Headers('authorization') authHeader: string,
     @Headers('x-session-token') sessionToken: string,
     @Param('reviewId') reviewId: string,
     @Body() dto: ReviewVoteDto
   ) {
+    if (!tenantId) throw new BadRequestException('Tenant ID required');
     const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
-    return this.reviewsService.voteReview(reviewId, customerId, sessionToken, dto);
+    return this.reviewsService.voteReview(tenantId, reviewId, customerId, sessionToken, dto);
   }
 
   // ============ REVIEWS - ADMIN ============
@@ -243,6 +246,7 @@ export class EcommerceController {
 
   // ============ GIFT CARDS - PUBLIC ============
 
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Get('gift-cards/check')
   async checkGiftCardBalance(
     @Headers('x-tenant-id') tenantId: string,

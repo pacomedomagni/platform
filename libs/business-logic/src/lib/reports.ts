@@ -213,9 +213,11 @@ export class ReportsService {
     private sumBalances(accounts: any[]): number {
         return accounts.reduce((sum, acc) => {
             const balance = acc.balance || 0;
-            // Assets and Expenses are debits (positive), Liabilities/Equity/Income are credits (negative in GL)
-            // For balance sheet, we want all positive values
-            return sum + Math.abs(balance);
+            // Use signed balance values as the accounting equation requires.
+            // Debit-normal accounts (Assets, Expenses) naturally have positive balances,
+            // while credit-normal accounts (Liabilities, Equity, Income) have negative balances.
+            // Using Math.abs here would break the accounting equation (A = L + E).
+            return sum + balance;
         }, 0);
     }
 

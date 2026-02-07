@@ -1,7 +1,7 @@
 import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { AuthGuard } from '@platform/auth';
-import { Tenant } from '../../../tenant.middleware';
+import { Tenant } from '../../tenant.middleware';
 import { EbayAuthService } from './ebay-auth.service';
 
 /**

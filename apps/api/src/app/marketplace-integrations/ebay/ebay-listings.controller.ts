@@ -12,7 +12,7 @@ import {
   ValidationPipe,
 } from '@nestjs/common';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
-import { Tenant } from '../../../tenant.middleware';
+import { Tenant } from '../../tenant.middleware';
 import { EbayListingsService } from './ebay-listings.service';
 import {
   CreateListingDto,

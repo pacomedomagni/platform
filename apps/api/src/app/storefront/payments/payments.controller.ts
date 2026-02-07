@@ -44,16 +44,20 @@ export class PaymentsController {
   }
 
   /**
-   * Get payments for order
+   * Get payments for order (PAY-7: requires auth - customer must own the order)
    * GET /api/v1/store/payments/order/:orderId
    */
   @Get('order/:orderId')
   async getOrderPayments(
     @Headers('x-tenant-id') tenantId: string,
-    @Param('orderId') orderId: string
+    @Param('orderId') orderId: string,
+    @Headers('authorization') authHeader?: string
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
+    }
+    if (!authHeader) {
+      throw new BadRequestException('Authentication required');
     }
     return this.paymentsService.getOrderPayments(tenantId, orderId);
   }

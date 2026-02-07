@@ -174,7 +174,9 @@ export class EmailPreferencesService {
    */
   generateUnsubscribeToken(tenantId: string, customerId: string, email: string): string {
     // Create a simple base64-encoded token with HMAC signature
-    const data = JSON.stringify({ tenantId, customerId, email });
+    // Token expires after 30 days
+    const exp = Date.now() + 30 * 24 * 60 * 60 * 1000;
+    const data = JSON.stringify({ tenantId, customerId, email, exp });
     const signature = crypto
       .createHmac('sha256', process.env['JWT_SECRET'] || 'dev-secret')
       .update(data)
@@ -213,6 +215,13 @@ export class EmailPreferencesService {
       }
 
       const payload = JSON.parse(data);
+
+      // Check token expiry
+      if (payload.exp && Date.now() > payload.exp) {
+        this.logger.warn('Unsubscribe token has expired');
+        return null;
+      }
+
       return {
         tenantId: payload.tenantId,
         customerId: payload.customerId,

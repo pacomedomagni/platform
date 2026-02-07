@@ -17,144 +17,168 @@ export class CheckoutService {
 
   /**
    * Create order from cart and initialize payment
+   * PAY-2: Entire flow wrapped in transaction
+   * PAY-3: Cart locked with SELECT FOR UPDATE
+   * PAY-4: Stock validated with advisory locks
+   * PAY-5: Order number generated atomically
    */
   async createCheckout(tenantId: string, dto: CreateCheckoutDto, customerId?: string) {
-    // Get cart with items
-    const cart = await this.prisma.cart.findFirst({
-      where: {
-        id: dto.cartId,
-        tenantId,
-        status: 'active',
-      },
-      include: {
-        items: {
-          include: {
-            product: {
-              include: {
-                item: {
-                  include: {
-                    warehouseItemBalances: true,
+    // Run database operations inside a transaction; Stripe call stays outside
+    const result = await this.prisma.$transaction(async (tx) => {
+      // PAY-3: Lock cart row to prevent TOCTOU race
+      const lockedCarts = await tx.$queryRaw<any[]>`
+        SELECT id FROM carts
+        WHERE id = ${dto.cartId} AND "tenantId" = ${tenantId} AND status = 'active'
+        FOR UPDATE
+      `;
+
+      if (!lockedCarts || lockedCarts.length === 0) {
+        throw new NotFoundException('Cart not found');
+      }
+
+      // Get cart with items (now that we hold the lock)
+      const cart = await tx.cart.findFirst({
+        where: {
+          id: dto.cartId,
+          tenantId,
+          status: 'active',
+        },
+        include: {
+          items: {
+            include: {
+              product: {
+                include: {
+                  item: {
+                    include: {
+                      warehouseItemBalances: true,
+                    },
                   },
                 },
               },
             },
           },
         },
-      },
-    });
+      });
 
-    if (!cart) {
-      throw new NotFoundException('Cart not found');
-    }
-
-    if (cart.items.length === 0) {
-      throw new BadRequestException('Cart is empty');
-    }
-
-    // Validate stock availability
-    for (const item of cart.items) {
-      const availableQty = item.product.item.warehouseItemBalances.reduce(
-        (sum, b) => sum + Number(b.actualQty) - Number(b.reservedQty),
-        0
-      );
-
-      if (item.quantity > availableQty) {
-        throw new BadRequestException(
-          `Insufficient stock for ${item.product.displayName}. Available: ${availableQty}`
-        );
+      if (!cart || cart.items.length === 0) {
+        throw new BadRequestException('Cart is empty');
       }
-    }
 
-    // Generate order number
-    const orderNumber = await this.generateOrderNumber(tenantId);
+      // PAY-4: Acquire advisory locks per item to prevent concurrent stock modifications
+      for (const item of cart.items) {
+        const itemKey = `${tenantId}:${item.product.item.id}`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${itemKey}))`;
+      }
 
-    // Use billing address or shipping address
-    const billingAddress = dto.billingAddress || dto.shippingAddress;
+      // Re-query fresh balances after acquiring locks
+      for (const item of cart.items) {
+        const freshBalances = await tx.warehouseItemBalance.findMany({
+          where: { tenantId, itemId: item.product.item.id },
+        });
+        const availableQty = freshBalances.reduce(
+          (sum, b) => sum + Number(b.actualQty) - Number(b.reservedQty),
+          0
+        );
+        if (item.quantity > availableQty) {
+          throw new BadRequestException(
+            `Insufficient stock for ${item.product.displayName}. Available: ${availableQty}`
+          );
+        }
+      }
 
-    // Create order
-    const order = await this.prisma.order.create({
-      data: {
-        tenantId,
-        orderNumber,
-        customerId,
-        cartId: cart.id,
-        email: dto.email,
-        phone: dto.phone,
+      // PAY-5: Atomic order number generation
+      const orderNumber = await this.generateOrderNumber(tx, tenantId);
 
-        // Shipping address
-        shippingFirstName: dto.shippingAddress.firstName,
-        shippingLastName: dto.shippingAddress.lastName,
-        shippingCompany: dto.shippingAddress.company,
-        shippingAddressLine1: dto.shippingAddress.addressLine1,
-        shippingAddressLine2: dto.shippingAddress.addressLine2,
-        shippingCity: dto.shippingAddress.city,
-        shippingState: dto.shippingAddress.state,
-        shippingPostalCode: dto.shippingAddress.postalCode,
-        shippingCountry: dto.shippingAddress.country,
+      // Use billing address or shipping address
+      const billingAddress = dto.billingAddress || dto.shippingAddress;
 
-        // Billing address
-        billingFirstName: billingAddress.firstName,
-        billingLastName: billingAddress.lastName,
-        billingCompany: billingAddress.company,
-        billingAddressLine1: billingAddress.addressLine1,
-        billingAddressLine2: billingAddress.addressLine2,
-        billingCity: billingAddress.city,
-        billingState: billingAddress.state,
-        billingPostalCode: billingAddress.postalCode,
-        billingCountry: billingAddress.country,
+      // Create order
+      const order = await tx.order.create({
+        data: {
+          tenantId,
+          orderNumber,
+          customerId,
+          cartId: cart.id,
+          email: dto.email,
+          phone: dto.phone,
 
-        // Totals from cart
-        subtotal: cart.subtotal,
-        shippingTotal: cart.shippingTotal,
-        taxTotal: cart.taxTotal,
-        discountTotal: cart.discountAmount,
-        grandTotal: cart.grandTotal,
+          // Shipping address
+          shippingFirstName: dto.shippingAddress.firstName,
+          shippingLastName: dto.shippingAddress.lastName,
+          shippingCompany: dto.shippingAddress.company,
+          shippingAddressLine1: dto.shippingAddress.addressLine1,
+          shippingAddressLine2: dto.shippingAddress.addressLine2,
+          shippingCity: dto.shippingAddress.city,
+          shippingState: dto.shippingAddress.state,
+          shippingPostalCode: dto.shippingAddress.postalCode,
+          shippingCountry: dto.shippingAddress.country,
 
-        // Notes
-        customerNotes: dto.customerNotes,
+          // Billing address
+          billingFirstName: billingAddress.firstName,
+          billingLastName: billingAddress.lastName,
+          billingCompany: billingAddress.company,
+          billingAddressLine1: billingAddress.addressLine1,
+          billingAddressLine2: billingAddress.addressLine2,
+          billingCity: billingAddress.city,
+          billingState: billingAddress.state,
+          billingPostalCode: billingAddress.postalCode,
+          billingCountry: billingAddress.country,
 
-        // Status
-        status: 'PENDING',
-        paymentStatus: 'PENDING',
+          // Totals from cart
+          subtotal: cart.subtotal,
+          shippingTotal: cart.shippingTotal,
+          taxTotal: cart.taxTotal,
+          discountTotal: cart.discountAmount,
+          grandTotal: cart.grandTotal,
 
-        // Create order items
-        items: {
-          create: cart.items.map((item) => ({
-            tenantId,
-            productId: item.productId,
-            sku: item.product.item.code,
-            name: item.product.displayName,
-            description: item.product.shortDescription,
-            imageUrl: item.product.images[0] || null,
-            quantity: item.quantity,
-            unitPrice: item.price,
-            totalPrice: Number(item.price) * item.quantity,
-          })),
+          // Notes
+          customerNotes: dto.customerNotes,
+
+          // Status
+          status: 'PENDING',
+          paymentStatus: 'PENDING',
+
+          // Create order items
+          items: {
+            create: cart.items.map((item) => ({
+              tenantId,
+              productId: item.productId,
+              sku: item.product.item.code,
+              name: item.product.displayName,
+              description: item.product.shortDescription,
+              imageUrl: item.product.images[0] || null,
+              quantity: item.quantity,
+              unitPrice: item.price,
+              totalPrice: Number(item.price) * item.quantity,
+            })),
+          },
         },
-      },
-      include: {
-        items: true,
-      },
-    });
+        include: {
+          items: true,
+        },
+      });
 
-    // Mark cart as converted
-    await this.prisma.cart.update({
-      where: { id: cart.id },
-      data: { status: 'converted' },
-    });
+      // Mark cart as converted
+      await tx.cart.update({
+        where: { id: cart.id },
+        data: { status: 'converted' },
+      });
 
-    // Create Stripe Payment Intent
+      return order;
+    }, { timeout: 30000 });
+
+    // Create Stripe Payment Intent (outside transaction - external call)
     let stripeClientSecret: string | null = null;
     try {
       // Generate deterministic idempotency key to prevent duplicate charges on retry
-      const idempotencyKey = `pi_${tenantId}_${order.id}`;
+      const idempotencyKey = `pi_${tenantId}_${result.id}`;
 
       const paymentIntent = await this.stripeService.createPaymentIntent(
-        Number(cart.grandTotal),
+        Number(result.grandTotal),
         'usd',
         {
-          orderId: order.id,
-          orderNumber: order.orderNumber,
+          orderId: result.id,
+          orderNumber: result.orderNumber,
           tenantId,
           customerEmail: dto.email,
         },
@@ -163,7 +187,7 @@ export class CheckoutService {
 
       // Update order with Stripe payment intent ID
       await this.prisma.order.update({
-        where: { id: order.id },
+        where: { id: result.id },
         data: { stripePaymentIntentId: paymentIntent.id },
       });
 
@@ -173,7 +197,7 @@ export class CheckoutService {
       console.error('Failed to create Stripe payment intent:', error);
     }
 
-    return this.mapOrderToCheckoutResponse(order, stripeClientSecret);
+    return this.mapOrderToCheckoutResponse(result, stripeClientSecret);
   }
 
   /**
@@ -288,69 +312,103 @@ export class CheckoutService {
 
   /**
    * Cancel checkout/order (before payment)
+   * PAY-10: Wrapped in transaction, releases stock reservations
    */
   async cancelCheckout(tenantId: string, orderId: string) {
-    const order = await this.prisma.order.findFirst({
-      where: {
-        id: orderId,
-        tenantId,
-        paymentStatus: 'PENDING',
-      },
-    });
-
-    if (!order) {
-      throw new NotFoundException('Order not found or already paid');
-    }
-
-    // Cancel Stripe payment intent if exists
-    if (order.stripePaymentIntentId) {
-      try {
-        await this.stripeService.cancelPaymentIntent(order.stripePaymentIntentId);
-      } catch (error) {
-        console.error('Failed to cancel Stripe payment intent:', error);
-      }
-    }
-
-    // Update order status
-    await this.prisma.order.update({
-      where: { id: orderId },
-      data: {
-        status: 'CANCELLED',
-        cancelledAt: new Date(),
-      },
-    });
-
-    // Restore cart if possible
-    if (order.cartId) {
-      await this.prisma.cart.update({
-        where: { id: order.cartId },
-        data: { status: 'active' },
+    return this.prisma.$transaction(async (tx) => {
+      const order = await tx.order.findFirst({
+        where: {
+          id: orderId,
+          tenantId,
+          paymentStatus: 'PENDING',
+        },
+        include: {
+          items: {
+            include: {
+              product: {
+                include: {
+                  item: true,
+                },
+              },
+            },
+          },
+        },
       });
-    }
 
-    return { success: true, message: 'Order cancelled' };
+      if (!order) {
+        throw new NotFoundException('Order not found or already paid');
+      }
+
+      // Cancel Stripe payment intent if exists
+      if (order.stripePaymentIntentId) {
+        try {
+          await this.stripeService.cancelPaymentIntent(order.stripePaymentIntentId);
+        } catch (error) {
+          console.error('Failed to cancel Stripe payment intent:', error);
+        }
+      }
+
+      // Update order status
+      await tx.order.update({
+        where: { id: orderId },
+        data: {
+          status: 'CANCELLED',
+          cancelledAt: new Date(),
+        },
+      });
+
+      // PAY-10: Release stock reservations for each order item
+      for (const item of order.items) {
+        if (item.product?.item?.id) {
+          await tx.warehouseItemBalance.updateMany({
+            where: {
+              tenantId,
+              itemId: item.product.item.id,
+            },
+            data: {
+              reservedQty: { decrement: item.quantity },
+            },
+          });
+        }
+      }
+
+      // Restore cart if possible
+      if (order.cartId) {
+        await tx.cart.update({
+          where: { id: order.cartId },
+          data: { status: 'active' },
+        });
+      }
+
+      return { success: true, message: 'Order cancelled' };
+    });
   }
 
   // ============ HELPERS ============
 
-  private async generateOrderNumber(tenantId: string): Promise<string> {
+  /**
+   * PAY-5: Atomic order number generation using tenant counter
+   */
+  private async generateOrderNumber(tx: any, tenantId: string): Promise<string> {
     const date = new Date();
     const prefix = `ORD-${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}`;
 
-    // Get count of orders this month for sequential number
-    const count = await this.prisma.order.count({
-      where: {
-        tenantId,
-        orderNumber: { startsWith: prefix },
-      },
-    });
+    // Atomically increment and return the next order number
+    const result = await tx.$queryRaw<any[]>`
+      UPDATE tenants
+      SET "nextOrderNumber" = "nextOrderNumber" + 1
+      WHERE id = ${tenantId}
+      RETURNING "nextOrderNumber"
+    `;
 
-    return `${prefix}-${String(count + 1).padStart(5, '0')}`;
+    const seq = result[0]?.nextOrderNumber || 1;
+    return `${prefix}-${String(seq).padStart(5, '0')}`;
   }
 
   private mapOrderToCheckoutResponse(order: any, clientSecret: string | null) {
     return {
       id: order.id,
+      customerId: order.customerId,
       orderNumber: order.orderNumber,
       email: order.email,
       phone: order.phone,

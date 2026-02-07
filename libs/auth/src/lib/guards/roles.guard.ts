@@ -42,8 +42,12 @@ export class RolesGuard implements CanActivate {
 
     const userRoles: string[] = user.roles || [];
 
-    // Admin and System Manager have access to everything
+    // Admin and System Manager have access to all roles within their own tenant
     if (userRoles.includes('admin') || userRoles.includes('System Manager')) {
+      const requestTenantId = request.tenantId || request.headers?.['x-tenant-id'];
+      if (requestTenantId && user.tenantId && requestTenantId !== user.tenantId) {
+        return false;
+      }
       return true;
     }
 

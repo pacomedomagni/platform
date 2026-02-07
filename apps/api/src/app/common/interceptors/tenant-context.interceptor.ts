@@ -8,8 +8,14 @@ export class TenantContextInterceptor implements NestInterceptor {
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const request = context.switchToHttp().getRequest();
-    const headerTenantId = request.headers?.['x-tenant-id'];
     const userTenantId = request.user?.tenantId;
+
+    // Only trust x-tenant-id header when ALLOW_TENANT_HEADER is explicitly enabled
+    const headerTenantId =
+      process.env['ALLOW_TENANT_HEADER'] === 'true'
+        ? request.headers?.['x-tenant-id']
+        : undefined;
+
     const tenantId = userTenantId || headerTenantId;
 
     const isUuid = (value: string) =>

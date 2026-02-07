@@ -4,7 +4,8 @@ import { ClsService } from 'nestjs-cls';
 import { EbayStoreService } from './ebay-store.service';
 import { EbayClientService } from './ebay-client.service';
 import { ListingStatus, SyncStatus } from '../shared/marketplace.types';
-import { Decimal } from '@prisma/client/runtime/library';
+import { Prisma } from '@prisma/client';
+const Decimal = Prisma.Decimal;
 
 /**
  * eBay Listings Management Service
@@ -352,6 +353,11 @@ export class EbayListingsService {
       throw new BadRequestException('eBay connection is not fully configured. Please complete OAuth and fetch business policies.');
     }
 
+    let inventoryItemCreated = false;
+    let offerCreated = false;
+    let offerId: string | undefined;
+    let client: any;
+
     try {
       // Update status to publishing
       await this.prisma.marketplaceListing.update({
@@ -360,7 +366,7 @@ export class EbayListingsService {
       });
 
       // Get eBay client
-      const client = await this.ebayStore.getClient(listing.connectionId);
+      client = await this.ebayStore.getClient(listing.connectionId);
       const photos = JSON.parse(listing.photos as string) as string[];
 
       // Step 1: Create inventory item
@@ -394,6 +400,7 @@ export class EbayListingsService {
           },
         }),
       });
+      inventoryItemCreated = true;
 
       // Step 2: Create offer
       const connection = listing.connection;
@@ -418,7 +425,8 @@ export class EbayListingsService {
         merchantLocationKey: connection.locationKey,
       });
 
-      const offerId = offer.offerId;
+      offerId = offer.offerId;
+      offerCreated = true;
 
       // Step 3: Publish offer
       const publishResult = await this.ebayClient.publishOffer(client, offerId);
@@ -443,6 +451,27 @@ export class EbayListingsService {
       return updated;
     } catch (error) {
       this.logger.error(`Failed to publish listing ${listingId}`, error);
+
+      // Rollback partially created eBay resources
+      if (client) {
+        if (offerCreated && offerId) {
+          try {
+            await this.ebayClient.withdrawOffer(client, offerId);
+            this.logger.log(`Rolled back offer ${offerId} for listing ${listingId}`);
+          } catch (rollbackError) {
+            this.logger.error(`Failed to rollback offer ${offerId}`, rollbackError);
+          }
+        }
+
+        if (inventoryItemCreated) {
+          try {
+            await this.ebayClient.deleteInventoryItem(client, listing.sku);
+            this.logger.log(`Rolled back inventory item ${listing.sku} for listing ${listingId}`);
+          } catch (rollbackError) {
+            this.logger.error(`Failed to rollback inventory item ${listing.sku}`, rollbackError);
+          }
+        }
+      }
 
       await this.prisma.marketplaceListing.update({
         where: { id: listingId },

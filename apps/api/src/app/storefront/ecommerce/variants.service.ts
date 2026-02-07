@@ -328,6 +328,13 @@ export class VariantsService {
       throw new NotFoundException('Variant not found');
     }
 
+    const currentStock = existing.stockQty ?? 0;
+    if (currentStock + adjustment < 0 && !existing.allowBackorder) {
+      throw new BadRequestException(
+        `Insufficient stock: current ${currentStock}, adjustment ${adjustment}`
+      );
+    }
+
     return this.prisma.productVariant.update({
       where: { id },
       data: { stockQty: { increment: adjustment } },

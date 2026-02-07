@@ -16,6 +16,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         ? {
             secretOrKey: devSecret,
             algorithms: ['HS256'],
+            issuer: 'admin',
+            audience: 'admin',
           }
         : {
             secretOrKeyProvider: passportJwtSecret({
