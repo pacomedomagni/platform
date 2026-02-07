@@ -72,7 +72,7 @@ export default function CreateListingPage() {
     setLoading(true);
     try {
       // Load connections
-      const connectionsRes = await fetch('/api/marketplace/connections', {
+      const connectionsRes = await fetch('/api/v1/marketplace/connections', {
         credentials: 'include',
       });
       if (connectionsRes.ok) {
@@ -81,7 +81,7 @@ export default function CreateListingPage() {
       }
 
       // Load products
-      const productsRes = await fetch('/api/products/listings', {
+      const productsRes = await fetch('/api/v1/products/listings', {
         credentials: 'include',
       });
       if (productsRes.ok) {
@@ -90,7 +90,7 @@ export default function CreateListingPage() {
       }
 
       // Load warehouses
-      const warehousesRes = await fetch('/api/warehouses', {
+      const warehousesRes = await fetch('/api/v1/warehouses', {
         credentials: 'include',
       });
       if (warehousesRes.ok) {
@@ -140,7 +140,7 @@ export default function CreateListingPage() {
     setSubmitting(true);
 
     try {
-      const res = await fetch('/api/marketplace/listings', {
+      const res = await fetch('/api/v1/marketplace/listings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -163,7 +163,7 @@ export default function CreateListingPage() {
         // Auto-publish if requested
         if (formData.autoPublish) {
           const publishRes = await fetch(
-            `/api/marketplace/listings/${listing.id}/publish`,
+            `/api/v1/marketplace/listings/${listing.id}/publish`,
             {
               method: 'POST',
               credentials: 'include',

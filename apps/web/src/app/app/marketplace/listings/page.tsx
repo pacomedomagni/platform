@@ -62,7 +62,7 @@ export default function MarketplaceListingsPage() {
     setLoading(true);
     try {
       // Load connections
-      const connectionsRes = await fetch('/api/marketplace/connections', {
+      const connectionsRes = await fetch('/api/v1/marketplace/connections', {
         credentials: 'include',
       });
       if (connectionsRes.ok) {
@@ -79,7 +79,7 @@ export default function MarketplaceListingsPage() {
         params.append('status', selectedStatus);
       }
 
-      const listingsRes = await fetch(`/api/marketplace/listings?${params}`, {
+      const listingsRes = await fetch(`/api/v1/marketplace/listings?${params}`, {
         credentials: 'include',
       });
       if (listingsRes.ok) {
@@ -97,7 +97,7 @@ export default function MarketplaceListingsPage() {
     if (!confirm('Publish this listing to eBay?')) return;
 
     try {
-      const res = await fetch(`/api/marketplace/listings/${listingId}/publish`, {
+      const res = await fetch(`/api/v1/marketplace/listings/${listingId}/publish`, {
         method: 'POST',
         credentials: 'include',
       });
@@ -119,7 +119,7 @@ export default function MarketplaceListingsPage() {
     if (!confirm('End this eBay listing? This will remove it from eBay.')) return;
 
     try {
-      const res = await fetch(`/api/marketplace/listings/${listingId}/end`, {
+      const res = await fetch(`/api/v1/marketplace/listings/${listingId}/end`, {
         method: 'POST',
         credentials: 'include',
       });
@@ -140,7 +140,7 @@ export default function MarketplaceListingsPage() {
   const handleSyncInventory = async (listingId: string) => {
     setSyncing(listingId);
     try {
-      const res = await fetch(`/api/marketplace/listings/${listingId}/sync-inventory`, {
+      const res = await fetch(`/api/v1/marketplace/listings/${listingId}/sync-inventory`, {
         method: 'POST',
         credentials: 'include',
       });
@@ -164,7 +164,7 @@ export default function MarketplaceListingsPage() {
     if (!confirm('Delete this listing? This cannot be undone.')) return;
 
     try {
-      const res = await fetch(`/api/marketplace/listings/${listingId}`, {
+      const res = await fetch(`/api/v1/marketplace/listings/${listingId}`, {
         method: 'DELETE',
         credentials: 'include',
       });

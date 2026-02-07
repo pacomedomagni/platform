@@ -37,7 +37,7 @@ interface OnboardingStore {
   reset: () => void;
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3333';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
 export const useOnboardingStore = create<OnboardingStore>()(
   persist(
@@ -90,7 +90,7 @@ export const useOnboardingStore = create<OnboardingStore>()(
       fetchStatus: async () => {
         set({ isLoading: true });
         try {
-          const token = localStorage.getItem('token');
+          const token = localStorage.getItem('customer_token');
           if (!token) {
             set({ isLoading: false });
             return;
@@ -116,7 +116,7 @@ export const useOnboardingStore = create<OnboardingStore>()(
       // Complete a step
       completeStep: async (step: string) => {
         try {
-          const token = localStorage.getItem('token');
+          const token = localStorage.getItem('customer_token');
           if (!token) return;
 
           const response = await fetch(`${API_BASE_URL}/api/v1/store/onboarding/complete-step`, {
@@ -140,7 +140,7 @@ export const useOnboardingStore = create<OnboardingStore>()(
       // Update current step
       updateStep: async (step: string) => {
         try {
-          const token = localStorage.getItem('token');
+          const token = localStorage.getItem('customer_token');
           if (!token) return;
 
           await fetch(`${API_BASE_URL}/api/v1/store/onboarding/update-step`, {
@@ -169,7 +169,7 @@ export const useOnboardingStore = create<OnboardingStore>()(
       // Dismiss onboarding
       dismissOnboarding: async () => {
         try {
-          const token = localStorage.getItem('token');
+          const token = localStorage.getItem('customer_token');
           if (!token) return;
 
           await fetch(`${API_BASE_URL}/api/v1/store/onboarding/dismiss`, {
@@ -198,7 +198,7 @@ export const useOnboardingStore = create<OnboardingStore>()(
       // Update profile
       updateProfile: async (data) => {
         try {
-          const token = localStorage.getItem('token');
+          const token = localStorage.getItem('customer_token');
           if (!token) return;
 
           const response = await fetch(`${API_BASE_URL}/api/v1/store/onboarding/update-profile`, {
@@ -222,7 +222,7 @@ export const useOnboardingStore = create<OnboardingStore>()(
       // Reset tour to show again
       resetTour: async () => {
         try {
-          const token = localStorage.getItem('token');
+          const token = localStorage.getItem('customer_token');
           if (!token) return;
 
           await fetch(`${API_BASE_URL}/api/v1/store/onboarding/reset-tour`, {

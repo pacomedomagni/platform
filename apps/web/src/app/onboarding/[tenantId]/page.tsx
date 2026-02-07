@@ -26,7 +26,7 @@ export default function OnboardingStatusPage() {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch(`/api/onboarding/${tenantId}/status`);
+      const res = await fetch(`/api/v1/onboarding/${tenantId}/status`);
       if (!res.ok) throw new Error('Failed to fetch status');
       const data = await res.json();
       setStatus(data);
@@ -64,7 +64,12 @@ export default function OnboardingStatusPage() {
 
     try {
       const token = localStorage.getItem('access_token');
-      const res = await fetch(`/api/onboarding/${tenantId}/payment/initiate`, {
+      const token = localStorage.getItem('access_token');
+      if (!token) {
+        throw new Error('Please sign in again to continue payment setup.');
+      }
+
+      const res = await fetch(`/api/v1/onboarding/${tenantId}/payment/initiate`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,

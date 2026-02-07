@@ -16,7 +16,10 @@ export default function OnboardingCompletePage() {
     const completeOnboarding = async () => {
       try {
         const token = localStorage.getItem('access_token');
-        const res = await fetch(`/api/onboarding/${tenantId}/complete`, {
+        if (!token) {
+          throw new Error('Please sign in again to complete onboarding.');
+        }
+        const res = await fetch(`/api/v1/onboarding/${tenantId}/complete`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${token}`,

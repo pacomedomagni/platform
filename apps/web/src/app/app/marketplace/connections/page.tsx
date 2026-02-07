@@ -51,7 +51,7 @@ export default function MarketplaceConnectionsPage() {
 
   const loadConnections = async () => {
     try {
-      const res = await fetch('/api/marketplace/connections', {
+      const res = await fetch('/api/v1/marketplace/connections', {
         credentials: 'include',
       });
       if (res.ok) {
@@ -72,7 +72,7 @@ export default function MarketplaceConnectionsPage() {
     }
 
     try {
-      const res = await fetch('/api/marketplace/connections', {
+      const res = await fetch('/api/v1/marketplace/connections', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -89,7 +89,7 @@ export default function MarketplaceConnectionsPage() {
         setNewConnection({ name: '', description: '', marketplaceId: 'EBAY_US', isDefault: false });
 
         // Redirect to OAuth flow
-        window.location.href = `/api/marketplace/ebay/auth/connect?connectionId=${connection.id}`;
+        window.location.href = `/api/v1/marketplace/ebay/auth/connect?connectionId=${connection.id}`;
       } else {
         const error = await res.json();
         alert(error.error || 'Failed to create connection');
@@ -104,7 +104,7 @@ export default function MarketplaceConnectionsPage() {
     if (!confirm('Are you sure you want to disconnect this store?')) return;
 
     try {
-      const res = await fetch(`/api/marketplace/connections/${connectionId}/disconnect`, {
+      const res = await fetch(`/api/v1/marketplace/connections/${connectionId}/disconnect`, {
         method: 'POST',
         credentials: 'include',
       });
@@ -121,7 +121,7 @@ export default function MarketplaceConnectionsPage() {
     if (!confirm('Are you sure you want to delete this store? This cannot be undone.')) return;
 
     try {
-      const res = await fetch(`/api/marketplace/connections/${connectionId}`, {
+      const res = await fetch(`/api/v1/marketplace/connections/${connectionId}`, {
         method: 'DELETE',
         credentials: 'include',
       });
@@ -138,7 +138,7 @@ export default function MarketplaceConnectionsPage() {
   };
 
   const handleReconnect = (connectionId: string) => {
-    window.location.href = `/api/marketplace/ebay/auth/connect?connectionId=${connectionId}`;
+    window.location.href = `/api/v1/marketplace/ebay/auth/connect?connectionId=${connectionId}`;
   };
 
   if (loading) {
@@ -316,7 +316,7 @@ function ConnectionCard({
 
   const loadStatus = async () => {
     try {
-      const res = await fetch(`/api/marketplace/connections/${connection.id}/status`, {
+      const res = await fetch(`/api/v1/marketplace/connections/${connection.id}/status`, {
         credentials: 'include',
       });
       if (res.ok) {

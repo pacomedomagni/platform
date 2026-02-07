@@ -30,7 +30,7 @@ export default function EmailPreferencesPage() {
 
   const fetchPreferences = async () => {
     try {
-      const response = await fetch('/api/storefront/email-preferences', {
+      const response = await fetch('/api/v1/storefront/email-preferences', {
         credentials: 'include',
       });
 
@@ -61,7 +61,7 @@ export default function EmailPreferencesPage() {
     setMessage(null);
 
     try {
-      const response = await fetch('/api/storefront/email-preferences', {
+      const response = await fetch('/api/v1/storefront/email-preferences', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -97,7 +97,7 @@ export default function EmailPreferencesPage() {
     setMessage(null);
 
     try {
-      const response = await fetch('/api/storefront/email-preferences/unsubscribe/all', {
+      const response = await fetch('/api/v1/storefront/email-preferences/unsubscribe/all', {
         method: 'POST',
         credentials: 'include',
       });

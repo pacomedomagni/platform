@@ -22,6 +22,9 @@ export default function LoginPage() {
             
             localStorage.setItem('access_token', access_token);
             localStorage.setItem('user', JSON.stringify(user));
+            if (user?.tenantId) {
+                localStorage.setItem('tenantId', user.tenantId);
+            }
             
             router.push('/app');
         } catch (err: any) {

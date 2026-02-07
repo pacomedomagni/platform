@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: '/api', // Proxy will handle this or absolute URL. Next.js rewrites can also be used.
+  baseURL: '/api/v1', // Proxy will handle this or absolute URL. Next.js rewrites can also be used.
   headers: {
     'Content-Type': 'application/json',
   },

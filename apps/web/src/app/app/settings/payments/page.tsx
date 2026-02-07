@@ -26,7 +26,7 @@ export default function PaymentSettingsPage() {
     if (!tenantId) return;
     try {
       const token = localStorage.getItem('access_token');
-      const res = await fetch(`/api/onboarding/${tenantId}/status`, {
+      const res = await fetch(`/api/v1/onboarding/${tenantId}/status`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Failed to fetch payment info');
@@ -56,7 +56,7 @@ export default function PaymentSettingsPage() {
   const handleOpenStripeDashboard = async () => {
     try {
       const token = localStorage.getItem('access_token');
-      const res = await fetch(`/api/onboarding/${tenantId}/stripe/dashboard`, {
+      const res = await fetch(`/api/v1/onboarding/${tenantId}/stripe/dashboard`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Failed to get dashboard link');
@@ -71,7 +71,7 @@ export default function PaymentSettingsPage() {
     setIsReconnecting(true);
     try {
       const token = localStorage.getItem('access_token');
-      const res = await fetch(`/api/onboarding/${tenantId}/payment/initiate`, {
+      const res = await fetch(`/api/v1/onboarding/${tenantId}/payment/initiate`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });

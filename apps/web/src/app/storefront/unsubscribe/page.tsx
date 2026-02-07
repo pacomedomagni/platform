@@ -22,7 +22,7 @@ export default function UnsubscribePage() {
     const unsubscribe = async () => {
       try {
         const response = await fetch(
-          `/api/storefront/email-preferences/unsubscribe?token=${encodeURIComponent(token)}&type=${type}`,
+          `/api/v1/storefront/email-preferences/unsubscribe?token=${encodeURIComponent(token)}&type=${type}`,
           {
             method: 'GET',
           },
