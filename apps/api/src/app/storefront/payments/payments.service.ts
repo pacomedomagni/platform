@@ -2,6 +2,8 @@ import { Injectable, Logger, NotFoundException, BadRequestException, Inject, Opt
 import { PrismaService } from '@platform/db';
 import { StripeService } from './stripe.service';
 import { EmailService } from '@platform/email';
+import { StockMovementService } from '../../inventory-management/stock-movement.service';
+import { MovementType } from '../../inventory-management/inventory-management.dto';
 import Stripe from 'stripe';
 
 @Injectable()
@@ -11,6 +13,7 @@ export class PaymentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly stripeService: StripeService,
+    private readonly stockMovementService: StockMovementService,
     @Optional() @Inject(EmailService) private readonly emailService?: EmailService
   ) {}
 
@@ -70,7 +73,7 @@ export class PaymentsService {
    */
   private async handlePaymentSucceeded(paymentIntent: Stripe.PaymentIntent) {
     const orderId = paymentIntent.metadata['orderId'];
-    
+
     if (!orderId) {
       this.logger.warn('Payment succeeded without orderId in metadata');
       return;
@@ -78,6 +81,18 @@ export class PaymentsService {
 
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
+      include: {
+        items: {
+          include: {
+            product: {
+              include: {
+                item: true,
+              },
+            },
+          },
+        },
+        cart: true,
+      },
     });
 
     if (!order) {
@@ -131,10 +146,131 @@ export class PaymentsService {
 
     this.logger.log(`Payment succeeded for order: ${order.orderNumber}`);
 
+    // CRITICAL: Process stock deduction and coupon tracking
+    await this.processOrderFulfillment(order);
+
     // Send order confirmation email (async - non-critical)
     this.sendOrderConfirmationEmailAsync(order.id);
+  }
 
-    // TODO: Reserve inventory
+  /**
+   * Process order fulfillment: stock deduction and coupon tracking
+   * CRITICAL: Must be executed after payment succeeds to prevent overselling
+   */
+  private async processOrderFulfillment(order: any) {
+    try {
+      // 1. Deduct stock from inventory
+      await this.deductStockForOrder(order);
+
+      // 2. Track coupon usage
+      await this.trackCouponUsage(order);
+
+      this.logger.log(`Order fulfillment completed for: ${order.orderNumber}`);
+    } catch (error) {
+      this.logger.error(`CRITICAL: Order fulfillment failed for ${order.orderNumber}:`, error);
+
+      // TODO: Implement failed operations table for retry mechanism
+      // For now, just log the error - requires manual intervention
+      this.logger.error(`Manual intervention required for order ${order.orderNumber}`, {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+
+      // Don't throw - payment already captured, need manual intervention
+    }
+  }
+
+  /**
+   * Deduct stock for order items
+   */
+  private async deductStockForOrder(order: any) {
+    if (!order.items || order.items.length === 0) {
+      this.logger.warn(`Order ${order.orderNumber} has no items to deduct stock`);
+      return;
+    }
+
+    // Get default warehouse (in production, this would be based on shipping location)
+    const warehouse = await this.prisma.warehouse.findFirst({
+      where: {
+        tenantId: order.tenantId,
+        isActive: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    if (!warehouse) {
+      throw new Error(`No active warehouse found for tenant ${order.tenantId}`);
+    }
+
+    // Prepare stock movement items
+    const items = order.items.map((orderItem: any) => ({
+      itemCode: orderItem.product.item.code,
+      quantity: orderItem.quantity,
+      rate: Number(orderItem.unitPrice),
+    }));
+
+    // Issue stock via stock movement service
+    await this.stockMovementService.createMovement(
+      { tenantId: order.tenantId },
+      {
+        movementType: MovementType.ISSUE,
+        postingDate: new Date().toISOString().split('T')[0],
+        warehouseCode: warehouse.code,
+        items,
+        reference: `Order ${order.orderNumber}`,
+        remarks: `Stock issued for order ${order.orderNumber} (Payment ID: ${order.stripePaymentIntentId})`,
+      }
+    );
+
+    this.logger.log(`Stock deducted for order: ${order.orderNumber}`);
+  }
+
+  /**
+   * Track coupon usage and increment counter
+   */
+  private async trackCouponUsage(order: any) {
+    // Only track if order has discount and coupon code
+    if (Number(order.discountTotal) <= 0 || !order.cart?.couponCode) {
+      return;
+    }
+
+    const couponCode = order.cart.couponCode;
+
+    // Find the coupon
+    const coupon = await this.prisma.coupon.findFirst({
+      where: {
+        tenantId: order.tenantId,
+        code: couponCode,
+      },
+    });
+
+    if (!coupon) {
+      this.logger.warn(`Coupon ${couponCode} not found for order ${order.orderNumber}`);
+      return;
+    }
+
+    // Atomically increment usage and create tracking record
+    await this.prisma.$transaction([
+      // Increment coupon usage counter
+      this.prisma.coupon.update({
+        where: { id: coupon.id },
+        data: { timesUsed: { increment: 1 } },
+      }),
+      // Create usage tracking record
+      this.prisma.couponUsage.create({
+        data: {
+          tenantId: order.tenantId,
+          couponId: coupon.id,
+          customerId: order.customerId,
+          orderId: order.id,
+          usedAt: new Date(),
+        },
+      }),
+    ]);
+
+    this.logger.log(`Coupon ${couponCode} usage tracked for order: ${order.orderNumber}`);
   }
 
   /**

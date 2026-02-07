@@ -21,6 +21,7 @@ import { SendGridWebhookController } from './email/sendgrid-webhook.controller';
 import { OnboardingController } from './onboarding/onboarding.controller';
 import { OnboardingService } from './onboarding/onboarding.service';
 import { ThemesModule } from './themes/themes.module';
+import { InventoryManagementModule } from '../inventory-management/inventory-management.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { ThemesModule } from './themes/themes.module';
     EcommerceModule,
     I18nModule,
     ThemesModule,
+    InventoryManagementModule,
     EmailModule.forRoot({
       smtp: {
         host: process.env['SMTP_HOST'] || 'localhost',
