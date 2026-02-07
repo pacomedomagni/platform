@@ -86,6 +86,142 @@ export class ProvisioningService {
   }
 
   /**
+   * Create tenant + admin user atomically inside a transaction.
+   * Called from OnboardingService.signup() to guarantee the user exists
+   * before returning a JWT. Seed data is still async.
+   */
+  async createTenantWithUser(
+    tx: Parameters<Parameters<PrismaService['$transaction']>[0]>[0],
+    dto: CreateTenantDto,
+  ): Promise<{ tenantId: string }> {
+    // Check subdomain uniqueness (inside transaction for atomicity)
+    const existingTenant = await tx.tenant.findUnique({
+      where: { domain: dto.domain },
+    });
+    if (existingTenant) {
+      throw new ConflictException(`Subdomain "${dto.domain}" is already taken`);
+    }
+
+    // Check email uniqueness
+    const existingUser = await tx.user.findUnique({
+      where: { email: dto.ownerEmail },
+    });
+    if (existingUser) {
+      throw new ConflictException(`Email "${dto.ownerEmail}" is already registered`);
+    }
+
+    // Create tenant
+    const tenant = await tx.tenant.create({
+      data: {
+        name: dto.businessName,
+        domain: dto.domain,
+        baseCurrency: dto.baseCurrency || 'USD',
+        isActive: false,
+      },
+    });
+
+    // Create admin user synchronously (bcrypt + insert is fast)
+    const hashedPassword = await bcrypt.hash(dto.ownerPassword, 12);
+    await tx.user.create({
+      data: {
+        email: dto.ownerEmail,
+        password: hashedPassword,
+        tenantId: tenant.id,
+        roles: ['admin', 'user'],
+      },
+    });
+
+    return { tenantId: tenant.id };
+  }
+
+  /**
+   * Run seed data provisioning asynchronously.
+   * Called after createTenantWithUser() transaction commits.
+   * Seeds accounts, warehouse, UOMs, and defaults.
+   */
+  async provisionSeedDataAsync(tenantId: string): Promise<void> {
+    const startTime = Date.now();
+
+    try {
+      // Step 1: Seeding accounts
+      await this.updateProvisioningStatus(tenantId, {
+        tenantId,
+        status: ProvisioningStatus.SEEDING_ACCOUNTS,
+        progress: 30,
+        currentStep: 'Setting up chart of accounts...',
+        estimatedSecondsRemaining: 20,
+      });
+      await this.seedData.seedAccounts(tenantId);
+
+      // Step 2: Seed Warehouse & Locations
+      await this.updateProvisioningStatus(tenantId, {
+        tenantId,
+        status: ProvisioningStatus.SEEDING_WAREHOUSE,
+        progress: 55,
+        currentStep: 'Creating default warehouse...',
+        estimatedSecondsRemaining: 15,
+      });
+      await this.seedData.seedWarehouse(tenantId);
+
+      // Step 3: Seed UOMs
+      await this.updateProvisioningStatus(tenantId, {
+        tenantId,
+        status: ProvisioningStatus.SEEDING_UOMS,
+        progress: 75,
+        currentStep: 'Setting up units of measure...',
+        estimatedSecondsRemaining: 10,
+      });
+      await this.seedData.seedUoms();
+
+      // Step 4: Seed Defaults (DocTypes, Perms, etc.)
+      await this.updateProvisioningStatus(tenantId, {
+        tenantId,
+        status: ProvisioningStatus.SEEDING_DEFAULTS,
+        progress: 90,
+        currentStep: 'Configuring defaults...',
+        estimatedSecondsRemaining: 5,
+      });
+      await this.seedData.seedDefaults(tenantId);
+
+      // Step 5: Seed Legal Pages
+      const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId } });
+      if (tenant) {
+        await this.seedData.seedLegalPages(tenantId, tenant.businessName || tenant.name);
+      }
+
+      // Activate tenant
+      await this.prisma.tenant.update({
+        where: { id: tenantId },
+        data: { isActive: true },
+      });
+
+      const duration = (Date.now() - startTime) / 1000;
+      this.logger.log(`Tenant ${tenantId} seed data provisioned in ${duration.toFixed(1)}s`);
+
+      await this.updateProvisioningStatus(tenantId, {
+        tenantId,
+        status: ProvisioningStatus.READY,
+        progress: 100,
+        currentStep: 'Ready!',
+        estimatedSecondsRemaining: 0,
+        completedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      this.logger.error(`Seed data provisioning failed for tenant ${tenantId}:`, error);
+
+      await this.updateProvisioningStatus(tenantId, {
+        tenantId,
+        status: ProvisioningStatus.FAILED,
+        progress: 0,
+        currentStep: 'Provisioning failed',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+
+      throw error;
+    }
+  }
+
+  /**
    * Get provisioning status
    */
   async getProvisioningStatus(tenantId: string): Promise<ProvisioningStatusDto> {
@@ -196,6 +332,9 @@ export class ProvisioningService {
         estimatedSecondsRemaining: 5,
       });
       await this.seedData.seedDefaults(tenantId);
+
+      // Step 7: Seed Legal Pages
+      await this.seedData.seedLegalPages(tenantId, dto.businessName);
 
       // Activate tenant
       await this.prisma.tenant.update({

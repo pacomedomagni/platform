@@ -72,6 +72,12 @@ http:
         accessControlMaxAge: 86400
         addVaryHeader: true
     
+    # Dashboard basic auth (generate htpasswd with: htpasswd -nb admin yourpassword)
+    dashboard-auth:
+      basicAuth:
+        users:
+          - "${TRAEFIK_DASHBOARD_AUTH}"
+
     # Redirect www to non-www
     redirect-www:
       redirectRegex:

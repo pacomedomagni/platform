@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Card } from '@platform/ui';
-import { DollarSign, ShoppingCart, Package, Activity, CheckCircle, Circle, ArrowRight, ExternalLink, Loader2 } from 'lucide-react';
+import { DollarSign, ShoppingCart, Package, Activity, CheckCircle, Circle, ArrowRight, ExternalLink, Loader2, Rocket, X, Mail, FileText, Globe } from 'lucide-react';
 import Link from 'next/link';
 
 interface DashboardData {
@@ -12,10 +12,15 @@ interface DashboardData {
   paymentStatus: string;
   paymentProvider: string | null;
   storeUrl: string | null;
+  storePublished: boolean;
+  storePublishedAt: string | null;
   checklist: {
+    emailVerified: boolean;
     paymentsConnected: boolean;
     hasProducts: boolean;
     hasCustomizedSettings: boolean;
+    hasLegalPages: boolean;
+    storePublished: boolean;
   };
   recentOrders: {
     id: string;
@@ -65,6 +70,15 @@ export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [setupBannerDismissed, setSetupBannerDismissed] = useState(true);
+
+  useEffect(() => {
+    const done = localStorage.getItem('merchant_setup_done');
+    const dismissed = localStorage.getItem('merchant_setup_dismissed');
+    if (!done && !dismissed) {
+      setSetupBannerDismissed(false);
+    }
+  }, []);
 
   useEffect(() => {
     const fetchDashboard = async () => {
@@ -119,10 +133,15 @@ export default function Dashboard() {
     );
   }
 
+  const [publishing, setPublishing] = useState(false);
+
   const showChecklist =
+    !data.checklist.emailVerified ||
     !data.checklist.paymentsConnected ||
     !data.checklist.hasProducts ||
-    !data.checklist.hasCustomizedSettings;
+    !data.checklist.hasCustomizedSettings ||
+    !data.checklist.hasLegalPages ||
+    !data.checklist.storePublished;
 
   const statCards = [
     {
@@ -156,7 +175,37 @@ export default function Dashboard() {
     },
   ];
 
+  const handlePublish = async () => {
+    setPublishing(true);
+    try {
+      const token = localStorage.getItem('access_token');
+      const tenantId = localStorage.getItem('tenantId');
+      const res = await fetch('/api/v1/store/admin/dashboard/publish', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'x-tenant-id': tenantId || '',
+        },
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.message || 'Failed to publish store');
+      } else {
+        window.location.reload();
+      }
+    } catch {
+      alert('Failed to publish store');
+    } finally {
+      setPublishing(false);
+    }
+  };
+
   const checklistItems = [
+    {
+      label: 'Verify your email',
+      done: data.checklist.emailVerified,
+      href: '#',
+    },
     {
       label: 'Connect payments',
       done: data.checklist.paymentsConnected,
@@ -173,10 +222,15 @@ export default function Dashboard() {
       href: '/app/settings/shipping',
     },
     {
-      label: 'Share your store',
-      done: false,
-      href: data.storeUrl || '#',
-      external: true,
+      label: 'Add legal pages',
+      done: data.checklist.hasLegalPages,
+      href: '/app/settings/legal',
+    },
+    {
+      label: 'Publish your store',
+      done: data.checklist.storePublished,
+      href: '#',
+      action: !data.checklist.storePublished ? handlePublish : undefined,
     },
   ];
 
@@ -191,6 +245,38 @@ export default function Dashboard() {
         </h2>
         <p className="mt-1 text-slate-500">Welcome back. Here&apos;s how your store is doing.</p>
       </div>
+
+      {/* Getting Started Banner */}
+      {!setupBannerDismissed && (
+        <div className="relative overflow-hidden rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-white">
+          <button
+            onClick={() => {
+              localStorage.setItem('merchant_setup_dismissed', 'true');
+              setSetupBannerDismissed(true);
+            }}
+            className="absolute right-4 top-4 rounded-lg p-1 text-white/70 transition hover:bg-white/10 hover:text-white"
+          >
+            <X className="h-4 w-4" />
+          </button>
+          <div className="flex items-center gap-4">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/20">
+              <Rocket className="h-6 w-6" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-lg font-semibold">Welcome! Complete your store setup</h3>
+              <p className="mt-0.5 text-sm text-blue-100">
+                Follow our step-by-step guide to get your store ready for customers.
+              </p>
+            </div>
+            <Link
+              href="/app/getting-started"
+              className="shrink-0 rounded-lg bg-white px-4 py-2.5 text-sm font-semibold text-blue-700 transition hover:bg-blue-50"
+            >
+              Start Setup
+            </Link>
+          </div>
+        </div>
+      )}
 
       {/* Stat Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -219,6 +305,21 @@ export default function Dashboard() {
         })}
       </div>
 
+      {/* Store Status Badge */}
+      {data.storePublished && (
+        <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-3">
+          <Globe className="h-5 w-5 text-emerald-600" />
+          <div className="flex-1">
+            <span className="text-sm font-semibold text-emerald-700">Store is Live</span>
+            {data.storePublishedAt && (
+              <span className="ml-2 text-xs text-emerald-600">
+                since {formatDate(data.storePublishedAt)}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Getting Started Checklist */}
       {showChecklist && (
         <Card className="p-6">
@@ -237,35 +338,51 @@ export default function Dashboard() {
           </div>
 
           <div className="space-y-3">
-            {checklistItems.map((item) => (
-              <Link
-                key={item.label}
-                href={item.href}
-                target={item.external ? '_blank' : undefined}
-                rel={item.external ? 'noopener noreferrer' : undefined}
-                className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3.5 transition hover:border-blue-200 hover:bg-blue-50/50"
-              >
-                <div className="flex items-center gap-3">
-                  {item.done ? (
-                    <CheckCircle className="h-5 w-5 text-emerald-500" />
+            {checklistItems.map((item) => {
+              const inner = (
+                <div className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3.5 transition hover:border-blue-200 hover:bg-blue-50/50">
+                  <div className="flex items-center gap-3">
+                    {item.done ? (
+                      <CheckCircle className="h-5 w-5 text-emerald-500" />
+                    ) : (
+                      <Circle className="h-5 w-5 text-slate-300" />
+                    )}
+                    <span
+                      className={`text-sm font-medium ${
+                        item.done ? 'text-slate-400 line-through' : 'text-slate-700'
+                      }`}
+                    >
+                      {item.label}
+                    </span>
+                  </div>
+                  {(item as any).action && !item.done ? (
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        (item as any).action();
+                      }}
+                      disabled={publishing}
+                      className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {publishing ? 'Publishing...' : 'Publish'}
+                    </button>
                   ) : (
-                    <Circle className="h-5 w-5 text-slate-300" />
+                    <ArrowRight className="h-4 w-4 text-slate-400" />
                   )}
-                  <span
-                    className={`text-sm font-medium ${
-                      item.done ? 'text-slate-400 line-through' : 'text-slate-700'
-                    }`}
-                  >
-                    {item.label}
-                  </span>
                 </div>
-                {item.external ? (
-                  <ExternalLink className="h-4 w-4 text-slate-400" />
-                ) : (
-                  <ArrowRight className="h-4 w-4 text-slate-400" />
-                )}
-              </Link>
-            ))}
+              );
+
+              if ((item as any).action && !item.done) {
+                return <div key={item.label}>{inner}</div>;
+              }
+
+              return (
+                <Link key={item.label} href={item.href}>
+                  {inner}
+                </Link>
+              );
+            })}
           </div>
         </Card>
       )}

@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { EmailService } from '@platform/email';
 import { Prisma } from '@prisma/client';
 import { ListOrdersDto } from './dto';
 
@@ -18,7 +19,12 @@ const VALID_ORDER_TRANSITIONS: Record<string, string[]> = {
 
 @Injectable()
 export class OrdersService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(OrdersService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() @Inject(EmailService) private readonly emailService?: EmailService,
+  ) {}
 
   /**
    * List orders for a customer
@@ -266,7 +272,88 @@ export class OrdersService {
       data: updateData,
     });
 
+    // Fire-and-forget transactional emails
+    if (status === 'SHIPPED') {
+      this.sendOrderStatusEmailAsync(orderId, 'store-order-shipped').catch(err =>
+        this.logger.error(`Shipped email failed for order ${orderId}: ${err.message}`));
+    } else if (status === 'DELIVERED') {
+      this.sendOrderStatusEmailAsync(orderId, 'store-order-delivered').catch(err =>
+        this.logger.error(`Delivered email failed for order ${orderId}: ${err.message}`));
+    } else if (status === 'CANCELLED') {
+      this.sendOrderStatusEmailAsync(orderId, 'store-order-cancelled').catch(err =>
+        this.logger.error(`Cancelled email failed for order ${orderId}: ${err.message}`));
+    }
+
     return this.getOrder(tenantId, orderId);
+  }
+
+  // ============ EMAIL HELPERS ============
+
+  private async sendOrderStatusEmailAsync(orderId: string, template: string) {
+    if (!this.emailService) {
+      this.logger.warn('Email service not available, skipping order status email');
+      return;
+    }
+
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { items: true, tenant: true },
+    });
+
+    if (!order || !order.email) {
+      this.logger.warn(`Cannot send email: order ${orderId} not found or no email`);
+      return;
+    }
+
+    const storeUrl = process.env['STORE_URL'] || process.env['FRONTEND_URL'] || '';
+
+    await this.emailService.sendAsync({
+      to: order.email,
+      template,
+      subject: '',
+      context: {
+        type: template,
+        tenantId: order.tenantId,
+        recipientName: [order.shippingFirstName, order.shippingLastName].filter(Boolean).join(' ') || order.email,
+        recipientEmail: order.email,
+        actionUrl: `${storeUrl}/storefront/account/orders?order=${order.orderNumber}`,
+        company: {
+          name: order.tenant.businessName || order.tenant.name,
+          supportEmail: order.tenant.email || 'support@example.com',
+        },
+        order: {
+          orderNumber: order.orderNumber,
+          status: order.status,
+          items: order.items.map(item => ({
+            name: item.name,
+            sku: item.sku || undefined,
+            quantity: item.quantity,
+            unitPrice: Number(item.unitPrice),
+            totalPrice: Number(item.totalPrice),
+            image: item.imageUrl || undefined,
+          })),
+          subtotal: Number(order.subtotal),
+          shipping: Number(order.shippingTotal),
+          tax: Number(order.taxTotal),
+          discount: Number(order.discountTotal) > 0 ? Number(order.discountTotal) : undefined,
+          total: Number(order.grandTotal),
+          currency: order.currency,
+          shippingAddress: {
+            name: [order.shippingFirstName, order.shippingLastName].filter(Boolean).join(' '),
+            line1: order.shippingAddressLine1,
+            line2: order.shippingAddressLine2 || undefined,
+            city: order.shippingCity,
+            state: order.shippingState,
+            postalCode: order.shippingPostalCode,
+            country: order.shippingCountry,
+          },
+          trackingNumber: order.trackingNumber || undefined,
+          shippingCarrier: order.shippingCarrier || undefined,
+        },
+      },
+    });
+
+    this.logger.log(`Order ${template} email queued for order: ${order.orderNumber}`);
   }
 
   // ============ HELPERS ============

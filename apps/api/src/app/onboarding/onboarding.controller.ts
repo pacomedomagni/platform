@@ -67,6 +67,17 @@ export class OnboardingController {
   }
 
   /**
+   * GET /api/onboarding/:tenantId/payment/refresh
+   * Requires authentication — poll Stripe directly for current account status.
+   * Fallback for when webhooks don't arrive.
+   */
+  @Get(':tenantId/payment/refresh')
+  @UseGuards(AuthGuard)
+  async refreshPaymentStatus(@Param('tenantId') tenantId: string) {
+    return this.onboardingService.refreshPaymentProviderStatus(tenantId);
+  }
+
+  /**
    * GET /api/onboarding/:tenantId/stripe/dashboard
    * Requires authentication — get Stripe Express dashboard link
    */

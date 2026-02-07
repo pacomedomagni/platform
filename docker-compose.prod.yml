@@ -59,11 +59,13 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./docker/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./docker/traefik/dynamic:/etc/traefik/dynamic:ro
+      - custom_domains:/etc/traefik/dynamic/custom-domains
       - traefik_letsencrypt:/letsencrypt
       - traefik_logs:/var/log/traefik
     environment:
       - DOMAIN=${DOMAIN}
       - ACME_EMAIL=${ACME_EMAIL}
+      - TRAEFIK_DASHBOARD_AUTH=${TRAEFIK_DASHBOARD_AUTH}
     networks:
       - noslag_network
     deploy:
@@ -87,6 +89,10 @@ services:
       SENTRY_DSN: ${SENTRY_DSN}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      TRAEFIK_DYNAMIC_DIR: /etc/traefik/dynamic/custom-domains
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - custom_domains:/etc/traefik/dynamic/custom-domains
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.api.rule=Host(`api.${DOMAIN}`) || (Host(`${DOMAIN}`) && PathPrefix(`/api`))"
@@ -172,6 +178,7 @@ volumes:
   minio_data:
   traefik_letsencrypt:
   traefik_logs:
+  custom_domains:
   backup_data:
 
 networks:

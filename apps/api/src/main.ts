@@ -53,9 +53,36 @@ async function bootstrap() {
   const globalPrefix = 'api/v1';
   app.setGlobalPrefix(globalPrefix);
   
-  // Enable CORS
+  // Enable CORS — allow platform domains + any verified custom domain
+  const allowedOrigins = process.env['CORS_ORIGINS']?.split(',') || ['http://localhost:3000', 'http://localhost:4200'];
+  const platformDomain = process.env['DOMAIN'] || 'noslag.com';
+
   app.enableCors({
-    origin: process.env['CORS_ORIGINS']?.split(',') || ['http://localhost:3000', 'http://localhost:4200'],
+    origin: (origin, callback) => {
+      // Allow requests with no origin (server-to-server, curl, mobile apps)
+      if (!origin) return callback(null, true);
+
+      // Allow explicitly configured origins
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+
+      // Allow any subdomain of the platform domain
+      try {
+        const url = new URL(origin);
+        if (url.hostname === platformDomain || url.hostname.endsWith(`.${platformDomain}`)) {
+          return callback(null, true);
+        }
+      } catch {
+        // Invalid origin URL
+      }
+
+      // Allow any HTTPS origin for storefront routes (custom domains)
+      // Custom domains are verified at the Traefik + DNS level before traffic arrives
+      if (origin.startsWith('https://')) {
+        return callback(null, true);
+      }
+
+      callback(null, false);
+    },
     credentials: true,
   });
   

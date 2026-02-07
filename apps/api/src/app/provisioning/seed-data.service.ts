@@ -4,6 +4,7 @@ import { DEFAULT_CHART_OF_ACCOUNTS } from './defaults/chart-of-accounts';
 import { DEFAULT_WAREHOUSE_CONFIG } from './defaults/warehouse';
 import { DEFAULT_UOMS } from './defaults/uoms';
 import { DEFAULT_DOC_TYPES } from './defaults/doc-types';
+import { DEFAULT_LEGAL_PAGES } from './defaults/legal-pages';
 
 @Injectable()
 export class SeedDataService {
@@ -196,5 +197,41 @@ export class SeedDataService {
     });
 
     this.logger.debug(`Seeded defaults for tenant ${tenantId}`);
+  }
+
+  /**
+   * Seed default legal pages (Terms, Privacy, Refund)
+   */
+  async seedLegalPages(tenantId: string, businessName: string): Promise<void> {
+    this.logger.debug(`Seeding legal pages for tenant ${tenantId}`);
+
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { email: true },
+    });
+
+    const email = tenant?.email || 'support@example.com';
+    const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
+    for (const page of DEFAULT_LEGAL_PAGES) {
+      const content = page.content
+        .replace(/\{\{businessName\}\}/g, businessName)
+        .replace(/\{\{email\}\}/g, email)
+        .replace(/\{\{date\}\}/g, date);
+
+      await this.prisma.storePage.upsert({
+        where: { tenantId_slug: { tenantId, slug: page.slug } },
+        create: {
+          tenantId,
+          slug: page.slug,
+          title: page.title,
+          content,
+          isPublished: true,
+        },
+        update: {},
+      });
+    }
+
+    this.logger.debug(`Seeded ${DEFAULT_LEGAL_PAGES.length} legal pages for tenant ${tenantId}`);
   }
 }

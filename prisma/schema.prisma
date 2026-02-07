@@ -57,6 +57,10 @@ model Tenant {
   onboardingStep          String?  // "signup"|"provisioning"|"payment"|"completed"
   onboardingCompletedAt   DateTime?
 
+  // Storefront publish gate
+  storePublished    Boolean   @default(false)
+  storePublishedAt  DateTime?
+
   createdAt                DateTime                 @default(now())
   updatedAt                DateTime                 @updatedAt
 
@@ -133,6 +137,12 @@ model Tenant {
   // OAuth state management
   oauthStates OAuthState[]
 
+  // Store pages (legal, custom)
+  storePages StorePage[]
+
+  // Product import jobs
+  productImportJobs ProductImportJob[]
+
   @@map("tenants")
 }
 
@@ -147,6 +157,11 @@ model User {
   tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   roles String[] @default(["user"])
+
+  // Email verification
+  emailVerified   Boolean   @default(false)
+  emailVerifiedAt DateTime?
+  emailVerificationTokens MerchantEmailVerificationToken[]
 
   // Marketplace listing approvals
   approvedMarketplaceListings MarketplaceListing[] @relation("MarketplaceListingApprover")
@@ -2806,4 +2821,61 @@ model OAuthState {
 
   @@index([expiresAt])
   @@map("oauth_states")
+}
+
+// ─── Merchant Email Verification ──────────────────────────────────
+
+model MerchantEmailVerificationToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([token])
+  @@map("merchant_email_verification_tokens")
+}
+
+// ─── Store Pages (Legal, Custom) ──────────────────────────────────
+
+model StorePage {
+  id          String  @id @default(uuid())
+  tenantId    String
+  tenant      Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  slug        String
+  title       String
+  content     String  @db.Text
+  isPublished Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, slug])
+  @@index([tenantId])
+  @@map("store_pages")
+}
+
+// ─── Product Import Jobs ──────────────────────────────────────────
+
+model ProductImportJob {
+  id            String    @id @default(uuid())
+  tenantId      String
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fileName      String
+  status        String    @default("pending") // pending, processing, completed, failed
+  totalRows     Int       @default(0)
+  processedRows Int       @default(0)
+  successCount  Int       @default(0)
+  errorCount    Int       @default(0)
+  errors        Json      @default("[]")
+  startedAt     DateTime?
+  completedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@map("product_import_jobs")
 }

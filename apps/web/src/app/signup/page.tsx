@@ -69,38 +69,9 @@ export default function SignupPage() {
         return;
       }
 
-      // Provisioning can race; retry login briefly if token isn't ready.
-      let loggedIn = false;
-      for (let i = 0; i < 10; i++) {
-        try {
-          const loginRes = await fetch('/api/v1/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: data.email, password: data.password }),
-          });
-          if (loginRes.ok) {
-            const loginData = await loginRes.json();
-            if (loginData?.access_token) {
-              localStorage.setItem('access_token', loginData.access_token);
-              if (loginData?.user?.tenantId) {
-                localStorage.setItem('tenantId', loginData.user.tenantId);
-              }
-              loggedIn = true;
-              break;
-            }
-          }
-        } catch {
-          // Retry until provisioning finishes.
-        }
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-
-      if (loggedIn) {
-        router.push(`/onboarding/${tenantId}`);
-        return;
-      }
-
-      setError('Account created, but we could not sign you in yet. Please sign in to continue.');
+      // Token should always be returned now (user created synchronously).
+      // Fallback: redirect to login if something unexpected happens.
+      setError('Account created. Please sign in to continue.');
       setIsSubmitting(false);
     } catch (err: any) {
       setError(err.message);

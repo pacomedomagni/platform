@@ -245,11 +245,97 @@ export class CheckoutService {
         paymentProvider = 'stripe';
       }
     } catch (error) {
-      // Log error but don't fail checkout - payment can be retried
+      // Log error but don't fail checkout — payment can be retried via getCheckout or retryPaymentIntent
       console.error('Failed to create payment intent:', error);
     }
 
     return this.mapOrderToCheckoutResponse(result, stripeClientSecret, paymentProvider);
+  }
+
+  /**
+   * Retry creating a payment intent for an order that failed during initial checkout.
+   * Called explicitly or auto-triggered by getCheckout().
+   */
+  async retryPaymentIntent(tenantId: string, orderId: string) {
+    const order = await this.prisma.order.findFirst({
+      where: {
+        id: orderId,
+        tenantId,
+        paymentStatus: 'PENDING',
+        stripePaymentIntentId: null,
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found, already has payment, or is not pending');
+    }
+
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: {
+        paymentProvider: true,
+        paymentProviderStatus: true,
+        stripeConnectAccountId: true,
+        platformFeePercent: true,
+        platformFeeFixed: true,
+        squareLocationId: true,
+      },
+    });
+
+    const idempotencyKey = `pi_${tenantId}_${orderId}`;
+    const metadata = {
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      tenantId,
+      customerEmail: order.email || '',
+    };
+
+    let clientSecret: string | null = null;
+    let paymentProvider = 'stripe';
+
+    if (
+      tenant?.paymentProvider === 'stripe' &&
+      tenant.stripeConnectAccountId &&
+      tenant.paymentProviderStatus === 'active'
+    ) {
+      const amount = Number(order.grandTotal);
+      const fee =
+        amount * (Number(tenant.platformFeePercent) / 100) +
+        Number(tenant.platformFeeFixed);
+
+      const paymentIntent =
+        await this.stripeConnectService.createConnectedPaymentIntent(
+          tenant.stripeConnectAccountId,
+          amount,
+          'usd',
+          fee,
+          metadata,
+          idempotencyKey,
+        );
+
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: { stripePaymentIntentId: paymentIntent.id },
+      });
+
+      clientSecret = paymentIntent.client_secret;
+    } else {
+      const paymentIntent = await this.stripeService.createPaymentIntent(
+        Number(order.grandTotal),
+        'usd',
+        metadata,
+        idempotencyKey,
+      );
+
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: { stripePaymentIntentId: paymentIntent.id },
+      });
+
+      clientSecret = paymentIntent.client_secret;
+    }
+
+    return { clientSecret, paymentProvider, orderId: order.id };
   }
 
   /**
@@ -272,14 +358,25 @@ export class CheckoutService {
 
     // Get Stripe client secret if payment is pending
     let clientSecret: string | null = null;
-    if (order.stripePaymentIntentId && order.paymentStatus === 'PENDING') {
-      try {
-        const paymentIntent = await this.stripeService.getPaymentIntent(
-          order.stripePaymentIntentId
-        );
-        clientSecret = paymentIntent.client_secret;
-      } catch (error) {
-        console.error('Failed to get Stripe payment intent:', error);
+    if (order.paymentStatus === 'PENDING') {
+      if (order.stripePaymentIntentId) {
+        // Payment intent exists — retrieve the client secret
+        try {
+          const paymentIntent = await this.stripeService.getPaymentIntent(
+            order.stripePaymentIntentId
+          );
+          clientSecret = paymentIntent.client_secret;
+        } catch (error) {
+          console.error('Failed to get Stripe payment intent:', error);
+        }
+      } else {
+        // Payment intent missing (Stripe call failed during checkout) — auto-retry
+        try {
+          const retryResult = await this.retryPaymentIntent(tenantId, orderId);
+          clientSecret = retryResult.clientSecret;
+        } catch (error) {
+          console.error('Auto-retry payment intent failed:', error);
+        }
       }
     }
 

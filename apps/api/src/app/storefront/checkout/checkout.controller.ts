@@ -156,6 +156,28 @@ export class CheckoutController {
   }
 
   /**
+   * Retry creating a payment intent for an order where Stripe failed during checkout.
+   * POST /api/v1/store/checkout/:id/retry-payment
+   */
+  @Post(':id/retry-payment')
+  @Throttle({ medium: { limit: 5, ttl: 60000 } })
+  async retryPaymentIntent(
+    @Headers('x-tenant-id') tenantId: string,
+    @Param('id') orderId: string,
+    @Headers('authorization') authHeader?: string,
+    @Headers('x-customer-email') email?: string
+  ) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID required');
+    }
+
+    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
+    await this.verifyOrderOwnership(tenantId, orderId, customerId, email);
+
+    return this.checkoutService.retryPaymentIntent(tenantId, orderId);
+  }
+
+  /**
    * Cancel checkout/order
    * DELETE /api/v1/store/checkout/:id
    */

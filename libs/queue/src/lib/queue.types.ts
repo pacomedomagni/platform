@@ -28,6 +28,7 @@ export enum QueueName {
   REPORTS = 'reports',
   WEBHOOKS = 'webhooks',
   SCHEDULED = 'scheduled',
+  PRODUCT_IMPORT = 'product-import',
 }
 
 export interface EmailJobData {
@@ -99,6 +100,11 @@ export interface AccountingJobData {
   docname?: string;
   tenantId: string;
   data?: Record<string, unknown>;
+}
+
+export interface ProductImportJobData {
+  jobId: string;
+  tenantId: string;
 }
 
 export interface ScheduledJobData {

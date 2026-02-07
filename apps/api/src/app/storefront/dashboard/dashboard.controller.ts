@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Headers,
   BadRequestException,
   UseGuards,
@@ -19,5 +20,29 @@ export class DashboardController {
       throw new BadRequestException('Tenant ID required');
     }
     return this.dashboardService.getDashboardStats(tenantId);
+  }
+
+  @Get('readiness')
+  async getReadiness(@Headers('x-tenant-id') tenantId: string) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID required');
+    }
+    return this.dashboardService.getStoreReadiness(tenantId);
+  }
+
+  @Post('publish')
+  async publishStore(@Headers('x-tenant-id') tenantId: string) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID required');
+    }
+    return this.dashboardService.publishStore(tenantId);
+  }
+
+  @Post('unpublish')
+  async unpublishStore(@Headers('x-tenant-id') tenantId: string) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID required');
+    }
+    return this.dashboardService.unpublishStore(tenantId);
   }
 }

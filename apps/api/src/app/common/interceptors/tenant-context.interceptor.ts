@@ -8,15 +8,20 @@ export class TenantContextInterceptor implements NestInterceptor {
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const request = context.switchToHttp().getRequest();
+
+    // Priority 1: JWT user's tenantId (most trusted)
     const userTenantId = request.user?.tenantId;
 
-    // Only trust x-tenant-id header when ALLOW_TENANT_HEADER is explicitly enabled
+    // Priority 2: Already resolved by TenantMiddleware (Host header → UUID)
+    const resolvedTenantId = request['resolvedTenantId'];
+
+    // Priority 3: Explicit header in dev mode
     const headerTenantId =
       process.env['ALLOW_TENANT_HEADER'] === 'true'
         ? request.headers?.['x-tenant-id']
         : undefined;
 
-    const tenantId = userTenantId || headerTenantId;
+    const tenantId = userTenantId || resolvedTenantId || headerTenantId;
 
     const isUuid = (value: string) =>
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);

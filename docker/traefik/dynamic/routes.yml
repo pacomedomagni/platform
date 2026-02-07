@@ -46,7 +46,7 @@ http:
             sans:
               - "*.${DOMAIN}"
     
-    # Dashboard (should be protected in production)
+    # Dashboard (protected with basic auth)
     traefik-dashboard:
       rule: "Host(`traefik.${DOMAIN}`)"
       entryPoints:
@@ -54,7 +54,7 @@ http:
       service: api@internal
       middlewares:
         - security-headers
-        # Add basic auth or IP whitelist in production
+        - dashboard-auth
       tls:
         certResolver: letsencrypt
 

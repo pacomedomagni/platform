@@ -29,6 +29,12 @@ import { StoreSettingsController } from './settings/store-settings.controller';
 import { StoreSettingsService } from './settings/store-settings.service';
 import { DashboardController } from './dashboard/dashboard.controller';
 import { DashboardService } from './dashboard/dashboard.service';
+import { StorePagesController } from './pages/store-pages.controller';
+import { StorePagesService } from './pages/store-pages.service';
+import { ProductImportController } from './products/product-import.controller';
+import { ProductImportService } from './products/product-import.service';
+import { ShippingAdminController, ShippingPublicController } from './shipping/shipping.controller';
+import { ShippingService } from './shipping/shipping.service';
 
 @Module({
   imports: [
@@ -68,6 +74,10 @@ import { DashboardService } from './dashboard/dashboard.service';
     UploadController,
     StoreSettingsController,
     DashboardController,
+    StorePagesController,
+    ProductImportController,
+    ShippingAdminController,
+    ShippingPublicController,
   ],
   providers: [
     ProductsService,
@@ -80,6 +90,9 @@ import { DashboardService } from './dashboard/dashboard.service';
     OnboardingService,
     StoreSettingsService,
     DashboardService,
+    StorePagesService,
+    ProductImportService,
+    ShippingService,
   ],
   exports: [
     CustomerAuthModule,

@@ -24,12 +24,16 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
 import { SentryInterceptor } from './sentry/sentry.interceptor';
 import { EmailWorker } from './workers/email.worker';
+import { ProductImportWorker } from './workers/product-import.worker';
 import { WorkersModule } from './workers/workers.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
+import { DomainResolverModule } from './storefront/domain-resolver/domain-resolver.module';
 
 @Module({
   imports: [
+    // Domain resolver — must load before StorefrontModule (used by TenantMiddleware)
+    DomainResolverModule,
     // Rate limiting - 100 requests per minute per IP
     ThrottlerModule.forRoot([
       {
@@ -73,6 +77,7 @@ import { OnboardingModule } from './onboarding/onboarding.module';
   providers: [
     AppService,
     EmailWorker,
+    ProductImportWorker,
     // Global rate limiting guard
     {
       provide: APP_GUARD,

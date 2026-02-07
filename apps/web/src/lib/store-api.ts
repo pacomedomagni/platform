@@ -5,15 +5,58 @@
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
 
-// Get tenant ID from subdomain or default
-function getTenantId(): string {
-  if (typeof window === 'undefined') return 'default';
-  const hostname = window.location.hostname;
-  const parts = hostname.split('.');
-  if (parts.length > 2) {
-    return parts[0]; // subdomain
+// Cached tenant UUID resolved from hostname
+let _resolvedTenantId: string | null = null;
+
+/**
+ * Resolve the current hostname to a tenant UUID.
+ * Uses the backend resolve endpoint and caches the result in sessionStorage.
+ */
+async function resolveTenantId(): Promise<string> {
+  if (_resolvedTenantId) return _resolvedTenantId;
+
+  if (typeof window === 'undefined') {
+    return process.env.NEXT_PUBLIC_TENANT_ID || 'default';
   }
-  return process.env.NEXT_PUBLIC_TENANT_ID || 'default';
+
+  // Check sessionStorage
+  const cached = sessionStorage.getItem('resolved_tenant_id');
+  if (cached) {
+    _resolvedTenantId = cached;
+    return cached;
+  }
+
+  // Resolve via backend API
+  const hostname = window.location.hostname;
+  try {
+    const res = await fetch(`${API_BASE}/v1/store/resolve?domain=${encodeURIComponent(hostname)}`);
+    if (res.ok) {
+      const data = await res.json();
+      _resolvedTenantId = data.tenantId;
+      sessionStorage.setItem('resolved_tenant_id', data.tenantId);
+      return data.tenantId;
+    }
+  } catch {
+    // Resolve API unavailable — fall through to defaults
+  }
+
+  // Fallback: env var or localStorage (admin panel / dev)
+  const envTenant = process.env.NEXT_PUBLIC_TENANT_ID;
+  if (envTenant) return envTenant;
+  const storedTenant = localStorage.getItem('tenantId');
+  if (storedTenant) return storedTenant;
+
+  return 'default';
+}
+
+/**
+ * Clear the cached tenant resolution (e.g., after signup when tenant changes).
+ */
+export function clearTenantCache(): void {
+  _resolvedTenantId = null;
+  if (typeof window !== 'undefined') {
+    sessionStorage.removeItem('resolved_tenant_id');
+  }
 }
 
 // Base fetch with tenant header
@@ -21,9 +64,10 @@ async function apiFetch<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
+  const tenantId = await resolveTenantId();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'x-tenant-id': getTenantId(),
+    'x-tenant-id': tenantId,
     ...Object.fromEntries(
       options.headers instanceof Headers 
         ? options.headers.entries() 

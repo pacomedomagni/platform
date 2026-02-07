@@ -11,6 +11,7 @@ import { AuthService } from '@platform/auth';
 import { ProvisioningService } from '../provisioning/provisioning.service';
 import { StripeConnectService } from './stripe-connect.service';
 import { SquareOAuthService } from './square-oauth.service';
+import { MerchantVerificationService } from './merchant-verification.service';
 import { SignupDto } from './dto/signup.dto';
 
 @Injectable()
@@ -23,64 +24,55 @@ export class OnboardingService {
     private readonly authService: AuthService,
     private readonly stripeConnect: StripeConnectService,
     private readonly squareOAuth: SquareOAuthService,
+    private readonly merchantVerification: MerchantVerificationService,
   ) {}
 
   /**
-   * Public signup — creates tenant, starts provisioning, returns JWT
+   * Public signup — creates tenant + user atomically, starts seed provisioning async, returns JWT.
+   * User creation is synchronous (inside the transaction) so a JWT is always returned.
    */
   async signup(dto: SignupDto): Promise<{ tenantId: string; accessToken: string }> {
-    // 1. Check subdomain availability
-    const existingTenant = await this.prisma.tenant.findUnique({
-      where: { domain: dto.subdomain },
-    });
-    if (existingTenant) {
-      throw new ConflictException(`Subdomain "${dto.subdomain}" is already taken`);
-    }
-
-    // 2. Check email availability
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email: dto.email },
-    });
-    if (existingUser) {
-      throw new ConflictException(`Email "${dto.email}" is already registered`);
-    }
-
-    // 3. Create tenant via existing provisioning service
-    const { tenantId } = await this.provisioningService.createTenant({
-      businessName: dto.businessName,
-      ownerEmail: dto.email,
-      ownerPassword: dto.password,
-      domain: dto.subdomain,
-      baseCurrency: dto.baseCurrency || 'USD',
-    });
-
-    // 4. Set payment provider and onboarding step
-    await this.prisma.tenant.update({
-      where: { id: tenantId },
-      data: {
-        email: dto.email,
-        paymentProvider: dto.paymentProvider,
-        onboardingStep: 'provisioning',
-      },
-    });
-
-    // 5. Wait briefly for user creation (provisioning is async but user is created early)
-    let user = null;
-    for (let i = 0; i < 10; i++) {
-      user = await this.prisma.user.findFirst({
-        where: { email: dto.email, tenantId },
+    // Run tenant + user creation in a serializable transaction to prevent race conditions
+    const { tenantId, user } = await this.prisma.$transaction(async (tx) => {
+      // 1. Create tenant + admin user atomically (checks uniqueness inside)
+      const { tenantId: newTenantId } = await this.provisioningService.createTenantWithUser(tx, {
+        businessName: dto.businessName,
+        ownerEmail: dto.email,
+        ownerPassword: dto.password,
+        domain: dto.subdomain,
+        baseCurrency: dto.baseCurrency || 'USD',
       });
-      if (user) break;
-      await new Promise((r) => setTimeout(r, 500));
-    }
 
-    if (!user) {
-      this.logger.warn(`User not yet created for tenant ${tenantId}, returning tenantId only`);
-      return { tenantId, accessToken: '' };
-    }
+      // 2. Set payment provider and onboarding step
+      await tx.tenant.update({
+        where: { id: newTenantId },
+        data: {
+          email: dto.email,
+          paymentProvider: dto.paymentProvider,
+          onboardingStep: 'provisioning',
+        },
+      });
 
-    // 6. Generate JWT (reuse auth service pattern)
+      // 3. Get the user we just created (guaranteed to exist now)
+      const createdUser = await tx.user.findFirst({
+        where: { email: dto.email, tenantId: newTenantId },
+      });
+
+      return { tenantId: newTenantId, user: createdUser! };
+    }, { isolationLevel: 'Serializable' });
+
+    // 4. Generate JWT immediately (user always exists at this point)
     const loginResult = await this.authService.login(user);
+
+    // 5. Kick off async seed data provisioning (accounts, warehouse, UOMs, defaults)
+    this.provisioningService.provisionSeedDataAsync(tenantId).catch((err) => {
+      this.logger.error(`Seed data provisioning failed for tenant ${tenantId}: ${err.message}`);
+    });
+
+    // 6. Send email verification (fire-and-forget)
+    this.merchantVerification.sendVerificationEmail(user.id).catch((err) => {
+      this.logger.error(`Verification email failed for user ${user.id}: ${err.message}`);
+    });
 
     this.logger.log(`Tenant ${tenantId} signed up with ${dto.paymentProvider}`);
 
@@ -105,6 +97,23 @@ export class OnboardingService {
     // Get provisioning status from Redis
     const provisioningStatus = await this.provisioningService.getProvisioningStatus(tenantId);
 
+    // Auto-refresh Stripe status if merchant is stuck in onboarding
+    let paymentProviderStatus = tenant.paymentProviderStatus;
+    let stripeChargesEnabled = tenant.stripeChargesEnabled;
+    if (
+      tenant.paymentProvider === 'stripe' &&
+      tenant.stripeConnectAccountId &&
+      tenant.paymentProviderStatus !== 'active'
+    ) {
+      try {
+        const refreshed = await this.refreshPaymentProviderStatus(tenantId);
+        paymentProviderStatus = refreshed.status;
+        stripeChargesEnabled = refreshed.chargesEnabled ?? stripeChargesEnabled;
+      } catch {
+        // Non-critical — use existing values
+      }
+    }
+
     return {
       tenantId: tenant.id,
       businessName: tenant.businessName || tenant.name,
@@ -114,8 +123,8 @@ export class OnboardingService {
       provisioningProgress: provisioningStatus.progress,
       currentStep: provisioningStatus.currentStep,
       paymentProvider: tenant.paymentProvider,
-      paymentProviderStatus: tenant.paymentProviderStatus,
-      stripeChargesEnabled: tenant.stripeChargesEnabled,
+      paymentProviderStatus,
+      stripeChargesEnabled,
       squareMerchantId: tenant.squareMerchantId,
     };
   }
@@ -208,6 +217,51 @@ export class OnboardingService {
     this.logger.log(`Tenant ${tenantId} completed onboarding`);
 
     return { success: true };
+  }
+
+  /**
+   * Refresh payment provider status by querying Stripe directly.
+   * Fallback for when the webhook doesn't arrive.
+   */
+  async refreshPaymentProviderStatus(tenantId: string) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+    });
+
+    if (!tenant) {
+      throw new NotFoundException('Tenant not found');
+    }
+
+    if (tenant.paymentProvider === 'stripe' && tenant.stripeConnectAccountId) {
+      try {
+        const account = await this.stripeConnect.getAccount(tenant.stripeConnectAccountId);
+        const isActive = account.charges_enabled && account.details_submitted;
+
+        await this.prisma.tenant.update({
+          where: { id: tenantId },
+          data: {
+            stripeChargesEnabled: account.charges_enabled,
+            stripePayoutsEnabled: account.payouts_enabled,
+            stripeDetailsSubmitted: account.details_submitted,
+            paymentProviderStatus: isActive ? 'active' : 'onboarding',
+          },
+        });
+
+        this.logger.log(`Refreshed Stripe status for tenant ${tenantId}: charges=${account.charges_enabled}, payouts=${account.payouts_enabled}`);
+
+        return {
+          chargesEnabled: account.charges_enabled,
+          payoutsEnabled: account.payouts_enabled,
+          detailsSubmitted: account.details_submitted,
+          status: isActive ? 'active' : 'onboarding',
+        };
+      } catch (error) {
+        this.logger.error(`Failed to refresh Stripe status for tenant ${tenantId}:`, error);
+        throw new BadRequestException('Failed to check payment provider status');
+      }
+    }
+
+    return { status: tenant.paymentProviderStatus || 'unknown' };
   }
 
   /**
