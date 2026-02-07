@@ -19,6 +19,7 @@ import {
 } from './dto';
 import { CreateSimpleProductDto } from './simple-product.dto';
 import { StoreAdminGuard } from '@platform/auth';
+import { Tenant } from '../../tenant.middleware';
 
 @Controller('store')
 export class ProductsController {
@@ -30,7 +31,7 @@ export class ProductsController {
    */
   @Get('products')
   async listProducts(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Query() query: ListProductsDto
   ) {
     if (!tenantId) {
@@ -45,7 +46,7 @@ export class ProductsController {
    */
   @Get('products/featured')
   async getFeaturedProducts(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Query('limit') limit?: string
   ) {
     if (!tenantId) {
@@ -63,7 +64,7 @@ export class ProductsController {
    */
   @Get('products/:slug')
   async getProduct(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('slug') slug: string
   ) {
     if (!tenantId) {
@@ -77,7 +78,7 @@ export class ProductsController {
    * GET /api/v1/store/categories
    */
   @Get('categories')
-  async listCategories(@Headers('x-tenant-id') tenantId: string) {
+  async listCategories(@Tenant() tenantId: string) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -90,7 +91,7 @@ export class ProductsController {
    */
   @Get('categories/:slug')
   async getCategory(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('slug') slug: string
   ) {
     if (!tenantId) {

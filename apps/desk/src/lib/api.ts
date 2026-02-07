@@ -1,5 +1,5 @@
 // Placeholder for real client
-const API_BASE = 'http://localhost:3000/api/v1';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
 
 export const getDocType = async (docType: string) => {
     const res = await fetch(`${API_BASE}/meta/${docType}`);

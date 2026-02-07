@@ -3,12 +3,12 @@ import { notFound } from 'next/navigation';
 import { Metadata } from 'next';
 import { Badge, Card } from '@platform/ui';
 import { Check, ShieldCheck, Truck } from 'lucide-react';
-import { products } from '../../_data/products';
 import { formatCurrency } from '../../_lib/format';
 import { ProductCard } from '../../_components/product-card';
 import { ButtonLink } from '../../_components/button-link';
 import { ProductReviews } from './_components/product-reviews';
 import { VariantSelector } from './_components/variant-selector';
+import { productsApi } from '@/lib/store-api';
 import {
   generateProductSchema,
   generateBreadcrumbSchema,
@@ -27,7 +27,7 @@ const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://storefront.example
  * Improves SEO with product-specific titles, descriptions, and OpenGraph data
  */
 export async function generateMetadata({ params }: ProductPageProps): Promise<Metadata> {
-  const product = products.find((item) => item.slug === params.slug);
+  const product = await productsApi.get(params.slug).catch(() => null);
 
   if (!product) {
     return {
@@ -35,60 +35,64 @@ export async function generateMetadata({ params }: ProductPageProps): Promise<Me
     };
   }
 
+  const categoryName = product.category?.name || 'Uncategorized';
   const productUrl = `${BASE_URL}/storefront/products/${product.slug}`;
-  const imageUrl = `${BASE_URL}/og-product-${product.slug}.png`; // Placeholder for actual product image
+  const imageUrl = product.images?.[0] || `${BASE_URL}/og-product-${product.slug}.png`;
 
   return {
-    title: `${product.name} - ${product.category}`,
-    description: product.description,
-    keywords: [product.name, product.category, 'inventory management', 'erp', 'b2b'],
+    title: `${product.displayName} - ${categoryName}`,
+    description: product.description || product.shortDescription,
+    keywords: [product.displayName, categoryName, 'inventory management', 'erp', 'b2b'],
     alternates: {
       canonical: productUrl,
     },
     openGraph: {
-      title: product.name,
-      description: product.description,
-      type: 'product',
+      title: product.displayName,
+      description: product.description || product.shortDescription || '',
       url: productUrl,
       images: [
         {
           url: imageUrl,
           width: 1200,
           height: 630,
-          alt: product.name,
+          alt: product.displayName,
         },
       ],
       siteName: 'NoSlag Storefront',
     },
     twitter: {
       card: 'summary_large_image',
-      title: product.name,
-      description: product.description,
+      title: product.displayName,
+      description: product.description || '',
       images: [imageUrl],
     },
   };
 }
 
-export default function ProductPage({ params }: ProductPageProps) {
-  const product = products.find((item) => item.slug === params.slug);
+export default async function ProductPage({ params }: ProductPageProps) {
+  const product = await productsApi.get(params.slug).catch(() => null);
 
   if (!product) {
     notFound();
   }
 
-  const related = products.filter((item) => item.category === product.category && item.id !== product.id).slice(0, 3);
+  const relatedRes = await productsApi.list({ categorySlug: product.category?.slug, limit: 4 }).catch(() => ({ items: [] }));
+  const related = relatedRes.items.filter((item) => item.id !== product.id).slice(0, 3);
+
+  const categoryName = product.category?.name || 'Uncategorized';
+  const displayImage = product.images?.[0]; // Fallback to gradient if null
 
   // Generate JSON-LD schemas for SEO
   const productUrl = `${BASE_URL}/storefront/products/${product.slug}`;
-  const imageUrl = `${BASE_URL}/og-product-${product.slug}.png`;
+  const imageUrl = displayImage || `${BASE_URL}/og-product-${product.slug}.png`;
 
   const productSchema = generateProductSchema({
-    name: product.name,
-    description: product.description,
+    name: product.displayName,
+    description: product.description || product.shortDescription || '',
     image: imageUrl,
     price: product.price,
     currency: 'USD',
-    availability: product.stockStatus === 'In Stock' ? 'InStock' : 'OutOfStock',
+    availability: product.stockStatus === 'in_stock' ? 'InStock' : 'OutOfStock',
     sku: product.id,
     url: productUrl,
   });
@@ -96,7 +100,7 @@ export default function ProductPage({ params }: ProductPageProps) {
   const breadcrumbSchema = generateBreadcrumbSchema([
     { name: 'Home', url: `${BASE_URL}/storefront` },
     { name: 'Products', url: `${BASE_URL}/storefront/products` },
-    { name: product.name, url: productUrl },
+    { name: product.displayName, url: productUrl },
   ]);
 
   return (
@@ -118,16 +122,22 @@ export default function ProductPage({ params }: ProductPageProps) {
           <span>/</span>
           <Link href="/storefront/products" className="hover:text-foreground">Products</Link>
           <span>/</span>
-          <span className="text-foreground">{product.name}</span>
+          <span className="text-foreground">{product.displayName}</span>
         </div>
 
       <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr]">
         <Card className="overflow-hidden border-border bg-card p-6 shadow-sm">
-          <div className={`aspect-[4/3] w-full rounded-2xl bg-gradient-to-br ${product.tone} flex items-center justify-center`}>
-            <div className="h-24 w-24 rounded-3xl bg-white/80 shadow-md ring-1 ring-white/70 flex items-center justify-center text-lg font-semibold text-slate-500">
-              {product.name.split(' ').map((word) => word[0]).join('').slice(0, 3)}
+          {displayImage ? (
+            <div className="aspect-[4/3] w-full rounded-2xl overflow-hidden flex items-center justify-center bg-white">
+               <img src={displayImage} alt={product.displayName} className="h-full w-full object-contain" />
             </div>
-          </div>
+          ) : (
+            <div className={`aspect-[4/3] w-full rounded-2xl bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center`}>
+                <div className="h-24 w-24 rounded-3xl bg-white/80 shadow-md ring-1 ring-white/70 flex items-center justify-center text-lg font-semibold text-slate-500">
+                {product.displayName.split(' ').map((word: string) => word[0]).join('').slice(0, 3)}
+                </div>
+            </div>
+          )}
           <div className="mt-6 grid gap-4 sm:grid-cols-2">
             {['Precision build', 'Inventory synced', 'Premium warranty', 'ERP ready'].map((item) => (
               <div key={item} className="flex items-center gap-2 rounded-xl border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
@@ -141,16 +151,16 @@ export default function ProductPage({ params }: ProductPageProps) {
         <div className="space-y-6">
           <div className="space-y-3">
             <Badge variant="outline" className="bg-card text-muted-foreground">
-              {product.category}
+              {categoryName}
             </Badge>
-            <h1 className="text-3xl font-semibold text-foreground">{product.name}</h1>
-            <p className="text-muted-foreground">{product.description}</p>
+            <h1 className="text-3xl font-semibold text-foreground">{product.displayName}</h1>
+            <p className="text-muted-foreground">{product.description || product.shortDescription}</p>
             <div className="flex items-center gap-4">
               <p className="text-2xl font-semibold text-foreground">{formatCurrency(product.price)}</p>
-              {product.compareAt && (
-                <p className="text-sm text-muted-foreground line-through">{formatCurrency(product.compareAt)}</p>
+              {product.compareAtPrice && (
+                <p className="text-sm text-muted-foreground line-through">{formatCurrency(product.compareAtPrice)}</p>
               )}
-              <span className="text-xs text-muted-foreground">{product.rating} · {product.reviews} reviews</span>
+              <span className="text-xs text-muted-foreground">5.0 · 0 reviews</span>
             </div>
           </div>
 
@@ -163,11 +173,13 @@ export default function ProductPage({ params }: ProductPageProps) {
           <Card className="space-y-4 border-border bg-card p-5 shadow-sm">
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">Availability</span>
-              <span className="font-semibold text-emerald-600">{product.stockStatus}</span>
+              <span className="font-semibold text-emerald-600">
+                {product.stockStatus === 'in_stock' ? 'In Stock' : product.stockStatus.replace('_', ' ')}
+              </span>
             </div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">Lead time</span>
-              <span className="font-semibold text-foreground">{product.leadTime}</span>
+              <span className="font-semibold text-foreground">3-5 business days</span>
             </div>
             <div className="flex flex-wrap gap-3">
               <ButtonLink
@@ -201,7 +213,7 @@ export default function ProductPage({ params }: ProductPageProps) {
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           {[
             { label: 'SKU', value: product.id },
-            { label: 'Category', value: product.category },
+            { label: 'Category', value: categoryName },
             { label: 'Fulfillment', value: 'Multi-location ready' },
             { label: 'Tracking', value: 'Batch + FIFO compatible' },
           ].map((item) => (
@@ -221,7 +233,7 @@ export default function ProductPage({ params }: ProductPageProps) {
 
       {related.length > 0 && (
         <div className="space-y-4">
-          <h2 className="text-xl font-semibold text-foreground">Related in {product.category}</h2>
+          <h2 className="text-xl font-semibold text-foreground">Related in {categoryName}</h2>
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
             {related.map((item) => (
               <ProductCard key={item.id} product={item} />

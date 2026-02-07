@@ -1,28 +1,19 @@
 /**
  * Product Reviews API Client
  */
+import { resolveTenantId } from './store-api';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
-
-// Get tenant ID from subdomain or default
-function getTenantId(): string {
-  if (typeof window === 'undefined') return 'default';
-  const hostname = window.location.hostname;
-  const parts = hostname.split('.');
-  if (parts.length > 2) {
-    return parts[0];
-  }
-  return process.env.NEXT_PUBLIC_TENANT_ID || 'default';
-}
 
 // Base fetch with tenant header
 async function apiFetch<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
+  const tenantId = await resolveTenantId();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'x-tenant-id': getTenantId(),
+    'x-tenant-id': tenantId,
     ...Object.fromEntries(
       options.headers instanceof Headers
         ? options.headers.entries()

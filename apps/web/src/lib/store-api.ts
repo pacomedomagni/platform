@@ -12,7 +12,7 @@ let _resolvedTenantId: string | null = null;
  * Resolve the current hostname to a tenant UUID.
  * Uses the backend resolve endpoint and caches the result in sessionStorage.
  */
-async function resolveTenantId(): Promise<string> {
+export async function resolveTenantId(): Promise<string> {
   if (_resolvedTenantId) return _resolvedTenantId;
 
   if (typeof window === 'undefined') {

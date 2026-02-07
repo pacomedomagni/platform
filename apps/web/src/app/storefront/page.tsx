@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { Metadata } from 'next';
 import { Badge, Button, Card } from '@platform/ui';
 import { ArrowRight, Check, Sparkles } from 'lucide-react';
-import { bestSellers, featuredProducts, productCategories } from './_data/products';
+import { productsApi } from '@/lib/store-api';
 import { SectionHeader } from './_components/section-header';
 import { ProductCard } from './_components/product-card';
 import { ButtonLink } from './_components/button-link';
@@ -18,7 +18,13 @@ export const metadata: Metadata = {
   },
 };
 
-export default function StorefrontLanding() {
+export default async function StorefrontLanding() {
+  const [featuredProducts, categories, bestSellersList] = await Promise.all([
+    productsApi.getFeatured(2).catch(() => []),
+    productsApi.getCategories().catch(() => []),
+    productsApi.list({ sortBy: 'sales', limit: 3 }).then(res => res.items).catch(() => []),
+  ]);
+
   return (
     <div className="space-y-20 pb-20">
       <section className="relative overflow-hidden border-b border-border bg-card">
@@ -80,14 +86,14 @@ export default function StorefrontLanding() {
           }
         />
         <div className="grid gap-4 md:grid-cols-2">
-          {productCategories.map((category) => (
+          {categories.map((category) => (
             <Card key={category.name} className="flex items-center justify-between border-border bg-card p-6 shadow-sm">
               <div className="space-y-2">
                 <p className="text-lg font-semibold text-foreground">{category.name}</p>
                 <p className="text-sm text-muted-foreground">{category.description}</p>
               </div>
               <div className="rounded-full bg-primary/10 px-4 py-2 text-xs font-semibold text-primary">
-                {category.count} items
+                {category.productCount} items
               </div>
             </Card>
           ))}
@@ -124,7 +130,7 @@ export default function StorefrontLanding() {
           </div>
         </div>
         <div className="grid gap-4 md:grid-cols-2">
-          {bestSellers.map((product) => (
+          {bestSellersList.map((product) => (
             <ProductCard key={product.id} product={product} />
           ))}
           <Card className="flex flex-col justify-between border-border bg-gradient-to-br from-primary/10 via-card to-accent/10 p-6 shadow-sm">
