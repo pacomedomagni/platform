@@ -15,7 +15,7 @@ import { PaymentsService } from './payments.service';
 import { CreateRefundDto } from './dto';
 import { StoreAdminGuard } from '@platform/auth';
 
-@Controller('api/v1/store/payments')
+@Controller('store/payments')
 export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) {}
 

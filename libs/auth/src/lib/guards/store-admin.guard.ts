@@ -1,12 +1,12 @@
-import { Injectable, CanActivate, ExecutionContext, UnauthorizedException, ForbiddenException } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
+import { Injectable, ExecutionContext, UnauthorizedException, ForbiddenException } from '@nestjs/common';
+import { JwtTenantGuard } from './jwt-tenant.guard';
 
 /**
  * Guard for storefront admin endpoints.
  * Requires JWT authentication + admin/System Manager role.
  */
 @Injectable()
-export class StoreAdminGuard extends AuthGuard('jwt') {
+export class StoreAdminGuard extends JwtTenantGuard {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     // First, validate JWT
     const isAuthenticated = await super.canActivate(context);

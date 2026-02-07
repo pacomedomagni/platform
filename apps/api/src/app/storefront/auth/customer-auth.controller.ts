@@ -21,7 +21,7 @@ import {
   AddAddressDto,
 } from './dto';
 
-@Controller('api/v1/store/auth')
+@Controller('store/auth')
 export class CustomerAuthController {
   constructor(private readonly authService: CustomerAuthService) {}
 

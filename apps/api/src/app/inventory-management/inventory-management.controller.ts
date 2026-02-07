@@ -30,7 +30,7 @@ interface TenantContext {
   userId?: string;
 }
 
-@Controller('api/v1/inventory-management')
+@Controller('inventory-management')
 @UseGuards(AuthGuard, RolesGuard)
 export class InventoryManagementController {
   constructor(

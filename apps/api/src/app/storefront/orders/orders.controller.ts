@@ -15,7 +15,7 @@ import { CustomerAuthService } from '../auth/customer-auth.service';
 import { ListOrdersDto } from './dto';
 import { StoreAdminGuard } from '@platform/auth';
 
-@Controller('api/v1/store/orders')
+@Controller('store/orders')
 export class OrdersController {
   constructor(
     private readonly ordersService: OrdersService,
@@ -36,7 +36,7 @@ export class OrdersController {
       throw new BadRequestException('Tenant ID required');
     }
 
-    const customerId = await this.getCustomerId(authHeader);
+    const customerId = await this.getCustomerId(authHeader, tenantId);
     return this.ordersService.listOrders(tenantId, customerId, query);
   }
 
@@ -54,7 +54,7 @@ export class OrdersController {
       throw new BadRequestException('Tenant ID required');
     }
 
-    const customerId = await this.getCustomerId(authHeader);
+    const customerId = await this.getCustomerId(authHeader, tenantId);
     return this.ordersService.getOrder(tenantId, orderId, customerId);
   }
 
@@ -133,7 +133,7 @@ export class OrdersController {
 
   // ============ HELPERS ============
 
-  private async getCustomerId(authHeader: string): Promise<string> {
+  private async getCustomerId(authHeader: string, tenantId: string): Promise<string> {
     if (!authHeader) {
       throw new UnauthorizedException('Authorization required');
     }
@@ -144,6 +144,9 @@ export class OrdersController {
     }
 
     const payload = await this.authService.verifyToken(token);
+    if (payload.tenantId !== tenantId) {
+      throw new UnauthorizedException('Invalid token');
+    }
     return payload.customerId;
   }
 }

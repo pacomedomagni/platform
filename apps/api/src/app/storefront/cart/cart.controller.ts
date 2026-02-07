@@ -12,7 +12,7 @@ import {
 import { CartService } from './cart.service';
 import { AddToCartDto, UpdateCartItemDto, ApplyCouponDto, MergeCartDto } from './dto';
 
-@Controller('api/v1/store/cart')
+@Controller('store/cart')
 export class CartController {
   constructor(private readonly cartService: CartService) {}
 

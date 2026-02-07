@@ -12,7 +12,7 @@ import {
 import { CheckoutService } from './checkout.service';
 import { CreateCheckoutDto, UpdateCheckoutDto } from './dto';
 
-@Controller('api/v1/store/checkout')
+@Controller('store/checkout')
 export class CheckoutController {
   constructor(private readonly checkoutService: CheckoutService) {}
 

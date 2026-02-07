@@ -3,7 +3,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { PrismaService, Prisma } from '@platform/db';
 import { SerialStatus } from '@prisma/client';
 
-@Controller('v1/inventory')
+@Controller('inventory')
 @UseGuards(AuthGuard('jwt'))
 export class InventoryController {
   constructor(private readonly prisma: PrismaService) {}

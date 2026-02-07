@@ -31,7 +31,7 @@ import {
   AddTrackingEventDto,
 } from './currency-shipping.dto';
 
-@Controller('api/v1/store')
+@Controller('store')
 export class CurrencyShippingController {
   constructor(
     private readonly currencyService: CurrencyService,

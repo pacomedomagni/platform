@@ -35,7 +35,7 @@ interface TenantContext {
   userId?: string;
 }
 
-@Controller('api/v1/operations')
+@Controller('operations')
 @UseGuards(AuthGuard, RolesGuard)
 export class OperationsController {
   constructor(

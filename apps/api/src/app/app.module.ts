@@ -21,6 +21,7 @@ import { InventoryManagementModule } from './inventory-management/inventory-mana
 import { CurrencyModule } from './currency/currency.module';
 import { MarketplaceIntegrationsModule } from './marketplace-integrations/marketplace-integrations.module';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
 import { SentryInterceptor } from './sentry/sentry.interceptor';
 import { EmailWorker } from './workers/email.worker';
 
@@ -75,6 +76,11 @@ import { EmailWorker } from './workers/email.worker';
     {
       provide: APP_INTERCEPTOR,
       useClass: LoggingInterceptor,
+    },
+    // Tenant context propagation
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: TenantContextInterceptor,
     },
     // Sentry context interceptor
     {

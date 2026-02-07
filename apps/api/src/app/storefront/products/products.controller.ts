@@ -19,7 +19,7 @@ import {
 } from './dto';
 import { StoreAdminGuard } from '@platform/auth';
 
-@Controller('api/v1/store')
+@Controller('store')
 export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 

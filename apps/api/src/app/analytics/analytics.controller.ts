@@ -19,7 +19,7 @@ import {
   InventoryReportDto,
 } from './analytics.dto';
 
-@Controller('api/v1/analytics')
+@Controller('analytics')
 @UseGuards(AuthGuard)
 export class AnalyticsController {
   constructor(

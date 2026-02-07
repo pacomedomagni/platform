@@ -50,7 +50,7 @@ async function bootstrap() {
     rawBody: true,
   });
   
-  const globalPrefix = 'api';
+  const globalPrefix = 'api/v1';
   app.setGlobalPrefix(globalPrefix);
   
   // Enable CORS

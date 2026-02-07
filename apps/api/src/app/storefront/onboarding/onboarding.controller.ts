@@ -10,7 +10,7 @@ interface AuthenticatedRequest extends Request {
   };
 }
 
-@Controller('api/v1/store/onboarding')
+@Controller('store/onboarding')
 @UseGuards(JwtAuthGuard)
 export class OnboardingController {
   constructor(private readonly onboardingService: OnboardingService) {}

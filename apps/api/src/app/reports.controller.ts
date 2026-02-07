@@ -2,7 +2,7 @@ import { Controller, Get, Query, Req, UseGuards, BadRequestException, ForbiddenE
 import { AuthGuard } from '@nestjs/passport';
 import { ReportsService } from '@platform/business-logic';
 
-@Controller('v1/reports')
+@Controller('reports')
 @UseGuards(AuthGuard('jwt'))
 export class ReportsController {
   constructor(private readonly reports: ReportsService) {}

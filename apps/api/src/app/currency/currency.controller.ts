@@ -19,7 +19,7 @@ import {
   BulkSetPriceOverridesDto,
 } from './currency.dto';
 
-@Controller('api/v1/currencies')
+@Controller('currencies')
 export class CurrencyController {
   constructor(private readonly currencyService: CurrencyService) {}
 

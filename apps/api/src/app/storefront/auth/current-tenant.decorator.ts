@@ -7,6 +7,12 @@ import { createParamDecorator, ExecutionContext } from '@nestjs/common';
 export const CurrentTenant = createParamDecorator(
   (data: unknown, ctx: ExecutionContext) => {
     const request = ctx.switchToHttp().getRequest();
-    return request.user?.tenantId || request.headers['x-tenant-id'];
+    if (request.user?.tenantId) {
+      return request.user.tenantId;
+    }
+    if (process.env.ALLOW_TENANT_HEADER === 'true') {
+      return request.headers['x-tenant-id'];
+    }
+    return undefined;
   },
 );

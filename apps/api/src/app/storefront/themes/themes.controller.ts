@@ -14,7 +14,7 @@ import { ThemesService } from './themes.service';
 import { CreateThemeDto, UpdateThemeDto } from './dto';
 import { StoreAdminGuard } from '@platform/auth';
 
-@Controller('api/v1/store')
+@Controller('store')
 export class ThemesController {
   constructor(private readonly themesService: ThemesService) {}
 

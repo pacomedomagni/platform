@@ -9,6 +9,7 @@ import {
   Body,
   Headers,
   BadRequestException,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { VariantsService } from './variants.service';
@@ -33,7 +34,7 @@ import {
 } from './dto';
 import { CustomerAuthService } from '../auth/customer-auth.service';
 
-@Controller('api/v1/store')
+@Controller('store')
 export class EcommerceController {
   constructor(
     private readonly variantsService: VariantsService,
@@ -172,7 +173,7 @@ export class EcommerceController {
     @Body() dto: CreateReviewDto
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
-    const customerId = await this.getOptionalCustomerId(authHeader);
+    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     dto.productListingId = productId;
     return this.reviewsService.createReview(tenantId, customerId, dto);
   }
@@ -184,7 +185,7 @@ export class EcommerceController {
     @Param('reviewId') reviewId: string,
     @Body() dto: ReviewVoteDto
   ) {
-    const customerId = await this.getOptionalCustomerId(authHeader);
+    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     return this.reviewsService.voteReview(reviewId, customerId, sessionToken, dto);
   }
 
@@ -330,7 +331,7 @@ export class EcommerceController {
     @Headers('authorization') authHeader: string
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
-    const customerId = await this.getCustomerId(authHeader);
+    const customerId = await this.getCustomerId(authHeader, tenantId);
     return this.wishlistService.getWishlists(tenantId, customerId);
   }
 
@@ -341,7 +342,7 @@ export class EcommerceController {
     @Param('id') id: string
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
-    const customerId = await this.getCustomerId(authHeader);
+    const customerId = await this.getCustomerId(authHeader, tenantId);
     return this.wishlistService.getWishlist(tenantId, customerId, id);
   }
 
@@ -352,7 +353,7 @@ export class EcommerceController {
     @Body() dto: CreateWishlistDto
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
-    const customerId = await this.getCustomerId(authHeader);
+    const customerId = await this.getCustomerId(authHeader, tenantId);
     return this.wishlistService.createWishlist(tenantId, customerId, dto);
   }
 
@@ -364,7 +365,7 @@ export class EcommerceController {
     @Body() dto: CreateWishlistDto
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
-    const customerId = await this.getCustomerId(authHeader);
+    const customerId = await this.getCustomerId(authHeader, tenantId);
     return this.wishlistService.updateWishlist(tenantId, customerId, id, dto);
   }
 
@@ -375,7 +376,7 @@ export class EcommerceController {
     @Param('id') id: string
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
-    const customerId = await this.getCustomerId(authHeader);
+    const customerId = await this.getCustomerId(authHeader, tenantId);
     return this.wishlistService.deleteWishlist(tenantId, customerId, id);
   }
 
@@ -386,7 +387,7 @@ export class EcommerceController {
     @Body() dto: AddWishlistItemDto
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
-    const customerId = await this.getCustomerId(authHeader);
+    const customerId = await this.getCustomerId(authHeader, tenantId);
     return this.wishlistService.addItem(tenantId, customerId, dto);
   }
 
@@ -398,7 +399,7 @@ export class EcommerceController {
     @Body() dto: AddWishlistItemDto
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
-    const customerId = await this.getCustomerId(authHeader);
+    const customerId = await this.getCustomerId(authHeader, tenantId);
     return this.wishlistService.addItemToWishlist(tenantId, customerId, wishlistId, dto);
   }
 
@@ -409,7 +410,7 @@ export class EcommerceController {
     @Param('itemId') itemId: string
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
-    const customerId = await this.getCustomerId(authHeader);
+    const customerId = await this.getCustomerId(authHeader, tenantId);
     return this.wishlistService.removeItem(tenantId, customerId, itemId);
   }
 
@@ -422,7 +423,7 @@ export class EcommerceController {
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
     if (!cartId) throw new BadRequestException('Cart ID required');
-    const customerId = await this.getCustomerId(authHeader);
+    const customerId = await this.getCustomerId(authHeader, tenantId);
     return this.wishlistService.moveToCart(tenantId, customerId, itemId, cartId);
   }
 
@@ -435,7 +436,7 @@ export class EcommerceController {
 
   // ============ HELPERS ============
 
-  private async getCustomerId(authHeader: string): Promise<string> {
+  private async getCustomerId(authHeader: string, tenantId: string): Promise<string> {
     if (!authHeader) {
       throw new BadRequestException('Authorization required');
     }
@@ -444,13 +445,16 @@ export class EcommerceController {
       throw new BadRequestException('Invalid authorization header');
     }
     const payload = await this.authService.verifyToken(token);
+    if (payload.tenantId !== tenantId) {
+      throw new UnauthorizedException('Invalid token');
+    }
     return payload.customerId;
   }
 
-  private async getOptionalCustomerId(authHeader: string): Promise<string | null> {
+  private async getOptionalCustomerId(authHeader: string, tenantId: string): Promise<string | null> {
     if (!authHeader) return null;
     try {
-      return await this.getCustomerId(authHeader);
+      return await this.getCustomerId(authHeader, tenantId);
     } catch {
       return null;
     }

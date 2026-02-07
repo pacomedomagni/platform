@@ -3,7 +3,7 @@ import { AuthGuard } from '@platform/auth';
 import { Tenant } from '../tenant.middleware';
 import { DashboardService } from './dashboard.service';
 
-@Controller('api/v1/dashboard')
+@Controller('dashboard')
 @UseGuards(AuthGuard)
 export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
