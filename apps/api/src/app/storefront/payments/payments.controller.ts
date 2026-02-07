@@ -14,10 +14,27 @@ import { Request } from 'express';
 import { PaymentsService } from './payments.service';
 import { CreateRefundDto } from './dto';
 import { StoreAdminGuard } from '@platform/auth';
+import { SquarePaymentService } from '../../onboarding/square-payment.service';
+import { IsString, IsNumber, IsOptional } from 'class-validator';
+
+class SquarePaymentDto {
+  @IsString()
+  orderId!: string;
+
+  @IsString()
+  sourceId!: string; // Card nonce from Square Web Payments SDK
+
+  @IsOptional()
+  @IsNumber()
+  amount?: number;
+}
 
 @Controller('store/payments')
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) {}
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    private readonly squarePaymentService: SquarePaymentService,
+  ) {}
 
   /**
    * Get payment configuration (public key)
@@ -81,5 +98,20 @@ export class PaymentsController {
       dto.amount,
       dto.reason
     );
+  }
+
+  /**
+   * Process Square payment (after frontend card tokenization)
+   * POST /api/v1/store/payments/square
+   */
+  @Post('square')
+  async processSquarePayment(
+    @Headers('x-tenant-id') tenantId: string,
+    @Body() dto: SquarePaymentDto,
+  ) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID required');
+    }
+    return this.paymentsService.processSquarePayment(tenantId, dto.orderId, dto.sourceId);
   }
 }

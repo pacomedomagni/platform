@@ -6,13 +6,15 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { StripeService } from '../payments/stripe.service';
+import { StripeConnectService } from '../../onboarding/stripe-connect.service';
 import { CreateCheckoutDto, UpdateCheckoutDto } from './dto';
 
 @Injectable()
 export class CheckoutService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly stripeService: StripeService
+    private readonly stripeService: StripeService,
+    private readonly stripeConnectService: StripeConnectService,
   ) {}
 
   /**
@@ -167,37 +169,87 @@ export class CheckoutService {
       return order;
     }, { timeout: 30000 });
 
-    // Create Stripe Payment Intent (outside transaction - external call)
+    // Create payment intent — route through connected account if tenant has one
     let stripeClientSecret: string | null = null;
+    let paymentProvider: string = 'stripe';
     try {
-      // Generate deterministic idempotency key to prevent duplicate charges on retry
-      const idempotencyKey = `pi_${tenantId}_${result.id}`;
-
-      const paymentIntent = await this.stripeService.createPaymentIntent(
-        Number(result.grandTotal),
-        'usd',
-        {
-          orderId: result.id,
-          orderNumber: result.orderNumber,
-          tenantId,
-          customerEmail: dto.email,
+      const tenant = await this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: {
+          paymentProvider: true,
+          paymentProviderStatus: true,
+          stripeConnectAccountId: true,
+          platformFeePercent: true,
+          platformFeeFixed: true,
+          squareLocationId: true,
         },
-        idempotencyKey
-      );
-
-      // Update order with Stripe payment intent ID
-      await this.prisma.order.update({
-        where: { id: result.id },
-        data: { stripePaymentIntentId: paymentIntent.id },
       });
 
-      stripeClientSecret = paymentIntent.client_secret;
+      const idempotencyKey = `pi_${tenantId}_${result.id}`;
+      const metadata = {
+        orderId: result.id,
+        orderNumber: result.orderNumber,
+        tenantId,
+        customerEmail: dto.email,
+      };
+
+      if (
+        tenant?.paymentProvider === 'stripe' &&
+        tenant.stripeConnectAccountId &&
+        tenant.paymentProviderStatus === 'active'
+      ) {
+        // Stripe Connect — charge on connected account with platform fee
+        const amount = Number(result.grandTotal);
+        const fee =
+          amount * (Number(tenant.platformFeePercent) / 100) +
+          Number(tenant.platformFeeFixed);
+
+        const paymentIntent =
+          await this.stripeConnectService.createConnectedPaymentIntent(
+            tenant.stripeConnectAccountId,
+            amount,
+            'usd',
+            fee,
+            metadata,
+            idempotencyKey,
+          );
+
+        await this.prisma.order.update({
+          where: { id: result.id },
+          data: { stripePaymentIntentId: paymentIntent.id },
+        });
+
+        stripeClientSecret = paymentIntent.client_secret;
+        paymentProvider = 'stripe';
+      } else if (
+        tenant?.paymentProvider === 'square' &&
+        tenant.paymentProviderStatus === 'active'
+      ) {
+        // Square — payment created after frontend card tokenization
+        paymentProvider = 'square';
+      } else {
+        // Fallback: direct Stripe (for tenants without Connect setup)
+        const paymentIntent = await this.stripeService.createPaymentIntent(
+          Number(result.grandTotal),
+          'usd',
+          metadata,
+          idempotencyKey,
+        );
+
+        await this.prisma.order.update({
+          where: { id: result.id },
+          data: { stripePaymentIntentId: paymentIntent.id },
+        });
+
+        stripeClientSecret = paymentIntent.client_secret;
+        paymentProvider = 'stripe';
+      }
     } catch (error) {
       // Log error but don't fail checkout - payment can be retried
-      console.error('Failed to create Stripe payment intent:', error);
+      console.error('Failed to create payment intent:', error);
     }
 
-    return this.mapOrderToCheckoutResponse(result, stripeClientSecret);
+    return this.mapOrderToCheckoutResponse(result, stripeClientSecret, paymentProvider);
   }
 
   /**
@@ -405,7 +457,7 @@ export class CheckoutService {
     return `${prefix}-${String(seq).padStart(5, '0')}`;
   }
 
-  private mapOrderToCheckoutResponse(order: any, clientSecret: string | null) {
+  private mapOrderToCheckoutResponse(order: any, clientSecret: string | null, paymentProvider?: string) {
     return {
       id: order.id,
       customerId: order.customerId,
@@ -414,6 +466,7 @@ export class CheckoutService {
       phone: order.phone,
       status: order.status,
       paymentStatus: order.paymentStatus,
+      paymentProvider: paymentProvider || 'stripe',
       shippingAddress: order.shippingAddressLine1
         ? {
             firstName: order.shippingFirstName,

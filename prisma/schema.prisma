@@ -29,6 +29,31 @@ model Tenant {
   defaultShippingRate    Decimal @default(9.99) @db.Decimal(18, 2)
   freeShippingThreshold  Decimal @default(100.00) @db.Decimal(18, 2)
 
+  // Payment provider configuration
+  paymentProvider         String?  // "stripe" | "square" | null
+  paymentProviderStatus   String   @default("pending") // "pending"|"onboarding"|"active"|"disabled"
+
+  // Stripe Connect
+  stripeConnectAccountId  String?  @unique
+  stripeChargesEnabled    Boolean  @default(false)
+  stripePayoutsEnabled    Boolean  @default(false)
+  stripeDetailsSubmitted  Boolean  @default(false)
+
+  // Square
+  squareMerchantId        String?  @unique
+  squareLocationId        String?
+  squareAccessToken       String?  // Encrypted
+  squareRefreshToken      String?  // Encrypted
+  squareAccessTokenExpiry DateTime?
+
+  // Platform fees
+  platformFeePercent      Decimal  @default(2.9) @db.Decimal(5, 2)
+  platformFeeFixed        Decimal  @default(0.30) @db.Decimal(18, 2)
+
+  // Onboarding tracking
+  onboardingStep          String?  // "signup"|"provisioning"|"payment"|"completed"
+  onboardingCompletedAt   DateTime?
+
   createdAt                DateTime                 @default(now())
   updatedAt                DateTime                 @updatedAt
 

@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { StripeService } from './stripe.service';
+import { SquarePaymentService } from '../../onboarding/square-payment.service';
 import { EmailService } from '@platform/email';
 import { StockMovementService } from '../../inventory-management/stock-movement.service';
 import { FailedOperationsService } from '../../workers/failed-operations.service';
@@ -15,6 +16,7 @@ export class PaymentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly stripeService: StripeService,
+    private readonly squarePaymentService: SquarePaymentService,
     private readonly stockMovementService: StockMovementService,
     private readonly failedOperationsService: FailedOperationsService,
     @Optional() @Inject(EmailService) private readonly emailService?: EmailService
@@ -616,5 +618,85 @@ export class PaymentsService {
       cardLast4: p.cardLast4,
       createdAt: p.createdAt,
     }));
+  }
+
+  /**
+   * Process a Square payment for an order (after frontend card tokenization)
+   */
+  async processSquarePayment(tenantId: string, orderId: string, sourceId: string) {
+    const order = await this.prisma.order.findFirst({
+      where: { id: orderId, tenantId },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    if (order.paymentStatus !== 'PENDING') {
+      throw new BadRequestException('Order is not pending payment');
+    }
+
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: {
+        paymentProvider: true,
+        squareLocationId: true,
+        platformFeePercent: true,
+        platformFeeFixed: true,
+      },
+    });
+
+    if (tenant?.paymentProvider !== 'square') {
+      throw new BadRequestException('Tenant is not configured for Square payments');
+    }
+
+    if (!tenant.squareLocationId) {
+      throw new BadRequestException('Square location not configured');
+    }
+
+    const amount = Number(order.grandTotal);
+    const platformFee =
+      amount * (Number(tenant.platformFeePercent) / 100) + Number(tenant.platformFeeFixed);
+
+    const idempotencyKey = `sq_${tenantId}_${orderId}`;
+
+    const payment = await this.squarePaymentService.createPayment(
+      tenantId,
+      amount,
+      order.currency || 'USD',
+      platformFee,
+      sourceId,
+      idempotencyKey,
+      tenant.squareLocationId,
+      { orderId, tenantId },
+    );
+
+    // Record payment in our DB
+    await this.prisma.payment.create({
+      data: {
+        tenantId,
+        orderId,
+        amount: order.grandTotal,
+        currency: order.currency || 'USD',
+        method: 'card',
+        status: 'CAPTURED',
+        capturedAt: new Date(),
+      },
+    });
+
+    // Update order status
+    await this.prisma.order.update({
+      where: { id: orderId },
+      data: {
+        paymentStatus: 'CAPTURED',
+        status: 'CONFIRMED',
+      },
+    });
+
+    return {
+      success: true,
+      paymentId: payment?.id,
+      orderId,
+    };
   }
 }

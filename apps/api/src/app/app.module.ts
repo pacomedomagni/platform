@@ -26,6 +26,7 @@ import { SentryInterceptor } from './sentry/sentry.interceptor';
 import { EmailWorker } from './workers/email.worker';
 import { WorkersModule } from './workers/workers.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
+import { OnboardingModule } from './onboarding/onboarding.module';
 
 @Module({
   imports: [
@@ -66,6 +67,7 @@ import { MonitoringModule } from './monitoring/monitoring.module';
     MarketplaceIntegrationsModule,
     WorkersModule,
     MonitoringModule,
+    OnboardingModule,
   ],
   controllers: [AppController, InventoryController, ReportsController],
   providers: [

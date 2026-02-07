@@ -20,10 +20,10 @@ export default function Index() {
             </p>
             <div className="flex flex-wrap items-center gap-3">
               <ButtonLink
-                href="/landing"
+                href="/signup"
                 className="bg-gradient-to-r from-indigo-600 via-blue-600 to-amber-400 text-white shadow-md hover:shadow-lg"
               >
-                View Marketing Site
+                Create Your Store
               </ButtonLink>
               <ButtonLink
                 href="/storefront"
