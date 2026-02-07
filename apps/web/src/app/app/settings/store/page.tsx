@@ -6,6 +6,8 @@ import Link from 'next/link';
 interface StoreSettings {
   businessName: string;
   storeUrl: string;
+  customDomain?: string | null;
+  customDomainStatus?: string | null;
 }
 
 export default function StoreDetailsPage() {
@@ -176,8 +178,33 @@ export default function StoreDetailsPage() {
                 </span>
               </div>
               <p className="mt-1.5 text-xs text-slate-400">
-                Your store URL cannot be changed after creation
+                This is your default storefront URL.
               </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700">
+                Custom Domain
+              </label>
+              <div className="mt-1.5 flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5">
+                <span className="text-sm text-slate-600">
+                  {settings?.customDomain || 'Not configured'}
+                </span>
+                {settings?.customDomainStatus && (
+                  <span className="rounded-full bg-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-600">
+                    {settings.customDomainStatus}
+                  </span>
+                )}
+              </div>
+              <p className="mt-1.5 text-xs text-slate-400">
+                Manage custom domains in the guided setup.
+              </p>
+              <Link
+                href="/app/getting-started"
+                className="mt-2 inline-flex text-xs font-semibold text-blue-600 hover:text-blue-700"
+              >
+                Open guided setup
+              </Link>
             </div>
           </div>
 

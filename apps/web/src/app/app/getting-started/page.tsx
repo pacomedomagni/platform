@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { Card } from '@platform/ui';
-import { Store, Truck, Package, PartyPopper, Loader2, Upload, X, Check } from 'lucide-react';
+import { Store, Truck, Package, PartyPopper, Loader2, Upload, X, Check, Globe, Link2 } from 'lucide-react';
 import Link from 'next/link';
 
 /* ------------------------------------------------------------------ */
@@ -11,10 +11,13 @@ import Link from 'next/link';
 
 interface StoreSettings {
   businessName: string;
-  taxRate: number;
-  shippingRate: number;
+  defaultTaxRate: number;
+  defaultShippingRate: number;
   freeShippingThreshold: number;
   storeUrl?: string;
+  customDomain?: string | null;
+  customDomainStatus?: string | null;
+  customDomainVerifiedAt?: string | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -38,8 +41,10 @@ function authHeaders(): Record<string, string> {
 const STEPS = [
   { number: 1, label: 'Store Details', icon: Store },
   { number: 2, label: 'Shipping & Tax', icon: Truck },
-  { number: 3, label: 'First Product', icon: Package },
-  { number: 4, label: "You're Ready!", icon: PartyPopper },
+  { number: 3, label: 'Custom Domain', icon: Globe },
+  { number: 4, label: 'Connect eBay', icon: Link2 },
+  { number: 5, label: 'First Product', icon: Package },
+  { number: 6, label: "You're Ready!", icon: PartyPopper },
 ] as const;
 
 function StepIndicator({ currentStep }: { currentStep: number }) {
@@ -107,6 +112,18 @@ export default function GettingStartedPage() {
   const [freeShippingThreshold, setFreeShippingThreshold] = useState('75.00');
 
   // Step 3 state
+  const [customDomain, setCustomDomain] = useState('');
+  const [customDomainStatus, setCustomDomainStatus] = useState<string | null>(null);
+  const [customDomainVerifiedAt, setCustomDomainVerifiedAt] = useState<string | null>(null);
+  const [verifyingDomain, setVerifyingDomain] = useState(false);
+
+  // Step 4 state (eBay)
+  const [ebayConnections, setEbayConnections] = useState<Array<{ id: string; name: string; isConnected: boolean }>>([]);
+  const [ebayName, setEbayName] = useState('');
+  const [ebayMarketplaceId, setEbayMarketplaceId] = useState('EBAY_US');
+  const [connectingEbay, setConnectingEbay] = useState(false);
+
+  // Step 5 state
   const [productName, setProductName] = useState('');
   const [productPrice, setProductPrice] = useState('');
   const [productDescription, setProductDescription] = useState('');
@@ -129,11 +146,14 @@ export default function GettingStartedPage() {
         if (!res.ok) throw new Error('Failed to load settings');
         const data: StoreSettings = await res.json();
         setBusinessName(data.businessName || '');
-        if (data.taxRate != null) setTaxRatePercent(String(+(data.taxRate * 100).toFixed(4)));
-        if (data.shippingRate != null) setShippingRate(String(data.shippingRate));
+        if (data.defaultTaxRate != null) setTaxRatePercent(String(+(data.defaultTaxRate * 100).toFixed(4)));
+        if (data.defaultShippingRate != null) setShippingRate(String(data.defaultShippingRate));
         if (data.freeShippingThreshold != null)
           setFreeShippingThreshold(String(data.freeShippingThreshold));
         if (data.storeUrl) setStoreUrl(data.storeUrl);
+        if (data.customDomain) setCustomDomain(data.customDomain);
+        if (data.customDomainStatus) setCustomDomainStatus(data.customDomainStatus);
+        if (data.customDomainVerifiedAt) setCustomDomainVerifiedAt(data.customDomainVerifiedAt);
       } catch {
         // We'll just use defaults
       } finally {
@@ -142,6 +162,12 @@ export default function GettingStartedPage() {
     };
     fetchSettings();
   }, []);
+
+  useEffect(() => {
+    if (step === 4) {
+      loadEbayConnections();
+    }
+  }, [step, loadEbayConnections]);
 
   /* ---------- Save helpers ---------- */
 
@@ -160,6 +186,10 @@ export default function GettingStartedPage() {
       }
       const updated = await res.json();
       if (updated.storeUrl) setStoreUrl(updated.storeUrl);
+      if (updated.customDomain !== undefined) setCustomDomain(updated.customDomain || '');
+      if (updated.customDomainStatus !== undefined) setCustomDomainStatus(updated.customDomainStatus);
+      if (updated.customDomainVerifiedAt !== undefined)
+        setCustomDomainVerifiedAt(updated.customDomainVerifiedAt);
       return true;
     } catch (err: any) {
       setError(err.message);
@@ -194,13 +224,124 @@ export default function GettingStartedPage() {
     }
 
     const ok = await saveSettings({
-      taxRate: taxDecimal,
-      shippingRate: shipping,
+      defaultTaxRate: taxDecimal,
+      defaultShippingRate: shipping,
       freeShippingThreshold: threshold,
     });
     if (ok) {
       setError(null);
       setStep(3);
+    }
+  };
+
+  const handleStep3Next = async () => {
+    const domain = customDomain.trim();
+    if (!domain) {
+      setError(null);
+      setStep(4);
+      return;
+    }
+
+    const ok = await saveSettings({ customDomain: domain });
+    if (ok) {
+      setError(null);
+      setStep(4);
+    }
+  };
+
+  const handleVerifyDomain = async () => {
+    const domain = customDomain.trim();
+    if (!domain) {
+      setError('Enter a custom domain to verify.');
+      return;
+    }
+
+    setVerifyingDomain(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/v1/store/admin/settings/verify-domain', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ customDomain: domain }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || 'Failed to verify domain');
+      }
+
+      const data = await res.json();
+      setCustomDomainStatus(data.status || 'pending');
+      if (data.status === 'verified') {
+        setCustomDomainVerifiedAt(data.verifiedAt || new Date().toISOString());
+      }
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setVerifyingDomain(false);
+    }
+  };
+
+  const loadEbayConnections = useCallback(async () => {
+    try {
+      const res = await fetch('/api/v1/marketplace/connections?platform=EBAY', {
+        headers: authHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setEbayConnections(
+          Array.isArray(data)
+            ? data.map((connection) => ({
+                id: connection.id,
+                name: connection.name,
+                isConnected: Boolean(connection.isConnected),
+              }))
+            : [],
+        );
+      }
+    } catch {
+      // Ignore; user can still continue without eBay.
+    }
+  }, []);
+
+  const handleCreateEbayConnection = async () => {
+    if (!ebayName.trim()) {
+      setError('Enter an eBay store name.');
+      return;
+    }
+
+    setConnectingEbay(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/v1/marketplace/connections', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          platform: 'EBAY',
+          name: ebayName.trim(),
+          marketplaceId: ebayMarketplaceId,
+          isDefault: ebayConnections.length === 0,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || err.message || 'Failed to create connection');
+      }
+
+      const connection = await res.json();
+      setEbayConnections((prev) => [
+        ...prev,
+        { id: connection.id, name: connection.name, isConnected: Boolean(connection.isConnected) },
+      ]);
+      setEbayName('');
+
+      const connectUrl = `/api/v1/marketplace/ebay/auth/connect?connectionId=${connection.id}`;
+      window.open(connectUrl, '_blank');
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setConnectingEbay(false);
     }
   };
 
@@ -233,7 +374,7 @@ export default function GettingStartedPage() {
     }
   };
 
-  const handleStep3Next = async () => {
+  const handleStep5Next = async () => {
     // Product creation is optional -- user can skip
     if (productName.trim() && productPrice.trim()) {
       setSaving(true);
@@ -269,13 +410,13 @@ export default function GettingStartedPage() {
     }
 
     setError(null);
-    setStep(4);
+    setStep(6);
     localStorage.setItem('merchant_setup_done', 'true');
   };
 
   const handleSkipProduct = () => {
     setError(null);
-    setStep(4);
+    setStep(6);
     localStorage.setItem('merchant_setup_done', 'true');
   };
 
@@ -294,15 +435,43 @@ export default function GettingStartedPage() {
 
   /* ---------- Render ---------- */
 
+  const domainStatus = customDomainStatus || 'not_set';
+  const domainBadgeClass =
+    domainStatus === 'verified'
+      ? 'bg-emerald-100 text-emerald-700'
+      : domainStatus === 'pending'
+        ? 'bg-amber-100 text-amber-700'
+        : domainStatus === 'failed'
+          ? 'bg-red-100 text-red-600'
+          : 'bg-slate-100 text-slate-600';
+  const domainBadgeLabel =
+    domainStatus === 'verified'
+      ? 'Verified'
+      : domainStatus === 'pending'
+        ? 'Pending DNS'
+        : domainStatus === 'failed'
+          ? 'Check DNS'
+          : 'Not configured';
+  const publicStoreUrl =
+    domainStatus === 'verified' && customDomain ? `https://${customDomain}` : storeUrl;
+
   return (
     <div className="min-h-[calc(100vh-4rem)]">
       {/* Gradient header */}
       <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-8 lg:px-8">
-        <div className="mx-auto max-w-3xl text-center text-white">
-          <h1 className="text-2xl font-bold sm:text-3xl">Set Up Your Store</h1>
-          <p className="mt-1.5 text-blue-100">
-            Just a few steps and you&apos;ll be ready to start selling.
-          </p>
+        <div className="mx-auto flex max-w-3xl flex-col items-center gap-4 text-center text-white sm:flex-row sm:justify-between sm:text-left">
+          <div>
+            <h1 className="text-2xl font-bold sm:text-3xl">Set Up Your Store</h1>
+            <p className="mt-1.5 text-blue-100">
+              Just a few steps and you&apos;ll be ready to start selling.
+            </p>
+          </div>
+          <Link
+            href="/app"
+            className="rounded-full border border-white/30 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white transition hover:bg-white/10"
+          >
+            Skip setup
+          </Link>
         </div>
       </div>
 
@@ -469,8 +638,245 @@ export default function GettingStartedPage() {
           </Card>
         )}
 
-        {/* ========== STEP 3: Add First Product ========== */}
+        {/* ========== STEP 3: Custom Domain ========== */}
         {step === 3 && (
+          <Card className="p-6 sm:p-8">
+            <div className="mb-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-slate-900">Custom Domain</h2>
+                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${domainBadgeClass}`}>
+                  {domainBadgeLabel}
+                </span>
+              </div>
+              <p className="mt-1 text-sm text-slate-500">
+                Use your own domain for your storefront. We&apos;ll verify it after you update DNS.
+              </p>
+            </div>
+
+            <div className="space-y-5">
+              <div>
+                <label htmlFor="customDomain" className="block text-sm font-medium text-slate-700">
+                  Custom Domain
+                </label>
+                <input
+                  id="customDomain"
+                  type="text"
+                  value={customDomain}
+                  onChange={(e) => setCustomDomain(e.target.value)}
+                  placeholder="store.yourbrand.com"
+                  className="mt-1.5 block w-full rounded-xl border border-slate-300 px-4 py-3 text-sm shadow-sm placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                />
+                <p className="mt-2 text-xs text-slate-500">
+                  Add a CNAME record pointing to <span className="font-semibold">noslag.com</span>.
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                <p className="font-semibold text-slate-700">DNS instructions</p>
+                <ul className="mt-2 space-y-1 text-xs text-slate-500">
+                  <li>Type: CNAME</li>
+                  <li>Host: your subdomain (example: store)</li>
+                  <li>Target: noslag.com</li>
+                </ul>
+              </div>
+
+              {customDomainVerifiedAt && domainStatus === 'verified' && (
+                <p className="text-xs text-emerald-600">
+                  Verified on {new Date(customDomainVerifiedAt).toLocaleString()}
+                </p>
+              )}
+            </div>
+
+            <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
+              <button
+                onClick={() => {
+                  setError(null);
+                  setStep(2);
+                }}
+                className="rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              >
+                Back
+              </button>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  onClick={() => {
+                    setError(null);
+                    setStep(4);
+                  }}
+                  className="rounded-xl px-5 py-2.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                >
+                  Skip for now
+                </button>
+                <button
+                  onClick={handleVerifyDomain}
+                  disabled={verifyingDomain || !customDomain.trim()}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {verifyingDomain ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Verifying...
+                    </>
+                  ) : (
+                    'Verify DNS'
+                  )}
+                </button>
+                <button
+                  onClick={handleStep3Next}
+                  disabled={saving}
+                  className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {saving ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    'Save & Continue'
+                  )}
+                </button>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {/* ========== STEP 4: Connect eBay ========== */}
+        {step === 4 && (
+          <Card className="p-6 sm:p-8">
+            <div className="mb-6">
+              <h2 className="text-xl font-semibold text-slate-900">Connect eBay Stores</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Connect one or more eBay stores so we can sync listings and orders.
+              </p>
+            </div>
+
+            <div className="space-y-6">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-semibold text-slate-700">Connected stores</p>
+                {ebayConnections.length === 0 ? (
+                  <p className="mt-2 text-sm text-slate-500">No stores connected yet.</p>
+                ) : (
+                  <div className="mt-3 space-y-2">
+                    {ebayConnections.map((connection) => (
+                      <div
+                        key={connection.id}
+                        className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"
+                      >
+                        <span className="font-medium text-slate-700">{connection.name}</span>
+                        <span
+                          className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                            connection.isConnected
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-amber-100 text-amber-700'
+                          }`}
+                        >
+                          {connection.isConnected ? 'Connected' : 'Pending'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={loadEbayConnections}
+                  className="mt-3 text-xs font-medium text-blue-600 hover:text-blue-700"
+                >
+                  Refresh connections
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label htmlFor="ebayName" className="block text-sm font-medium text-slate-700">
+                    eBay Store Name
+                  </label>
+                  <input
+                    id="ebayName"
+                    type="text"
+                    value={ebayName}
+                    onChange={(e) => setEbayName(e.target.value)}
+                    placeholder="Main eBay Store"
+                    className="mt-1.5 block w-full rounded-xl border border-slate-300 px-4 py-3 text-sm shadow-sm placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="ebayMarketplace"
+                    className="block text-sm font-medium text-slate-700"
+                  >
+                    Marketplace
+                  </label>
+                  <select
+                    id="ebayMarketplace"
+                    value={ebayMarketplaceId}
+                    onChange={(e) => setEbayMarketplaceId(e.target.value)}
+                    className="mt-1.5 block w-full rounded-xl border border-slate-300 px-4 py-3 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  >
+                    <option value="EBAY_US">eBay US</option>
+                    <option value="EBAY_UK">eBay UK</option>
+                    <option value="EBAY_DE">eBay Germany</option>
+                    <option value="EBAY_AU">eBay Australia</option>
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleCreateEbayConnection}
+                  disabled={connectingEbay}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {connectingEbay ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Connecting...
+                    </>
+                  ) : (
+                    'Connect eBay Store'
+                  )}
+                </button>
+                <p className="text-xs text-slate-500">
+                  We&apos;ll open eBay in a new tab so you can authorize the connection.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-8 flex items-center justify-between">
+              <button
+                onClick={() => {
+                  setError(null);
+                  setStep(3);
+                }}
+                className="rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              >
+                Back
+              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    setError(null);
+                    setStep(5);
+                  }}
+                  className="rounded-xl px-5 py-2.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+                >
+                  Skip for now
+                </button>
+                <button
+                  onClick={() => {
+                    setError(null);
+                    setStep(5);
+                  }}
+                  className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+                >
+                  Continue
+                </button>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {/* ========== STEP 5: Add First Product ========== */}
+        {step === 5 && (
           <Card className="p-6 sm:p-8">
             <div className="mb-6">
               <h2 className="text-xl font-semibold text-slate-900">Add Your First Product</h2>
@@ -592,7 +998,7 @@ export default function GettingStartedPage() {
               <button
                 onClick={() => {
                   setError(null);
-                  setStep(2);
+                  setStep(4);
                 }}
                 className="rounded-xl border border-slate-300 px-5 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
               >
@@ -606,7 +1012,7 @@ export default function GettingStartedPage() {
                   Skip for now
                 </button>
                 <button
-                  onClick={handleStep3Next}
+                  onClick={handleStep5Next}
                   disabled={saving}
                   className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
                 >
@@ -626,8 +1032,8 @@ export default function GettingStartedPage() {
           </Card>
         )}
 
-        {/* ========== STEP 4: You're Ready! ========== */}
-        {step === 4 && (
+        {/* ========== STEP 6: You're Ready! ========== */}
+        {step === 6 && (
           <Card className="p-6 sm:p-8">
             <div className="text-center">
               <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100">
@@ -639,20 +1045,20 @@ export default function GettingStartedPage() {
                 selling!
               </p>
 
-              {storeUrl && (
+              {publicStoreUrl && (
                 <div className="mx-auto mt-6 max-w-md">
                   <label className="block text-xs font-medium text-slate-500">Your Store URL</label>
                   <div className="mt-1.5 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                     <a
-                      href={storeUrl}
+                      href={publicStoreUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex-1 truncate text-sm font-medium text-blue-600 hover:underline"
                     >
-                      {storeUrl}
+                      {publicStoreUrl}
                     </a>
                     <button
-                      onClick={() => navigator.clipboard.writeText(storeUrl)}
+                      onClick={() => navigator.clipboard.writeText(publicStoreUrl)}
                       className="shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-100"
                     >
                       Copy

@@ -34,6 +34,16 @@ export default function MarketplaceConnectionsPage() {
     isDefault: false,
   });
 
+  const authHeaders = () => {
+    const token = localStorage.getItem('access_token') || '';
+    const tenantId = localStorage.getItem('tenantId') || '';
+    return {
+      Authorization: `Bearer ${token}`,
+      'x-tenant-id': tenantId,
+      'Content-Type': 'application/json',
+    };
+  };
+
   useEffect(() => {
     loadConnections();
 
@@ -52,7 +62,7 @@ export default function MarketplaceConnectionsPage() {
   const loadConnections = async () => {
     try {
       const res = await fetch('/api/v1/marketplace/connections', {
-        credentials: 'include',
+        headers: authHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -74,8 +84,7 @@ export default function MarketplaceConnectionsPage() {
     try {
       const res = await fetch('/api/v1/marketplace/connections', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
+        headers: authHeaders(),
         body: JSON.stringify({
           platform: 'EBAY',
           ...newConnection,
@@ -106,7 +115,7 @@ export default function MarketplaceConnectionsPage() {
     try {
       const res = await fetch(`/api/v1/marketplace/connections/${connectionId}/disconnect`, {
         method: 'POST',
-        credentials: 'include',
+        headers: authHeaders(),
       });
 
       if (res.ok) {
@@ -123,7 +132,7 @@ export default function MarketplaceConnectionsPage() {
     try {
       const res = await fetch(`/api/v1/marketplace/connections/${connectionId}`, {
         method: 'DELETE',
-        credentials: 'include',
+        headers: authHeaders(),
       });
 
       if (res.ok) {
