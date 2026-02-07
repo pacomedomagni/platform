@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { Webhook } from '@prisma/client';
 import * as crypto from 'crypto';
 import * as url from 'url';
 import * as net from 'net';
@@ -311,7 +312,7 @@ export class WebhookService {
   /**
    * Deliver a webhook
    */
-  private async deliverWebhook(webhook: any, event: WebhookEvent): Promise<void> {
+  private async deliverWebhook(webhook: Webhook, event: WebhookEvent): Promise<void> {
     const payload = JSON.stringify({
       event: event.event,
       timestamp: event.timestamp.toISOString(),

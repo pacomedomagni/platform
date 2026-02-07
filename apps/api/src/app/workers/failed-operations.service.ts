@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '@platform/db';
-import { OperationType, OperationStatus, Prisma } from '@prisma/client';
+import { OperationType, OperationStatus, Prisma, FailedOperation } from '@prisma/client';
 
 interface CreateFailedOperationDto {
   tenantId: string;
@@ -182,7 +182,7 @@ export class FailedOperationsService {
   /**
    * Execute a failed operation based on its type
    */
-  private async executeOperation(operation: any): Promise<void> {
+  private async executeOperation(operation: FailedOperation): Promise<void> {
     switch (operation.operationType) {
       case OperationType.STOCK_DEDUCTION:
         await this.retryStockDeduction(operation);
@@ -208,7 +208,7 @@ export class FailedOperationsService {
   /**
    * Retry stock deduction for an order
    */
-  private async retryStockDeduction(operation: any): Promise<void> {
+  private async retryStockDeduction(operation: FailedOperation): Promise<void> {
     const payload = operation.payload as any;
     const { orderId, items, warehouseId } = payload;
 
@@ -245,7 +245,7 @@ export class FailedOperationsService {
   /**
    * Retry coupon tracking for an order
    */
-  private async retryCouponTracking(operation: any): Promise<void> {
+  private async retryCouponTracking(operation: FailedOperation): Promise<void> {
     const payload = operation.payload as any;
     const { couponId, customerId, orderId } = payload;
 
@@ -273,7 +273,7 @@ export class FailedOperationsService {
   /**
    * Retry email send
    */
-  private async retryEmailSend(operation: any): Promise<void> {
+  private async retryEmailSend(operation: FailedOperation): Promise<void> {
     const payload = operation.payload as any;
     const { emailOptions } = payload;
 
@@ -297,7 +297,7 @@ export class FailedOperationsService {
   /**
    * Retry webhook delivery
    */
-  private async retryWebhookDelivery(operation: any): Promise<void> {
+  private async retryWebhookDelivery(operation: FailedOperation): Promise<void> {
     const payload = operation.payload as any;
     const { webhookId, event: webhookEvent } = payload;
 

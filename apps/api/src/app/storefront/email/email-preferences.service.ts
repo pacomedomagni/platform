@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { Prisma } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import * as crypto from 'crypto';
 
@@ -112,7 +113,7 @@ export class EmailPreferencesService {
     }
 
     // Prepare update data
-    const updateData: any = {};
+    const updateData: Prisma.EmailPreferencesUpdateInput = {};
 
     if (type === 'all') {
       updateData.marketing = false;

@@ -1,6 +1,7 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { Prisma } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import * as crypto from 'crypto';
 import {
@@ -122,7 +123,7 @@ export class GiftCardsService {
     const { page = 1, limit = 20, status } = options;
     const skip = (page - 1) * limit;
 
-    const where: any = { tenantId };
+    const where: Prisma.GiftCardWhereInput = { tenantId };
     if (status) where.status = status;
 
     const [giftCards, total] = await Promise.all([

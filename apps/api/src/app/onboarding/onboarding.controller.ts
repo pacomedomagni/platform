@@ -10,9 +10,14 @@ import {
   UseGuards,
   ValidationPipe,
 } from '@nestjs/common';
-import { AuthGuard } from '@platform/auth';
+import { AuthGuard, AuthenticatedUser } from '@platform/auth';
 import { OnboardingService } from './onboarding.service';
 import { SignupDto } from './dto/signup.dto';
+import { Request } from 'express';
+
+interface RequestWithUser extends Request {
+  user: AuthenticatedUser;
+}
 
 @Controller('onboarding')
 export class OnboardingController {
@@ -49,9 +54,9 @@ export class OnboardingController {
   @HttpCode(HttpStatus.OK)
   async initiatePayment(
     @Param('tenantId') tenantId: string,
-    @Req() req: any,
+    @Req() req: RequestWithUser,
   ) {
-    const userId = req.user?.userId || req.user?.sub;
+    const userId = req.user.userId;
     return this.onboardingService.initiatePaymentOnboarding(tenantId, userId);
   }
 

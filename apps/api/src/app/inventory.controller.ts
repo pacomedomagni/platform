@@ -1,14 +1,20 @@
-import { Controller, Get, Query, Req, UseGuards, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Controller, Get, Query, Req, UseGuards, BadRequestException, ForbiddenException, Post, Body, Put, Param } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { PrismaService, Prisma } from '@platform/db';
 import { SerialStatus } from '@prisma/client';
+import { Request } from 'express';
+import { AuthenticatedUser } from '@platform/auth';
+
+interface RequestWithUser extends Request {
+  user: AuthenticatedUser;
+}
 
 @Controller('inventory')
 @UseGuards(AuthGuard('jwt'))
 export class InventoryController {
   constructor(private readonly prisma: PrismaService) {}
 
-  private ensureInventoryAccess(user: any) {
+  private ensureInventoryAccess(user: AuthenticatedUser) {
     const roles: string[] = user?.roles || [];
     const allowed = new Set(['System Manager', 'Stock Manager', 'Accounts Manager', 'user', 'admin']);
     if (!roles.some((role) => allowed.has(role))) {
@@ -18,7 +24,7 @@ export class InventoryController {
 
   @Get('stock-balance')
   async getStockBalance(
-    @Req() req: any,
+    @Req() req: RequestWithUser,
     @Query('warehouseCode') warehouseCode?: string,
     @Query('itemCode') itemCode?: string,
     @Query('locationCode') locationCode?: string,
@@ -110,7 +116,7 @@ export class InventoryController {
 
   @Get('stock-ledger')
   async getStockLedger(
-    @Req() req: any,
+    @Req() req: RequestWithUser,
     @Query('itemCode') itemCode?: string,
     @Query('warehouseCode') warehouseCode?: string,
     @Query('batchNo') batchNo?: string,
@@ -151,7 +157,8 @@ export class InventoryController {
         throw new BadRequestException('batchNo requires a valid itemCode');
       }
 
-      const where: any = {
+      const where: Prisma.StockLedgerEntryWhereInput = {
+        tenantId,
         ...(item ? { itemId: item.id } : {}),
         ...(warehouse ? { warehouseId: warehouse.id } : {}),
         ...(batch ? { batchId: batch.id } : {}),
@@ -191,7 +198,7 @@ export class InventoryController {
   }
 
   @Get('locations')
-  async listLocations(@Req() req: any, @Query('warehouseCode') warehouseCode?: string) {
+  async listLocations(@Req() req: RequestWithUser, @Query('warehouseCode') warehouseCode?: string) {
     const tenantId = req.user?.tenantId;
     if (!tenantId) throw new BadRequestException('Missing tenantId');
     this.ensureInventoryAccess(req.user);
@@ -229,7 +236,7 @@ export class InventoryController {
 
   @Get('serials')
   async listSerials(
-    @Req() req: any,
+    @Req() req: RequestWithUser,
     @Query('itemCode') itemCode?: string,
     @Query('warehouseCode') warehouseCode?: string,
     @Query('status') status?: string,
@@ -293,7 +300,7 @@ export class InventoryController {
 
   @Get('stock-valuation')
   async getStockValuation(
-    @Req() req: any,
+    @Req() req: RequestWithUser,
     @Query('warehouseCode') warehouseCode?: string,
     @Query('itemCode') itemCode?: string,
     @Query('locationCode') locationCode?: string,
@@ -423,7 +430,7 @@ export class InventoryController {
 
   @Get('stock-aging')
   async getStockAging(
-    @Req() req: any,
+    @Req() req: RequestWithUser,
     @Query('warehouseCode') warehouseCode?: string,
     @Query('itemCode') itemCode?: string,
     @Query('locationCode') locationCode?: string,
@@ -590,7 +597,7 @@ export class InventoryController {
 
   @Get('stock-movement')
   async getStockMovement(
-    @Req() req: any,
+    @Req() req: RequestWithUser,
     @Query('warehouseCode') warehouseCode?: string,
     @Query('itemCode') itemCode?: string,
     @Query('fromDate') fromDate?: string,
@@ -615,7 +622,8 @@ export class InventoryController {
         : null;
       if (warehouseCode && !warehouse) throw new BadRequestException(`Unknown warehouse: ${warehouseCode}`);
 
-      const where: any = {
+      const where: Prisma.StockLedgerEntryWhereInput = {
+        tenantId,
         ...(item ? { itemId: item.id } : {}),
         ...(warehouse ? { warehouseId: warehouse.id } : {}),
       };
@@ -665,7 +673,7 @@ export class InventoryController {
 
   @Get('reorder-suggestions')
   async getReorderSuggestions(
-    @Req() req: any,
+    @Req() req: RequestWithUser,
     @Query('warehouseCode') warehouseCode?: string,
     @Query('itemCode') itemCode?: string,
   ) {

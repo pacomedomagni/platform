@@ -1,5 +1,6 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService, Prisma } from '@platform/db';
+import { StoreCurrency } from '@prisma/client';
 import {
   CreateStoreCurrencyDto,
   UpdateStoreCurrencyDto,
@@ -425,7 +426,7 @@ export class CurrencyService {
     }));
   }
 
-  private formatCurrency(currency: any): CurrencyInfo {
+  private formatCurrency(currency: StoreCurrency): CurrencyInfo {
     return {
       code: currency.currencyCode,
       symbol: currency.symbol,

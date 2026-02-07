@@ -539,11 +539,11 @@ export class ImportExportService {
     ctx: TenantContext,
     filters: { startDate?: Date; endDate?: Date }
   ): Promise<Record<string, unknown>[]> {
-    const where: any = { tenantId: ctx.tenantId };
+    const where: Prisma.OrderWhereInput = { tenantId: ctx.tenantId };
     if (filters.startDate || filters.endDate) {
       where.createdAt = {};
-      if (filters.startDate) where.createdAt.gte = filters.startDate;
-      if (filters.endDate) where.createdAt.lte = filters.endDate;
+      if (filters.startDate) (where.createdAt as any).gte = filters.startDate;
+      if (filters.endDate) (where.createdAt as any).lte = filters.endDate;
     }
 
     const orders = await this.prisma.order.findMany({

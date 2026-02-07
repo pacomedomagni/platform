@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { Prisma, StoreCustomer } from '@prisma/client';
 
 export interface OnboardingStatus {
   completed: boolean;
@@ -116,7 +117,7 @@ export class OnboardingService {
       throw new NotFoundException('Customer not found');
     }
 
-    const updateData: any = {
+    const updateData: Prisma.StoreCustomerUpdateInput = {
       lastOnboardingInteraction: new Date(),
     };
 
@@ -229,7 +230,7 @@ export class OnboardingService {
   /**
    * Calculate profile completion score (0-100)
    */
-  private calculateProfileScore(customer: any): number {
+  private calculateProfileScore(customer: StoreCustomer): number {
     let score = 0;
     const fields = [
       customer.email,

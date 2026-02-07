@@ -1,12 +1,40 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { Prisma } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import * as crypto from 'crypto';
 import {
   CreateWishlistDto,
   AddWishlistItemDto,
 } from './dto';
+
+type WishlistWithRelations = Prisma.WishlistGetPayload<{
+  include: {
+    customer: {
+      select: { firstName: true };
+    };
+    items: {
+      include: {
+        productListing: {
+          include: {
+            category: true;
+          };
+        };
+        variant: {
+          include: {
+            attributes: {
+              include: {
+                attributeType: true;
+                attributeValue: true;
+              };
+            };
+          };
+        };
+      };
+    };
+  };
+}>;
 
 @Injectable()
 export class WishlistService {
@@ -380,7 +408,7 @@ export class WishlistService {
 
   // ============ HELPERS ============
 
-  private mapWishlistToResponse(wishlist: any) {
+  private mapWishlistToResponse(wishlist: WishlistWithRelations) {
     return {
       id: wishlist.id,
       name: wishlist.name,
@@ -389,7 +417,7 @@ export class WishlistService {
       shareToken: wishlist.shareToken,
       shareUrl: wishlist.shareToken ? `/wishlist/shared/${wishlist.shareToken}` : null,
       ownerName: wishlist.customer?.firstName || 'Someone',
-      items: wishlist.items?.map((item: any) => ({
+      items: wishlist.items?.map((item) => ({
         id: item.id,
         product: {
           id: item.productListing.id,
@@ -406,7 +434,7 @@ export class WishlistService {
               sku: item.variant.sku,
               price: item.variant.price,
               imageUrl: item.variant.imageUrl,
-              attributes: item.variant.attributes?.map((a: any) => ({
+              attributes: item.variant.attributes?.map((a) => ({
                 type: a.attributeType.displayName,
                 value: a.attributeValue.displayValue,
               })),

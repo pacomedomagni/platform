@@ -15,8 +15,8 @@ import {
   DefaultValuePipe,
   Request,
 } from '@nestjs/common';
-import { Response } from 'express';
-import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
+import { Response, Request as ExpressRequest } from 'express';
+import { AuthGuard, RolesGuard, Roles, AuthenticatedUser } from '@platform/auth';
 import { Tenant } from '../tenant.middleware';
 import { AuditLogService } from './audit-log.service';
 import { WebhookService } from './webhook.service';
@@ -35,6 +35,10 @@ interface TenantContext {
   userId?: string;
 }
 
+interface RequestWithUser extends ExpressRequest {
+  user: AuthenticatedUser;
+}
+
 @Controller('operations')
 @UseGuards(AuthGuard, RolesGuard)
 export class OperationsController {
@@ -46,8 +50,8 @@ export class OperationsController {
     private readonly notificationService: NotificationService,
   ) {}
 
-  private getContext(tenantId: string, req: any): TenantContext {
-    return { tenantId, userId: req?.user?.sub };
+  private getContext(tenantId: string, req: RequestWithUser): TenantContext {
+    return { tenantId, userId: req.user.userId };
   }
 
   // ==========================================
@@ -58,7 +62,7 @@ export class OperationsController {
   @Roles('admin')
   async getAuditLogs(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Query() query: AuditLogQueryDto,
   ) {
     const ctx = this.getContext(tenantId, req);
@@ -73,7 +77,7 @@ export class OperationsController {
   @Roles('admin')
   async getEntityHistory(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Param('docType') docType: string,
     @Param('docName') docName: string,
   ) {
@@ -85,7 +89,7 @@ export class OperationsController {
   @Roles('admin')
   async getActivitySummary(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
@@ -100,7 +104,7 @@ export class OperationsController {
   @Roles('admin')
   async exportAuditLogs(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Query() query: AuditLogQueryDto,
     @Res() res: Response,
   ) {
@@ -118,21 +122,21 @@ export class OperationsController {
 
   @Get('webhooks')
   @Roles('admin')
-  async getWebhooks(@Tenant() tenantId: string, @Request() req: any) {
+  async getWebhooks(@Tenant() tenantId: string, @Request() req: RequestWithUser) {
     const ctx = this.getContext(tenantId, req);
     return this.webhookService.findMany(ctx);
   }
 
   @Get('webhooks/:id')
   @Roles('admin')
-  async getWebhook(@Tenant() tenantId: string, @Request() req: any, @Param('id') id: string) {
+  async getWebhook(@Tenant() tenantId: string, @Request() req: RequestWithUser, @Param('id') id: string) {
     const ctx = this.getContext(tenantId, req);
     return this.webhookService.findOne(ctx, id);
   }
 
   @Post('webhooks')
   @Roles('admin')
-  async createWebhook(@Tenant() tenantId: string, @Request() req: any, @Body() dto: CreateWebhookDto) {
+  async createWebhook(@Tenant() tenantId: string, @Request() req: RequestWithUser, @Body() dto: CreateWebhookDto) {
     const ctx = this.getContext(tenantId, req);
     return this.webhookService.create(ctx, dto);
   }
@@ -141,7 +145,7 @@ export class OperationsController {
   @Roles('admin')
   async updateWebhook(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Param('id') id: string,
     @Body() dto: UpdateWebhookDto,
   ) {
@@ -152,14 +156,14 @@ export class OperationsController {
   @Delete('webhooks/:id')
   @Roles('admin')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async deleteWebhook(@Tenant() tenantId: string, @Request() req: any, @Param('id') id: string) {
+  async deleteWebhook(@Tenant() tenantId: string, @Request() req: RequestWithUser, @Param('id') id: string) {
     const ctx = this.getContext(tenantId, req);
     await this.webhookService.delete(ctx, id);
   }
 
   @Post('webhooks/:id/test')
   @Roles('admin')
-  async testWebhook(@Tenant() tenantId: string, @Request() req: any, @Param('id') id: string) {
+  async testWebhook(@Tenant() tenantId: string, @Request() req: RequestWithUser, @Param('id') id: string) {
     const ctx = this.getContext(tenantId, req);
     return this.webhookService.testWebhook(ctx, id);
   }
@@ -168,7 +172,7 @@ export class OperationsController {
   @Roles('admin')
   async getWebhookDeliveries(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Param('id') id: string,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
@@ -181,7 +185,7 @@ export class OperationsController {
   @Roles('admin')
   async retryWebhookDelivery(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Param('deliveryId') deliveryId: string,
   ) {
     const ctx = this.getContext(tenantId, req);
@@ -196,7 +200,7 @@ export class OperationsController {
   @Roles('admin')
   async getJobs(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Query('type') type?: string,
     @Query('status') status?: string,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page?: number,
@@ -208,14 +212,14 @@ export class OperationsController {
 
   @Get('jobs/:id')
   @Roles('admin')
-  async getJob(@Tenant() tenantId: string, @Request() req: any, @Param('id') id: string) {
+  async getJob(@Tenant() tenantId: string, @Request() req: RequestWithUser, @Param('id') id: string) {
     const ctx = this.getContext(tenantId, req);
     return this.jobService.findOne(ctx, id);
   }
 
   @Post('jobs')
   @Roles('admin')
-  async createJob(@Tenant() tenantId: string, @Request() req: any, @Body() dto: CreateJobDto) {
+  async createJob(@Tenant() tenantId: string, @Request() req: RequestWithUser, @Body() dto: CreateJobDto) {
     const ctx = this.getContext(tenantId, req);
     return this.jobService.createJob(ctx, {
       type: dto.type,
@@ -227,21 +231,21 @@ export class OperationsController {
 
   @Post('jobs/:id/cancel')
   @Roles('admin')
-  async cancelJob(@Tenant() tenantId: string, @Request() req: any, @Param('id') id: string) {
+  async cancelJob(@Tenant() tenantId: string, @Request() req: RequestWithUser, @Param('id') id: string) {
     const ctx = this.getContext(tenantId, req);
     return this.jobService.cancelJob(ctx, id);
   }
 
   @Post('jobs/:id/retry')
   @Roles('admin')
-  async retryJob(@Tenant() tenantId: string, @Request() req: any, @Param('id') id: string) {
+  async retryJob(@Tenant() tenantId: string, @Request() req: RequestWithUser, @Param('id') id: string) {
     const ctx = this.getContext(tenantId, req);
     return this.jobService.retryJob(ctx, id);
   }
 
   @Get('jobs/stats')
   @Roles('admin')
-  async getJobStats(@Tenant() tenantId: string, @Request() req: any) {
+  async getJobStats(@Tenant() tenantId: string, @Request() req: RequestWithUser) {
     const ctx = this.getContext(tenantId, req);
     return this.jobService.getStats(ctx);
   }
@@ -254,7 +258,7 @@ export class OperationsController {
   @Roles('admin')
   async importCsv(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Param('entityType') entityType: 'products' | 'customers' | 'inventory',
     @Body('content') content: string,
     @Query('skipDuplicates') skipDuplicates?: string,
@@ -273,7 +277,7 @@ export class OperationsController {
   @Roles('admin')
   async importJson(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Param('entityType') entityType: 'products' | 'customers' | 'inventory',
     @Body('content') content: string,
     @Query('skipDuplicates') skipDuplicates?: string,
@@ -292,7 +296,7 @@ export class OperationsController {
   @Roles('admin')
   async scheduleImport(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Param('entityType') entityType: 'products' | 'customers' | 'inventory',
     @Body() body: { format: 'csv' | 'json'; content: string },
     @Query('skipDuplicates') skipDuplicates?: string,
@@ -319,7 +323,7 @@ export class OperationsController {
   @Roles('admin')
   async exportCsv(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Param('entityType') entityType: 'products' | 'customers' | 'inventory' | 'orders',
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
@@ -336,7 +340,7 @@ export class OperationsController {
   @Roles('admin')
   async exportJson(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Param('entityType') entityType: 'products' | 'customers' | 'inventory' | 'orders',
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
@@ -356,7 +360,7 @@ export class OperationsController {
   @Get('notifications')
   async getNotifications(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Query('types') types?: string,
     @Query('isRead') isRead?: string,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page?: number,
@@ -364,7 +368,7 @@ export class OperationsController {
   ) {
     const ctx = this.getContext(tenantId, req);
     return this.notificationService.findMany(ctx, {
-      userId: req?.user?.sub,
+      userId: req.user.userId,
       types: types ? types.split(',') : undefined,
       isRead: isRead !== undefined ? isRead === 'true' : undefined,
       page,
@@ -373,33 +377,33 @@ export class OperationsController {
   }
 
   @Get('notifications/unread-count')
-  async getUnreadCount(@Tenant() tenantId: string, @Request() req: any) {
+  async getUnreadCount(@Tenant() tenantId: string, @Request() req: RequestWithUser) {
     const ctx = this.getContext(tenantId, req);
-    const count = await this.notificationService.getUnreadCount(ctx, req?.user?.sub || '');
+    const count = await this.notificationService.getUnreadCount(ctx, req.user.userId);
     return { count };
   }
 
   @Get('notifications/:id')
-  async getNotification(@Tenant() tenantId: string, @Request() req: any, @Param('id') id: string) {
+  async getNotification(@Tenant() tenantId: string, @Request() req: RequestWithUser, @Param('id') id: string) {
     const ctx = this.getContext(tenantId, req);
     return this.notificationService.findOne(ctx, id);
   }
 
   @Put('notifications/:id/read')
-  async markAsRead(@Tenant() tenantId: string, @Request() req: any, @Param('id') id: string) {
+  async markAsRead(@Tenant() tenantId: string, @Request() req: RequestWithUser, @Param('id') id: string) {
     const ctx = this.getContext(tenantId, req);
     return this.notificationService.markAsRead(ctx, id);
   }
 
   @Put('notifications/read-all')
-  async markAllAsRead(@Tenant() tenantId: string, @Request() req: any) {
+  async markAllAsRead(@Tenant() tenantId: string, @Request() req: RequestWithUser) {
     const ctx = this.getContext(tenantId, req);
-    const count = await this.notificationService.markAllAsRead(ctx, req?.user?.sub || '');
+    const count = await this.notificationService.markAllAsRead(ctx, req.user.userId);
     return { marked: count };
   }
 
   @Put('notifications/read-many')
-  async markManyAsRead(@Tenant() tenantId: string, @Request() req: any, @Body('ids') ids: string[]) {
+  async markManyAsRead(@Tenant() tenantId: string, @Request() req: RequestWithUser, @Body('ids') ids: string[]) {
     const ctx = this.getContext(tenantId, req);
     const count = await this.notificationService.markManyAsRead(ctx, ids);
     return { marked: count };
@@ -407,15 +411,15 @@ export class OperationsController {
 
   @Delete('notifications/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async deleteNotification(@Tenant() tenantId: string, @Request() req: any, @Param('id') id: string) {
+  async deleteNotification(@Tenant() tenantId: string, @Request() req: RequestWithUser, @Param('id') id: string) {
     const ctx = this.getContext(tenantId, req);
     await this.notificationService.delete(ctx, id);
   }
 
   @Delete('notifications/read')
-  async deleteReadNotifications(@Tenant() tenantId: string, @Request() req: any) {
+  async deleteReadNotifications(@Tenant() tenantId: string, @Request() req: RequestWithUser) {
     const ctx = this.getContext(tenantId, req);
-    const count = await this.notificationService.deleteRead(ctx, req?.user?.sub || '');
+    const count = await this.notificationService.deleteRead(ctx, req.user.userId);
     return { deleted: count };
   }
 }

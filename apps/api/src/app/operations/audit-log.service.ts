@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { Prisma } from '@prisma/client';
 import { Response } from 'express';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -75,12 +76,12 @@ export class AuditLogService {
       offset?: number;
     }
   ) {
-    const where: any = { tenantId: ctx.tenantId };
+    const where: Prisma.AuditLogWhereInput = { tenantId: ctx.tenantId };
 
     if (filters.startDate || filters.endDate) {
       where.createdAt = {};
-      if (filters.startDate) where.createdAt.gte = filters.startDate;
-      if (filters.endDate) where.createdAt.lte = filters.endDate;
+      if (filters.startDate) (where.createdAt as any).gte = filters.startDate;
+      if (filters.endDate) (where.createdAt as any).lte = filters.endDate;
     }
 
     if (filters.userId) where.userId = filters.userId;
@@ -150,12 +151,12 @@ export class AuditLogService {
     },
     res: Response
   ): Promise<void> {
-    const where: any = { tenantId: ctx.tenantId };
+    const where: Prisma.AuditLogWhereInput = { tenantId: ctx.tenantId };
 
     if (filters.startDate || filters.endDate) {
       where.createdAt = {};
-      if (filters.startDate) where.createdAt.gte = filters.startDate;
-      if (filters.endDate) where.createdAt.lte = filters.endDate;
+      if (filters.startDate) (where.createdAt as any).gte = filters.startDate;
+      if (filters.endDate) (where.createdAt as any).lte = filters.endDate;
     }
 
     if (filters.userId) where.userId = filters.userId;
@@ -196,12 +197,12 @@ export class AuditLogService {
     ctx: TenantContext,
     options: { startDate?: Date; endDate?: Date }
   ) {
-    const where: any = { tenantId: ctx.tenantId };
+    const where: Prisma.AuditLogWhereInput = { tenantId: ctx.tenantId };
 
     if (options.startDate || options.endDate) {
       where.createdAt = {};
-      if (options.startDate) where.createdAt.gte = options.startDate;
-      if (options.endDate) where.createdAt.lte = options.endDate;
+      if (options.startDate) (where.createdAt as any).gte = options.startDate;
+      if (options.endDate) (where.createdAt as any).lte = options.endDate;
     }
 
     // Get counts by action

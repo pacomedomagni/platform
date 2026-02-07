@@ -9,7 +9,8 @@ import {
   UseGuards,
   Request,
 } from '@nestjs/common';
-import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
+import { Request as ExpressRequest } from 'express';
+import { AuthGuard, RolesGuard, Roles, AuthenticatedUser } from '@platform/auth';
 import { Tenant } from '../tenant.middleware';
 import { StockMovementService } from './stock-movement.service';
 import { BatchSerialService } from './batch-serial.service';
@@ -30,6 +31,10 @@ interface TenantContext {
   userId?: string;
 }
 
+interface RequestWithUser extends ExpressRequest {
+  user: AuthenticatedUser;
+}
+
 @Controller('inventory-management')
 @UseGuards(AuthGuard, RolesGuard)
 export class InventoryManagementController {
@@ -38,8 +43,8 @@ export class InventoryManagementController {
     private readonly batchSerial: BatchSerialService,
   ) {}
 
-  private getContext(tenantId: string, req: any): TenantContext {
-    return { tenantId, userId: req?.user?.sub };
+  private getContext(tenantId: string, req: RequestWithUser): TenantContext {
+    return { tenantId, userId: req.user.userId };
   }
 
   // ==========================================
@@ -50,7 +55,7 @@ export class InventoryManagementController {
   @Roles('admin', 'Stock Manager')
   async createMovement(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Body() dto: CreateStockMovementDto,
   ) {
     return this.stockMovement.createMovement(this.getContext(tenantId, req), dto);
@@ -60,7 +65,7 @@ export class InventoryManagementController {
   @Roles('admin', 'Stock Manager', 'user')
   async getMovements(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Query() query: StockMovementQueryDto,
   ) {
     return this.stockMovement.queryMovements(this.getContext(tenantId, req), query);
@@ -70,7 +75,7 @@ export class InventoryManagementController {
   @Roles('admin', 'Stock Manager')
   async getMovementSummary(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
@@ -85,7 +90,7 @@ export class InventoryManagementController {
   @Roles('admin', 'Stock Manager', 'user')
   async getItemMovements(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Param('itemCode') itemCode: string,
     @Query('limit') limit?: string,
   ) {
@@ -104,7 +109,7 @@ export class InventoryManagementController {
   @Roles('admin', 'Stock Manager')
   async createBatch(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Body() dto: CreateBatchDto,
   ) {
     return this.batchSerial.createBatch(this.getContext(tenantId, req), dto);
@@ -114,7 +119,7 @@ export class InventoryManagementController {
   @Roles('admin', 'Stock Manager', 'user')
   async getBatches(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Query() query: BatchQueryDto,
   ) {
     return this.batchSerial.queryBatches(this.getContext(tenantId, req), query);
@@ -124,7 +129,7 @@ export class InventoryManagementController {
   @Roles('admin', 'Stock Manager')
   async getExpiringBatches(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Query('daysAhead') daysAhead?: string,
   ) {
     return this.batchSerial.getExpiringBatches(
@@ -137,7 +142,7 @@ export class InventoryManagementController {
   @Roles('admin', 'Stock Manager', 'user')
   async getBatchDetails(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Param('id') id: string,
   ) {
     return this.batchSerial.getBatchDetails(this.getContext(tenantId, req), id);
@@ -147,7 +152,7 @@ export class InventoryManagementController {
   @Roles('admin', 'Stock Manager')
   async updateBatch(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Param('id') id: string,
     @Body() dto: UpdateBatchDto,
   ) {
@@ -162,7 +167,7 @@ export class InventoryManagementController {
   @Roles('admin', 'Stock Manager')
   async createSerial(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Body() dto: CreateSerialDto,
   ) {
     return this.batchSerial.createSerial(this.getContext(tenantId, req), dto);
@@ -172,7 +177,7 @@ export class InventoryManagementController {
   @Roles('admin', 'Stock Manager')
   async createSerialsBulk(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Body() dto: CreateSerialBulkDto,
   ) {
     return this.batchSerial.createSerialsBulk(this.getContext(tenantId, req), dto);
@@ -182,7 +187,7 @@ export class InventoryManagementController {
   @Roles('admin', 'Stock Manager', 'user')
   async getSerials(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Query() query: SerialQueryDto,
   ) {
     return this.batchSerial.querySerials(this.getContext(tenantId, req), query);
@@ -192,7 +197,7 @@ export class InventoryManagementController {
   @Roles('admin', 'Stock Manager', 'user')
   async getSerialHistory(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Param('serialNo') serialNo: string,
   ) {
     return this.batchSerial.getSerialHistory(this.getContext(tenantId, req), serialNo);
@@ -202,7 +207,7 @@ export class InventoryManagementController {
   @Roles('admin', 'Stock Manager')
   async updateSerial(
     @Tenant() tenantId: string,
-    @Request() req: any,
+    @Request() req: RequestWithUser,
     @Param('id') id: string,
     @Body() dto: UpdateSerialDto,
   ) {

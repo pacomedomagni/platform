@@ -3,6 +3,13 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { passportJwtSecret } from 'jwks-rsa';
 
+export interface AuthenticatedUser {
+  userId: string;
+  email: string;
+  roles: string[];
+  tenantId: string;
+}
+
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor() {
@@ -32,7 +39,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: any) {
+  async validate(payload: any): Promise<AuthenticatedUser> {
     // This payload is the decoded JWT
     // Return user context for the Request object
     return {

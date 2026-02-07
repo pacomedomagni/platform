@@ -1,6 +1,11 @@
 import { Controller, Post, Get, Body, UseGuards, Req, HttpCode, HttpStatus } from '@nestjs/common';
-import { AuthGuard } from '@platform/auth';
+import { AuthGuard, AuthenticatedUser } from '@platform/auth';
 import { MerchantVerificationService } from './merchant-verification.service';
+import { Request } from 'express';
+
+interface RequestWithUser extends Request {
+  user: AuthenticatedUser;
+}
 
 @Controller('onboarding')
 export class MerchantVerificationController {
@@ -23,8 +28,8 @@ export class MerchantVerificationController {
   @Post('resend-verification')
   @UseGuards(AuthGuard)
   @HttpCode(HttpStatus.OK)
-  async resendVerification(@Req() req: any) {
-    const userId = req.user?.id || req.user?.sub;
+  async resendVerification(@Req() req: RequestWithUser) {
+    const userId = req.user.userId;
     return this.verificationService.resendVerificationEmail(userId);
   }
 
@@ -34,8 +39,8 @@ export class MerchantVerificationController {
    */
   @Get('email-status')
   @UseGuards(AuthGuard)
-  async getEmailStatus(@Req() req: any) {
-    const userId = req.user?.id || req.user?.sub;
+  async getEmailStatus(@Req() req: RequestWithUser) {
+    const userId = req.user.userId;
     return this.verificationService.getEmailStatus(userId);
   }
 }

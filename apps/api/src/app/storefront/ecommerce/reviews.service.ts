@@ -1,12 +1,30 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { Prisma } from '@prisma/client';
 import {
   CreateReviewDto,
   ReviewVoteDto,
   ModerateReviewDto,
   AdminRespondDto,
 } from './dto';
+
+type ReviewWithRelations = Prisma.ProductReviewGetPayload<{
+  include: {
+    customer: {
+      select: {
+        firstName: true;
+        lastName: true;
+      };
+    };
+    productListing: {
+      select: {
+        displayName: true;
+        slug: true;
+      };
+    };
+  };
+}>;
 
 @Injectable()
 export class ReviewsService {
@@ -22,7 +40,7 @@ export class ReviewsService {
     const { page = 1, limit = 10, rating } = options;
     const skip = (page - 1) * limit;
 
-    const where: any = {
+    const where: Prisma.ProductReviewWhereInput = {
       tenantId,
       productListingId,
       status: 'approved',
@@ -221,7 +239,7 @@ export class ReviewsService {
     const { page = 1, limit = 20, status, productId } = options;
     const skip = (page - 1) * limit;
 
-    const where: any = { tenantId };
+    const where: Prisma.ProductReviewWhereInput = { tenantId };
     if (status) where.status = status;
     if (productId) where.productListingId = productId;
 
@@ -338,7 +356,7 @@ export class ReviewsService {
     });
   }
 
-  private mapReviewToResponse(review: any) {
+  private mapReviewToResponse(review: ReviewWithRelations) {
     return {
       id: review.id,
       rating: review.rating,

@@ -1,9 +1,13 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { Injectable, Logger, NotFoundException, BadRequestException, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { EmailService } from '@platform/email';
 import { Prisma } from '@prisma/client';
 import { ListOrdersDto } from './dto';
+
+type OrderWithItems = Prisma.OrderGetPayload<{
+  include: { items: true };
+}>;
 
 // PAY-13: Valid order status transitions
 const VALID_ORDER_TRANSITIONS: Record<string, string[]> = {
@@ -251,7 +255,7 @@ export class OrdersService {
       );
     }
 
-    const updateData: any = { status };
+    const updateData: Prisma.OrderUpdateInput = { status };
 
     if (status === 'SHIPPED') {
       updateData.shippedAt = new Date();
@@ -358,7 +362,7 @@ export class OrdersService {
 
   // ============ HELPERS ============
 
-  private mapOrderToDetail(order: any) {
+  private mapOrderToDetail(order: OrderWithItems) {
     return {
       id: order.id,
       orderNumber: order.orderNumber,
@@ -392,7 +396,7 @@ export class OrdersService {
             country: order.billingCountry,
           }
         : null,
-      items: order.items.map((item: any) => ({
+      items: order.items.map((item) => ({
         id: item.id,
         name: item.name,
         quantity: item.quantity,

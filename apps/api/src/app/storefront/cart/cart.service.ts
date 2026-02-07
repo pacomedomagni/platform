@@ -6,9 +6,27 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
-import { Prisma } from '@prisma/client';
+import { Prisma, WarehouseItemBalance } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import { AddToCartDto, UpdateCartItemDto } from './dto';
+
+type CartWithRelations = Prisma.CartGetPayload<{
+  include: {
+    items: {
+      include: {
+        product: {
+          include: {
+            item: {
+              include: {
+                warehouseItemBalances: true,
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+}>;
 
 // Tax rate - in production, this would come from tenant settings or tax service
 const DEFAULT_TAX_RATE = 0.0825; // 8.25%
@@ -660,7 +678,7 @@ export class CartService {
    * Increments reservedQty in warehouse balances
    */
   private async reserveStock(
-    tx: any,
+    tx: Prisma.TransactionClient,
     tenantId: string,
     itemId: string,
     quantity: number
@@ -705,7 +723,7 @@ export class CartService {
    * Decrements reservedQty in warehouse balances
    */
   private async releaseReservation(
-    tx: any,
+    tx: Prisma.TransactionClient,
     tenantId: string,
     itemId: string,
     quantity: number
@@ -740,7 +758,7 @@ export class CartService {
    * Adjusts reservedQty by the delta (can be positive or negative)
    */
   private async updateReservation(
-    tx: any,
+    tx: Prisma.TransactionClient,
     tenantId: string,
     itemId: string,
     oldQuantity: number,
@@ -763,7 +781,7 @@ export class CartService {
    * Called when cart is cleared or expired
    */
   private async releaseAllReservations(
-    tx: any,
+    tx: Prisma.TransactionClient,
     tenantId: string,
     cartId: string
   ): Promise<void> {
@@ -878,7 +896,7 @@ export class CartService {
    * Recalculate cart totals within a transaction
    * Used by transactional methods to avoid nested transactions
    */
-  private async recalculateCartInTx(tx: any, cartId: string) {
+  private async recalculateCartInTx(tx: Prisma.TransactionClient, cartId: string) {
     const cart = await tx.cart.findUnique({
       where: { id: cartId },
       include: {
@@ -972,14 +990,14 @@ export class CartService {
     },
   };
 
-  private mapCartToResponse(cart: any) {
+  private mapCartToResponse(cart: CartWithRelations) {
     return {
       id: cart.id,
       customerId: cart.customerId,
       sessionToken: cart.sessionToken,
-      items: cart.items.map((item: any) => {
-        const availableQty = item.product.item.warehouseItemBalances.reduce(
-          (sum: number, b: any) => sum + Number(b.actualQty) - Number(b.reservedQty),
+      items: cart.items.map((item) => {
+        const availableQty = item.product.item!.warehouseItemBalances.reduce(
+          (sum: number, b: WarehouseItemBalance) => sum + Number(b.actualQty) - Number(b.reservedQty),
           0
         );
 
@@ -1006,7 +1024,7 @@ export class CartService {
           totalPrice: Number(item.price) * item.quantity,
         };
       }),
-      itemCount: cart.items.reduce((sum: number, item: any) => sum + item.quantity, 0),
+      itemCount: cart.items.reduce((sum: number, item) => sum + item.quantity, 0),
       subtotal: Number(cart.subtotal),
       shippingTotal: Number(cart.shippingTotal),
       taxTotal: Number(cart.taxTotal),
