@@ -24,6 +24,8 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
 import { SentryInterceptor } from './sentry/sentry.interceptor';
 import { EmailWorker } from './workers/email.worker';
+import { WorkersModule } from './workers/workers.module';
+import { MonitoringModule } from './monitoring/monitoring.module';
 
 @Module({
   imports: [
@@ -62,6 +64,8 @@ import { EmailWorker } from './workers/email.worker';
     InventoryManagementModule,
     CurrencyModule,
     MarketplaceIntegrationsModule,
+    WorkersModule,
+    MonitoringModule,
   ],
   controllers: [AppController, InventoryController, ReportsController],
   providers: [

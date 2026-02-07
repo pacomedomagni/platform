@@ -22,6 +22,7 @@ import { OnboardingController } from './onboarding/onboarding.controller';
 import { OnboardingService } from './onboarding/onboarding.service';
 import { ThemesModule } from './themes/themes.module';
 import { InventoryManagementModule } from '../inventory-management/inventory-management.module';
+import { WorkersModule } from '../workers/workers.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { InventoryManagementModule } from '../inventory-management/inventory-man
     I18nModule,
     ThemesModule,
     InventoryManagementModule,
+    WorkersModule,
     EmailModule.forRoot({
       smtp: {
         host: process.env['SMTP_HOST'] || 'localhost',

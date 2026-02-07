@@ -10,6 +10,7 @@ import {
   BadRequestException,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { CustomerAuthService } from './customer-auth.service';
 import {
   RegisterCustomerDto,
@@ -30,6 +31,7 @@ export class CustomerAuthController {
    * POST /api/v1/store/auth/register
    */
   @Post('register')
+  @Throttle({ medium: { limit: 5, ttl: 60000 } }) // 5 registrations per minute
   async register(
     @Headers('x-tenant-id') tenantId: string,
     @Body() dto: RegisterCustomerDto
@@ -45,6 +47,7 @@ export class CustomerAuthController {
    * POST /api/v1/store/auth/login
    */
   @Post('login')
+  @Throttle({ medium: { limit: 10, ttl: 60000 } }) // 10 login attempts per minute
   async login(
     @Headers('x-tenant-id') tenantId: string,
     @Body() dto: LoginCustomerDto
@@ -131,6 +134,7 @@ export class CustomerAuthController {
    * POST /api/v1/store/auth/forgot-password
    */
   @Post('forgot-password')
+  @Throttle({ medium: { limit: 3, ttl: 60000 } }) // 3 requests per minute to prevent email spam
   async forgotPassword(
     @Headers('x-tenant-id') tenantId: string,
     @Body() dto: ForgotPasswordDto
@@ -146,6 +150,7 @@ export class CustomerAuthController {
    * POST /api/v1/store/auth/reset-password
    */
   @Post('reset-password')
+  @Throttle({ medium: { limit: 5, ttl: 60000 } }) // 5 attempts per minute
   async resetPassword(
     @Headers('x-tenant-id') tenantId: string,
     @Body() dto: ResetPasswordDto

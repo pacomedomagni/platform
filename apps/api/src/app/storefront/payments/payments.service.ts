@@ -3,7 +3,9 @@ import { PrismaService } from '@platform/db';
 import { StripeService } from './stripe.service';
 import { EmailService } from '@platform/email';
 import { StockMovementService } from '../../inventory-management/stock-movement.service';
+import { FailedOperationsService } from '../../workers/failed-operations.service';
 import { MovementType } from '../../inventory-management/inventory-management.dto';
+import { OperationType } from '@prisma/client';
 import Stripe from 'stripe';
 
 @Injectable()
@@ -14,6 +16,7 @@ export class PaymentsService {
     private readonly prisma: PrismaService,
     private readonly stripeService: StripeService,
     private readonly stockMovementService: StockMovementService,
+    private readonly failedOperationsService: FailedOperationsService,
     @Optional() @Inject(EmailService) private readonly emailService?: EmailService
   ) {}
 
@@ -158,32 +161,81 @@ export class PaymentsService {
    * CRITICAL: Must be executed after payment succeeds to prevent overselling
    */
   private async processOrderFulfillment(order: any) {
+    // 1. Deduct stock from inventory
     try {
-      // 1. Deduct stock from inventory
       await this.deductStockForOrder(order);
-
-      // 2. Track coupon usage
-      await this.trackCouponUsage(order);
-
-      this.logger.log(`Order fulfillment completed for: ${order.orderNumber}`);
+      this.logger.log(`Stock deducted for order: ${order.orderNumber}`);
     } catch (error) {
-      this.logger.error(`CRITICAL: Order fulfillment failed for ${order.orderNumber}:`, error);
+      this.logger.error(`CRITICAL: Stock deduction failed for ${order.orderNumber}:`, error);
 
-      // TODO: Implement failed operations table for retry mechanism
-      // For now, just log the error - requires manual intervention
-      this.logger.error(`Manual intervention required for order ${order.orderNumber}`, {
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-        error: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
+      // Record failed operation for automatic retry
+      await this.failedOperationsService.recordFailedOperation({
+        tenantId: order.tenantId,
+        operationType: OperationType.STOCK_DEDUCTION,
+        referenceId: order.id,
+        referenceType: 'order',
+        payload: {
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          items: order.items.map((item: any) => ({
+            itemCode: item.product.item.code,
+            quantity: item.quantity,
+            rate: Number(item.unitPrice),
+          })),
+          warehouseId: order.warehouseId || null, // Will be determined in retry
+        },
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
       });
 
-      // Don't throw - payment already captured, need manual intervention
+      this.logger.warn(`Stock deduction queued for retry: order ${order.orderNumber}`);
     }
+
+    // 2. Track coupon usage
+    try {
+      await this.trackCouponUsage(order);
+      if (Number(order.discountTotal) > 0) {
+        this.logger.log(`Coupon usage tracked for order: ${order.orderNumber}`);
+      }
+    } catch (error) {
+      this.logger.error(`CRITICAL: Coupon tracking failed for ${order.orderNumber}:`, error);
+
+      // Record failed operation for automatic retry
+      if (order.cart?.couponCode) {
+        const coupon = await this.prisma.coupon.findFirst({
+          where: {
+            tenantId: order.tenantId,
+            code: order.cart.couponCode,
+          },
+        });
+
+        if (coupon) {
+          await this.failedOperationsService.recordFailedOperation({
+            tenantId: order.tenantId,
+            operationType: OperationType.COUPON_TRACKING,
+            referenceId: order.id,
+            referenceType: 'order',
+            payload: {
+              orderId: order.id,
+              orderNumber: order.orderNumber,
+              couponId: coupon.id,
+              customerId: order.customerId,
+            },
+            errorMessage: error instanceof Error ? error.message : String(error),
+            errorStack: error instanceof Error ? error.stack : undefined,
+          });
+
+          this.logger.warn(`Coupon tracking queued for retry: order ${order.orderNumber}`);
+        }
+      }
+    }
+
+    this.logger.log(`Order fulfillment completed for: ${order.orderNumber}`);
   }
 
   /**
    * Deduct stock for order items
+   * Also releases stock reservations made during checkout
    */
   private async deductStockForOrder(order: any) {
     if (!order.items || order.items.length === 0) {
@@ -211,7 +263,7 @@ export class PaymentsService {
       rate: Number(orderItem.unitPrice),
     }));
 
-    // Issue stock via stock movement service
+    // Issue stock via stock movement service (this decrements actualQty)
     await this.stockMovementService.createMovement(
       { tenantId: order.tenantId },
       {
@@ -224,7 +276,30 @@ export class PaymentsService {
       }
     );
 
-    this.logger.log(`Stock deducted for order: ${order.orderNumber}`);
+    // Release stock reservations (decrement reservedQty)
+    // Stock was reserved during checkout, now we release it since actualQty was already decremented
+    await this.releaseStockReservations(order, warehouse.id);
+
+    this.logger.log(`Stock deducted and reservations released for order: ${order.orderNumber}`);
+  }
+
+  /**
+   * Release stock reservations for order items
+   * Called after stock movement is created (actualQty already decremented)
+   */
+  private async releaseStockReservations(order: any, warehouseId: string) {
+    for (const orderItem of order.items) {
+      await this.prisma.warehouseItemBalance.updateMany({
+        where: {
+          tenantId: order.tenantId,
+          itemId: orderItem.product.item.id,
+          warehouseId,
+        },
+        data: {
+          reservedQty: { decrement: orderItem.quantity },
+        },
+      });
+    }
   }
 
   /**
@@ -468,10 +543,14 @@ export class PaymentsService {
       throw new BadRequestException('Order payment must be captured before refunding');
     }
 
+    // Generate deterministic idempotency key to prevent duplicate refunds on retry
+    const idempotencyKey = `refund_${tenantId}_${orderId}_${amount || 'full'}`;
+
     const refund = await this.stripeService.createRefund(
       order.stripePaymentIntentId,
       amount,
-      reason
+      reason,
+      idempotencyKey
     );
 
     // Record will be created via webhook, but we can return preliminary info

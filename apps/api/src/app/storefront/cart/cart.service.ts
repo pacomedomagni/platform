@@ -202,6 +202,9 @@ export class CartService {
         },
       });
 
+      // Reserve stock for this item
+      await this.reserveStock(tx, tenantId, product.item.id, dto.quantity);
+
       // Recalculate cart totals
       await this.recalculateCartInTx(tx, cartId);
 
@@ -232,83 +235,155 @@ export class CartService {
     itemId: string,
     dto: UpdateCartItemDto
   ) {
-    const cartItem = await this.prisma.cartItem.findFirst({
-      where: {
-        id: itemId,
-        cartId,
-        cart: { tenantId },
-      },
-      include: {
-        product: {
-          include: {
-            item: {
-              include: {
-                warehouseItemBalances: true,
+    return this.prisma.$transaction(async (tx) => {
+      const cartItem = await tx.cartItem.findFirst({
+        where: {
+          id: itemId,
+          cartId,
+          cart: { tenantId },
+        },
+        include: {
+          product: {
+            include: {
+              item: {
+                include: {
+                  warehouseItemBalances: true,
+                },
               },
             },
           },
         },
-      },
-    });
-
-    if (!cartItem) {
-      throw new NotFoundException('Cart item not found');
-    }
-
-    if (dto.quantity === 0) {
-      // Remove item
-      await this.prisma.cartItem.delete({
-        where: { id: itemId },
       });
-    } else {
-      // Check stock
-      const availableQty = cartItem.product.item.warehouseItemBalances.reduce(
-        (sum, b) => sum + Number(b.actualQty) - Number(b.reservedQty),
-        0
-      );
 
-      if (dto.quantity > availableQty) {
-        throw new BadRequestException(
-          `Only ${availableQty} items available in stock`
-        );
+      if (!cartItem) {
+        throw new NotFoundException('Cart item not found');
       }
 
-      await this.prisma.cartItem.update({
-        where: { id: itemId },
-        data: { quantity: dto.quantity },
+      const oldQuantity = cartItem.quantity;
+
+      if (dto.quantity === 0) {
+        // Remove item and release reservation
+        await this.releaseReservation(
+          tx,
+          tenantId,
+          cartItem.product.item.id,
+          oldQuantity
+        );
+        await tx.cartItem.delete({
+          where: { id: itemId },
+        });
+      } else {
+        // Acquire advisory lock to prevent concurrent stock modifications
+        const itemKey = `${tenantId}:${cartItem.product.item.id}`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${itemKey}))`;
+
+        // Check stock (including current reservation)
+        const balances = await tx.warehouseItemBalance.findMany({
+          where: {
+            tenantId,
+            itemId: cartItem.product.item.id,
+          },
+        });
+
+        const availableQty = balances.reduce(
+          (sum, b) => sum + Number(b.actualQty) - Number(b.reservedQty),
+          0
+        );
+
+        // Add back the current reservation to get true available
+        const trueAvailable = availableQty + oldQuantity;
+
+        if (dto.quantity > trueAvailable) {
+          throw new BadRequestException(
+            `Only ${trueAvailable} items available in stock`
+          );
+        }
+
+        // Update reservation
+        await this.updateReservation(
+          tx,
+          tenantId,
+          cartItem.product.item.id,
+          oldQuantity,
+          dto.quantity
+        );
+
+        // Update cart item
+        await tx.cartItem.update({
+          where: { id: itemId },
+          data: { quantity: dto.quantity },
+        });
+      }
+
+      // Recalculate cart totals
+      await this.recalculateCartInTx(tx, cartId);
+
+      // Return cart data
+      const cart = await tx.cart.findFirst({
+        where: { id: cartId, tenantId, status: 'active' },
+        include: this.cartInclude,
       });
-    }
 
-    // Recalculate cart totals
-    await this.recalculateCart(cartId);
+      if (!cart) {
+        throw new NotFoundException('Cart not found');
+      }
 
-    return this.getCart(tenantId, cartId);
+      return this.mapCartToResponse(cart);
+    });
   }
 
   /**
    * Remove item from cart
    */
   async removeItem(tenantId: string, cartId: string, itemId: string) {
-    const cartItem = await this.prisma.cartItem.findFirst({
-      where: {
-        id: itemId,
-        cartId,
-        cart: { tenantId },
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const cartItem = await tx.cartItem.findFirst({
+        where: {
+          id: itemId,
+          cartId,
+          cart: { tenantId },
+        },
+        include: {
+          product: {
+            include: {
+              item: true,
+            },
+          },
+        },
+      });
+
+      if (!cartItem) {
+        throw new NotFoundException('Cart item not found');
+      }
+
+      // Release stock reservation
+      await this.releaseReservation(
+        tx,
+        tenantId,
+        cartItem.product.item.id,
+        cartItem.quantity
+      );
+
+      // Remove item
+      await tx.cartItem.delete({
+        where: { id: itemId },
+      });
+
+      // Recalculate cart totals
+      await this.recalculateCartInTx(tx, cartId);
+
+      // Return cart data
+      const cart = await tx.cart.findFirst({
+        where: { id: cartId, tenantId, status: 'active' },
+        include: this.cartInclude,
+      });
+
+      if (!cart) {
+        throw new NotFoundException('Cart not found');
+      }
+
+      return this.mapCartToResponse(cart);
     });
-
-    if (!cartItem) {
-      throw new NotFoundException('Cart item not found');
-    }
-
-    await this.prisma.cartItem.delete({
-      where: { id: itemId },
-    });
-
-    // Recalculate cart totals
-    await this.recalculateCart(cartId);
-
-    return this.getCart(tenantId, cartId);
   }
 
   /**
@@ -534,26 +609,182 @@ export class CartService {
    * Clear cart
    */
   async clearCart(tenantId: string, cartId: string) {
-    await this.prisma.cartItem.deleteMany({
-      where: { cartId },
-    });
+    return this.prisma.$transaction(async (tx) => {
+      // Release all stock reservations
+      await this.releaseAllReservations(tx, tenantId, cartId);
 
-    await this.prisma.cart.update({
-      where: { id: cartId },
-      data: {
-        subtotal: 0,
-        shippingTotal: 0,
-        taxTotal: 0,
-        discountAmount: 0,
-        grandTotal: 0,
-        couponCode: null,
-      },
-    });
+      // Delete cart items
+      await tx.cartItem.deleteMany({
+        where: { cartId },
+      });
 
-    return this.getCart(tenantId, cartId);
+      // Reset cart totals
+      await tx.cart.update({
+        where: { id: cartId },
+        data: {
+          subtotal: 0,
+          shippingTotal: 0,
+          taxTotal: 0,
+          discountAmount: 0,
+          grandTotal: 0,
+          couponCode: null,
+        },
+      });
+
+      // Return cart data
+      const cart = await tx.cart.findFirst({
+        where: { id: cartId, tenantId, status: 'active' },
+        include: this.cartInclude,
+      });
+
+      if (!cart) {
+        throw new NotFoundException('Cart not found');
+      }
+
+      return this.mapCartToResponse(cart);
+    });
   }
 
   // ============ INTERNAL HELPERS ============
+
+  /**
+   * Reserve stock for a cart item
+   * Increments reservedQty in warehouse balances
+   */
+  private async reserveStock(
+    tx: any,
+    tenantId: string,
+    itemId: string,
+    quantity: number
+  ): Promise<void> {
+    // Get default warehouse (in production, this would be based on location/shipping address)
+    const warehouse = await tx.warehouse.findFirst({
+      where: {
+        tenantId,
+        isActive: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    if (!warehouse) {
+      throw new BadRequestException('No active warehouse found');
+    }
+
+    // Atomically increment reservedQty
+    await tx.warehouseItemBalance.upsert({
+      where: {
+        tenantId_itemId_warehouseId: {
+          tenantId,
+          itemId,
+          warehouseId: warehouse.id,
+        },
+      },
+      update: {
+        reservedQty: { increment: quantity },
+      },
+      create: {
+        tenantId,
+        itemId,
+        warehouseId: warehouse.id,
+        actualQty: 0,
+        reservedQty: quantity,
+      },
+    });
+  }
+
+  /**
+   * Release stock reservation for a cart item
+   * Decrements reservedQty in warehouse balances
+   */
+  private async releaseReservation(
+    tx: any,
+    tenantId: string,
+    itemId: string,
+    quantity: number
+  ): Promise<void> {
+    const warehouse = await tx.warehouse.findFirst({
+      where: {
+        tenantId,
+        isActive: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    if (!warehouse) {
+      return; // Silently skip if no warehouse
+    }
+
+    // Atomically decrement reservedQty
+    await tx.warehouseItemBalance.updateMany({
+      where: {
+        tenantId,
+        itemId,
+        warehouseId: warehouse.id,
+      },
+      data: {
+        reservedQty: { decrement: quantity },
+      },
+    });
+  }
+
+  /**
+   * Update stock reservation when cart item quantity changes
+   * Adjusts reservedQty by the delta (can be positive or negative)
+   */
+  private async updateReservation(
+    tx: any,
+    tenantId: string,
+    itemId: string,
+    oldQuantity: number,
+    newQuantity: number
+  ): Promise<void> {
+    const delta = newQuantity - oldQuantity;
+    if (delta === 0) return;
+
+    if (delta > 0) {
+      // Increased quantity - reserve more stock
+      await this.reserveStock(tx, tenantId, itemId, delta);
+    } else {
+      // Decreased quantity - release some reservation
+      await this.releaseReservation(tx, tenantId, itemId, Math.abs(delta));
+    }
+  }
+
+  /**
+   * Release all stock reservations for a cart
+   * Called when cart is cleared or expired
+   */
+  private async releaseAllReservations(
+    tx: any,
+    tenantId: string,
+    cartId: string
+  ): Promise<void> {
+    const cart = await tx.cart.findUnique({
+      where: { id: cartId },
+      include: {
+        items: {
+          include: {
+            product: {
+              include: {
+                item: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!cart) return;
+
+    for (const item of cart.items) {
+      await this.releaseReservation(
+        tx,
+        tenantId,
+        item.product.item.id,
+        item.quantity
+      );
+    }
+  }
 
   /**
    * Recalculate cart totals

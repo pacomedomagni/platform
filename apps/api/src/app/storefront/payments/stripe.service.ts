@@ -29,11 +29,17 @@ export class StripeService {
 
   /**
    * Create a Payment Intent
+   *
+   * @param amount - Amount in dollars (will be converted to cents)
+   * @param currency - Currency code (default: 'usd')
+   * @param metadata - Custom metadata to attach to the payment intent
+   * @param idempotencyKey - Optional idempotency key for retry safety
    */
   async createPaymentIntent(
     amount: number,
     currency = 'usd',
-    metadata: Record<string, string> = {}
+    metadata: Record<string, string> = {},
+    idempotencyKey?: string
   ): Promise<Stripe.PaymentIntent> {
     if (!this.stripe) {
       throw new BadRequestException('Payment processing is not configured');
@@ -42,16 +48,23 @@ export class StripeService {
     // Convert amount to cents
     const amountInCents = Math.round(amount * 100);
 
-    const paymentIntent = await this.stripe.paymentIntents.create({
-      amount: amountInCents,
-      currency: currency.toLowerCase(),
-      automatic_payment_methods: {
-        enabled: true,
-      },
-      metadata,
-    });
+    // Generate idempotency key if not provided
+    // Use orderId from metadata to create stable key
+    const key = idempotencyKey || (metadata.orderId ? `pi_${metadata.orderId}` : undefined);
 
-    this.logger.log(`Created PaymentIntent: ${paymentIntent.id} for ${amount} ${currency}`);
+    const paymentIntent = await this.stripe.paymentIntents.create(
+      {
+        amount: amountInCents,
+        currency: currency.toLowerCase(),
+        automatic_payment_methods: {
+          enabled: true,
+        },
+        metadata,
+      },
+      key ? { idempotencyKey: key } : undefined
+    );
+
+    this.logger.log(`Created PaymentIntent: ${paymentIntent.id} for ${amount} ${currency} (key: ${key || 'none'})`);
 
     return paymentIntent;
   }
@@ -91,11 +104,17 @@ export class StripeService {
 
   /**
    * Create a refund
+   *
+   * @param paymentIntentId - The payment intent to refund
+   * @param amount - Optional partial refund amount in dollars (will be converted to cents)
+   * @param reason - Reason for the refund
+   * @param idempotencyKey - Optional idempotency key for retry safety
    */
   async createRefund(
     paymentIntentId: string,
     amount?: number,
-    reason?: 'duplicate' | 'fraudulent' | 'requested_by_customer'
+    reason?: 'duplicate' | 'fraudulent' | 'requested_by_customer',
+    idempotencyKey?: string
   ): Promise<Stripe.Refund> {
     if (!this.stripe) {
       throw new BadRequestException('Payment processing is not configured');
@@ -113,9 +132,15 @@ export class StripeService {
       refundData.reason = reason;
     }
 
-    const refund = await this.stripe.refunds.create(refundData);
+    // Generate idempotency key if not provided
+    const key = idempotencyKey || `refund_${paymentIntentId}_${Date.now()}`;
 
-    this.logger.log(`Created refund: ${refund.id} for PaymentIntent: ${paymentIntentId}`);
+    const refund = await this.stripe.refunds.create(
+      refundData,
+      { idempotencyKey: key }
+    );
+
+    this.logger.log(`Created refund: ${refund.id} for PaymentIntent: ${paymentIntentId} (key: ${key})`);
 
     return refund;
   }

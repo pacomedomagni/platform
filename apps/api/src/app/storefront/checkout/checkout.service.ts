@@ -146,6 +146,9 @@ export class CheckoutService {
     // Create Stripe Payment Intent
     let stripeClientSecret: string | null = null;
     try {
+      // Generate deterministic idempotency key to prevent duplicate charges on retry
+      const idempotencyKey = `pi_${tenantId}_${order.id}`;
+
       const paymentIntent = await this.stripeService.createPaymentIntent(
         Number(cart.grandTotal),
         'usd',
@@ -154,7 +157,8 @@ export class CheckoutService {
           orderNumber: order.orderNumber,
           tenantId,
           customerEmail: dto.email,
-        }
+        },
+        idempotencyKey
       );
 
       // Update order with Stripe payment intent ID

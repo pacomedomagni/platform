@@ -90,6 +90,7 @@ model Tenant {
   marketplaceOrders          MarketplaceOrder[]
   marketplaceActiveListings  MarketplaceActiveListing[]
   marketplaceSyncLogs        MarketplaceSyncLog[]
+  failedOperations           FailedOperation[]
 
   @@map("tenants")
 }
@@ -233,6 +234,7 @@ model Warehouse {
 
   locations Location[]
 
+  deletedAt             DateTime?
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
   warehouseItemBalances WarehouseItemBalance[]
@@ -268,6 +270,7 @@ model Location {
   isStaging  Boolean @default(false)
   isActive   Boolean @default(true)
 
+  deletedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -2644,4 +2647,55 @@ model MarketplaceSyncLog {
   @@index([tenantId, connectionId])
   @@index([syncType, status])
   @@map("marketplace_sync_logs")
+}
+
+// Failed Operations - Track operations that failed and need retry
+model FailedOperation {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  operationType OperationType
+  status        OperationStatus @default(PENDING)
+
+  // Reference to the entity this operation is for (e.g., orderId, paymentId)
+  referenceId   String
+  referenceType String // order, payment, webhook, etc.
+
+  // Operation payload (e.g., stock deduction items, coupon code, email data)
+  payload Json
+
+  // Error tracking
+  errorMessage String?
+  errorStack   String?
+
+  // Retry tracking
+  attemptCount  Int       @default(0)
+  maxAttempts   Int       @default(3)
+  nextRetryAt   DateTime?
+  lastAttemptAt DateTime?
+  succeededAt   DateTime?
+  failedAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@index([nextRetryAt])
+  @@index([referenceId, referenceType])
+  @@map("failed_operations")
+}
+
+enum OperationType {
+  STOCK_DEDUCTION
+  COUPON_TRACKING
+  EMAIL_SEND
+  WEBHOOK_DELIVERY
+}
+
+enum OperationStatus {
+  PENDING
+  RETRYING
+  FAILED
+  SUCCEEDED
 }
