@@ -106,7 +106,7 @@ NEXT_PUBLIC_API_URL=http://localhost/api/v1
 
 # Stripe Configuration (Optional)
 STRIPE_SECRET_KEY=sk_test_your_key_here
-STRIPE_PUBLISHABLE_KEY=pk_test_your_key_here
+STRIPE_PUBLIC_KEY=pk_test_your_key_here
 STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret_here
 
 # PgAdmin Configuration

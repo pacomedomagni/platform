@@ -3,7 +3,7 @@
 -- Lead (Prospective customers)
 CREATE TABLE leads (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     
@@ -70,7 +70,7 @@ CREATE INDEX idx_leads_email ON leads(tenant_id, email);
 -- Opportunity (Sales deals in pipeline)
 CREATE TABLE opportunities (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     
@@ -136,7 +136,7 @@ CREATE INDEX idx_opportunities_closing ON opportunities(tenant_id, expected_clos
 -- Activity (Calls, Meetings, Tasks)
 CREATE TABLE activities (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     
@@ -200,7 +200,7 @@ CREATE INDEX idx_activities_reference ON activities(tenant_id, reference_doctype
 -- Campaign (Marketing campaigns)
 CREATE TABLE campaigns (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     campaign_name VARCHAR(500),
@@ -240,7 +240,7 @@ CREATE INDEX idx_campaigns_dates ON campaigns(tenant_id, start_date, end_date);
 -- Email Campaign (Drip sequences)
 CREATE TABLE email_campaigns (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     

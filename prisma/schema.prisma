@@ -66,6 +66,7 @@ model Tenant {
   orderItems              OrderItem[]
   payments                Payment[]
   coupons                 Coupon[]
+  couponUsages            CouponUsage[]
 
   // Phase 2 E-commerce
   itemAttributeTypes   ItemAttributeType[]
@@ -1159,6 +1160,7 @@ model StoreCustomer {
   reviews                 ProductReview[]
   wishlists               Wishlist[]
   emailPreferences        StoreCustomerPreferences?
+  couponUsages            CouponUsage[]
 
   @@unique([tenantId, email])
   @@index([tenantId, isActive])
@@ -1402,6 +1404,7 @@ model Order {
   items              OrderItem[]
   payments           Payment[]
   giftCardsUsed      GiftCardTransaction[]
+  couponUsage        CouponUsage?
   giftCardsGenerated GiftCard[]            @relation("GiftCardSource")
   shipments          Shipment[]
   marketplaceOrder   MarketplaceOrder?
@@ -1532,9 +1535,34 @@ model Coupon {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  usages CouponUsage[]
+
   @@unique([tenantId, code])
   @@index([tenantId, isActive])
   @@map("coupons")
+}
+
+// Coupon usage tracking
+model CouponUsage {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  couponId String
+  coupon   Coupon @relation(fields: [couponId], references: [id], onDelete: Cascade)
+
+  customerId String?
+  customer   StoreCustomer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  orderId String @unique
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  usedAt DateTime @default(now())
+
+  @@unique([tenantId, couponId, customerId, orderId])
+  @@index([tenantId, couponId])
+  @@index([tenantId, customerId])
+  @@map("coupon_usages")
 }
 
 // ==================== PHASE 2: E-COMMERCE ENHANCEMENTS ====================

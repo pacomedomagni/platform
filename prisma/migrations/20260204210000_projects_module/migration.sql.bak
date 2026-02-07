@@ -3,7 +3,7 @@
 -- Project
 CREATE TABLE projects (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     project_name VARCHAR(500),
@@ -66,7 +66,7 @@ CREATE INDEX idx_projects_dates ON projects(tenant_id, expected_start_date, expe
 -- Task
 CREATE TABLE tasks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     subject VARCHAR(500) NOT NULL,
@@ -131,7 +131,7 @@ CREATE INDEX idx_tasks_parent ON tasks(tenant_id, parent_task);
 -- Milestone
 CREATE TABLE milestones (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     milestone_title VARCHAR(500),
@@ -160,7 +160,7 @@ CREATE INDEX idx_milestones_project ON milestones(tenant_id, project);
 -- Timesheet
 CREATE TABLE timesheets (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     
@@ -206,7 +206,7 @@ CREATE INDEX idx_timesheets_dates ON timesheets(tenant_id, start_date, end_date)
 -- Timesheet Detail (Time logs)
 CREATE TABLE timesheet_details (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     parent_id UUID NOT NULL REFERENCES timesheets(id) ON DELETE CASCADE,
     idx INT DEFAULT 0,
@@ -247,7 +247,7 @@ CREATE INDEX idx_timesheet_details_project ON timesheet_details(tenant_id, proje
 -- Project Update (Status reports)
 CREATE TABLE project_updates (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     

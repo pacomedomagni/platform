@@ -3,7 +3,7 @@
 -- Tax Category (Classification for tax applicability)
 CREATE TABLE tax_categories (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     title VARCHAR(500),
@@ -23,7 +23,7 @@ CREATE INDEX idx_tax_categories_tenant ON tax_categories(tenant_id);
 -- Sales Tax Template (Reusable tax rules for sales)
 CREATE TABLE sales_tax_templates (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     title VARCHAR(500),
@@ -46,7 +46,7 @@ CREATE INDEX idx_sales_tax_templates_tenant ON sales_tax_templates(tenant_id);
 -- Sales Tax Template Detail (Individual tax rates in a template)
 CREATE TABLE sales_tax_template_details (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     parent_id UUID NOT NULL REFERENCES sales_tax_templates(id) ON DELETE CASCADE,
     idx INT DEFAULT 0,
@@ -71,7 +71,7 @@ CREATE INDEX idx_sales_tax_detail_tenant ON sales_tax_template_details(tenant_id
 -- Purchase Tax Template (Reusable tax rules for purchases)
 CREATE TABLE purchase_tax_templates (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     title VARCHAR(500),
@@ -92,7 +92,7 @@ CREATE INDEX idx_purchase_tax_templates_tenant ON purchase_tax_templates(tenant_
 -- Purchase Tax Template Detail
 CREATE TABLE purchase_tax_template_details (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     parent_id UUID NOT NULL REFERENCES purchase_tax_templates(id) ON DELETE CASCADE,
     idx INT DEFAULT 0,
@@ -116,7 +116,7 @@ CREATE INDEX idx_purchase_tax_detail_tenant ON purchase_tax_template_details(ten
 -- Tax Withholding Category (TDS/Withholding Tax)
 CREATE TABLE tax_withholding_categories (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     category_name VARCHAR(500),
@@ -149,7 +149,7 @@ CREATE INDEX idx_tax_withholding_tenant ON tax_withholding_categories(tenant_id)
 -- Item Tax Template (Item-specific tax rates)
 CREATE TABLE item_tax_templates (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     title VARCHAR(500),
@@ -167,7 +167,7 @@ CREATE INDEX idx_item_tax_templates_tenant ON item_tax_templates(tenant_id);
 -- Item Tax Template Detail
 CREATE TABLE item_tax_template_details (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     parent_id UUID NOT NULL REFERENCES item_tax_templates(id) ON DELETE CASCADE,
     idx INT DEFAULT 0,

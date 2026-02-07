@@ -141,6 +141,39 @@ export class StockMovementService {
 
         const stockValueDiff = qty.mul(rate);
 
+        // Acquire advisory lock to prevent race conditions
+        await this.lockStock(tx, ctx.tenantId, warehouse.id, item.id);
+
+        // Validate negative stock before processing negative movements
+        if (qty.lessThan(0)) {
+          const tenant = await tx.tenant.findUnique({
+            where: { id: ctx.tenantId },
+            select: { allowNegativeStock: true },
+          });
+
+          if (!tenant?.allowNegativeStock) {
+            const currentBalance = await tx.warehouseItemBalance.findUnique({
+              where: {
+                tenantId_itemId_warehouseId: {
+                  tenantId: ctx.tenantId,
+                  itemId: item.id,
+                  warehouseId: warehouse.id,
+                },
+              },
+            });
+
+            const availableQty = currentBalance
+              ? currentBalance.actualQty.minus(currentBalance.reservedQty)
+              : new Prisma.Decimal(0);
+
+            if (availableQty.lessThan(qty.abs())) {
+              throw new BadRequestException(
+                `Insufficient stock for ${item.code}. Available: ${availableQty}, Required: ${qty.abs()}`
+              );
+            }
+          }
+        }
+
         // Create stock ledger entry
         const entry = await tx.stockLedgerEntry.create({
           data: {
@@ -162,11 +195,22 @@ export class StockMovementService {
 
         ledgerEntries.push(entry);
 
-        // Update warehouse balance
+        // Update warehouse balance atomically
         await this.updateWarehouseBalance(tx, ctx.tenantId, item.id, warehouse.id, qty);
+
+        // Update bin (location) balance if location specified
+        if (fromLocation) {
+          await this.updateBinBalance(tx, ctx.tenantId, item.id, warehouse.id, fromLocation.id, qty);
+        }
+        if (toLocation && dto.movementType !== MovementType.TRANSFER) {
+          await this.updateBinBalance(tx, ctx.tenantId, item.id, warehouse.id, toLocation.id, qty);
+        }
 
         // For transfers, create the receiving entry
         if (dto.movementType === MovementType.TRANSFER && toWarehouse) {
+          // Acquire lock for destination warehouse
+          await this.lockStock(tx, ctx.tenantId, toWarehouse.id, item.id);
+
           const receiveEntry = await tx.stockLedgerEntry.create({
             data: {
               tenantId: ctx.tenantId,
@@ -185,8 +229,13 @@ export class StockMovementService {
           });
           ledgerEntries.push(receiveEntry);
 
-          // Update destination warehouse balance
+          // Update destination warehouse balance atomically
           await this.updateWarehouseBalance(tx, ctx.tenantId, item.id, toWarehouse.id, qty.neg());
+
+          // Update destination bin balance if location specified
+          if (toLocation) {
+            await this.updateBinBalance(tx, ctx.tenantId, item.id, toWarehouse.id, toLocation.id, qty.neg());
+          }
         }
 
         processedItems.push({
@@ -387,6 +436,10 @@ export class StockMovementService {
   // Helper Methods
   // ==========================================
 
+  /**
+   * Generate voucher number using posting markers for idempotency
+   * Prevents duplicate voucher numbers in concurrent transactions
+   */
   private async generateVoucherNo(tx: any, tenantId: string, type: MovementType): Promise<string> {
     const prefix = {
       [MovementType.RECEIPT]: 'SR',
@@ -397,16 +450,50 @@ export class StockMovementService {
 
     const year = new Date().getFullYear();
     const month = String(new Date().getMonth() + 1).padStart(2, '0');
+    const voucherType = this.getVoucherType(type);
 
-    const count = await tx.stockLedgerEntry.count({
-      where: {
-        tenantId,
-        voucherType: this.getVoucherType(type),
-        voucherNo: { startsWith: `${prefix}-${year}${month}` },
-      },
-    });
+    // Use posting markers to prevent duplicate sequence numbers
+    const maxRetries = 5;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      // Find the highest sequence number
+      const lastEntry = await tx.stockLedgerEntry.findFirst({
+        where: {
+          tenantId,
+          voucherType,
+          voucherNo: { startsWith: `${prefix}-${year}${month}` },
+        },
+        orderBy: { voucherNo: 'desc' },
+        select: { voucherNo: true },
+      });
 
-    return `${prefix}-${year}${month}-${String(count + 1).padStart(5, '0')}`;
+      const nextSeq = lastEntry
+        ? parseInt(lastEntry.voucherNo.split('-').pop() || '0') + 1
+        : 1;
+
+      const voucherNo = `${prefix}-${year}${month}-${String(nextSeq).padStart(5, '0')}`;
+
+      // Try to create a posting marker to claim this voucher number
+      try {
+        await tx.stockPosting.create({
+          data: {
+            tenantId,
+            postingTs: new Date(),
+            voucherType,
+            voucherNo,
+            status: 'draft',
+          },
+        });
+        return voucherNo;
+      } catch (error: any) {
+        // If unique constraint violated, retry with next number
+        if (error.code === 'P2002' && attempt < maxRetries - 1) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    throw new Error('Failed to generate unique voucher number after retries');
   }
 
   private getVoucherType(type: MovementType): string {
@@ -418,6 +505,19 @@ export class StockMovementService {
     }[type];
   }
 
+  /**
+   * Acquire PostgreSQL advisory lock for stock operations
+   * Prevents race conditions in concurrent stock movements
+   */
+  private async lockStock(tx: any, tenantId: string, warehouseId: string, itemId: string) {
+    const key = `${tenantId}:${warehouseId}:${itemId}`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+  }
+
+  /**
+   * Update warehouse balance atomically using upsert
+   * Prevents race conditions during concurrent updates
+   */
   private async updateWarehouseBalance(
     tx: any,
     tenantId: string,
@@ -425,25 +525,60 @@ export class StockMovementService {
     warehouseId: string,
     qty: Prisma.Decimal
   ) {
-    const existing = await tx.warehouseItemBalance.findFirst({
-      where: { tenantId, itemId, warehouseId },
-    });
-
-    if (existing) {
-      await tx.warehouseItemBalance.update({
-        where: { id: existing.id },
-        data: { actualQty: existing.actualQty.add(qty) },
-      });
-    } else {
-      await tx.warehouseItemBalance.create({
-        data: {
+    await tx.warehouseItemBalance.upsert({
+      where: {
+        tenantId_itemId_warehouseId: {
           tenantId,
           itemId,
           warehouseId,
-          actualQty: qty,
-          reservedQty: 0,
         },
-      });
-    }
+      },
+      update: {
+        actualQty: { increment: qty },
+      },
+      create: {
+        tenantId,
+        itemId,
+        warehouseId,
+        actualQty: qty,
+        reservedQty: 0,
+      },
+    });
+  }
+
+  /**
+   * Update bin (location) balance atomically
+   */
+  private async updateBinBalance(
+    tx: any,
+    tenantId: string,
+    itemId: string,
+    warehouseId: string,
+    locationId: string | null,
+    qty: Prisma.Decimal
+  ) {
+    if (!locationId) return;
+
+    await tx.binBalance.upsert({
+      where: {
+        tenantId_itemId_warehouseId_locationId: {
+          tenantId,
+          itemId,
+          warehouseId,
+          locationId,
+        },
+      },
+      update: {
+        actualQty: { increment: qty },
+      },
+      create: {
+        tenantId,
+        itemId,
+        warehouseId,
+        locationId,
+        actualQty: qty,
+        reservedQty: 0,
+      },
+    });
   }
 }

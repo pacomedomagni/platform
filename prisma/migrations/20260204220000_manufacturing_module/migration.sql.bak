@@ -3,7 +3,7 @@
 -- BOM (Bill of Materials)
 CREATE TABLE boms (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     
@@ -54,7 +54,7 @@ CREATE INDEX idx_boms_active ON boms(tenant_id, is_active, is_default);
 -- BOM Item (Raw materials)
 CREATE TABLE bom_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     parent_id UUID NOT NULL REFERENCES boms(id) ON DELETE CASCADE,
     idx INT DEFAULT 0,
@@ -92,7 +92,7 @@ CREATE INDEX idx_bom_items_item ON bom_items(tenant_id, item_code);
 -- BOM Operation (Manufacturing operations)
 CREATE TABLE bom_operations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     parent_id UUID NOT NULL REFERENCES boms(id) ON DELETE CASCADE,
     idx INT DEFAULT 0,
@@ -126,7 +126,7 @@ CREATE INDEX idx_bom_operations_tenant ON bom_operations(tenant_id);
 -- Workstation
 CREATE TABLE workstations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     workstation_name VARCHAR(500),
@@ -166,7 +166,7 @@ CREATE INDEX idx_workstations_type ON workstations(tenant_id, workstation_type);
 -- Routing (Operation sequences)
 CREATE TABLE routings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     routing_name VARCHAR(500),
@@ -187,7 +187,7 @@ CREATE INDEX idx_routings_tenant ON routings(tenant_id);
 -- Routing Operation
 CREATE TABLE routing_operations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     parent_id UUID NOT NULL REFERENCES routings(id) ON DELETE CASCADE,
     idx INT DEFAULT 0,
@@ -209,7 +209,7 @@ CREATE INDEX idx_routing_operations_tenant ON routing_operations(tenant_id);
 -- Work Order (Production order)
 CREATE TABLE work_orders (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     
@@ -267,7 +267,7 @@ CREATE INDEX idx_work_orders_dates ON work_orders(tenant_id, planned_start_date,
 -- Work Order Item (Required materials)
 CREATE TABLE work_order_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     parent_id UUID NOT NULL REFERENCES work_orders(id) ON DELETE CASCADE,
     idx INT DEFAULT 0,
@@ -296,7 +296,7 @@ CREATE INDEX idx_work_order_items_tenant ON work_order_items(tenant_id);
 -- Job Card (Operation tracking)
 CREATE TABLE job_cards (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     
@@ -353,7 +353,7 @@ CREATE INDEX idx_job_cards_workstation ON job_cards(tenant_id, workstation);
 -- Job Card Time Log
 CREATE TABLE job_card_time_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     parent_id UUID NOT NULL REFERENCES job_cards(id) ON DELETE CASCADE,
     idx INT DEFAULT 0,
@@ -376,7 +376,7 @@ CREATE INDEX idx_job_card_time_logs_tenant ON job_card_time_logs(tenant_id);
 -- Production Plan (MRP)
 CREATE TABLE production_plans (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     
@@ -419,7 +419,7 @@ CREATE INDEX idx_production_plans_dates ON production_plans(tenant_id, from_date
 -- Production Plan Item
 CREATE TABLE production_plan_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     parent_id UUID NOT NULL REFERENCES production_plans(id) ON DELETE CASCADE,
     idx INT DEFAULT 0,

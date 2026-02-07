@@ -3,7 +3,7 @@
 -- Department
 CREATE TABLE departments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     department_name VARCHAR(500),
@@ -27,7 +27,7 @@ CREATE INDEX idx_departments_tenant ON departments(tenant_id);
 -- Designation (Job titles)
 CREATE TABLE designations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     designation_name VARCHAR(500),
@@ -47,7 +47,7 @@ CREATE INDEX idx_designations_tenant ON designations(tenant_id);
 -- Employment Type
 CREATE TABLE employment_types (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     employment_type_name VARCHAR(500),
@@ -67,7 +67,7 @@ CREATE INDEX idx_employment_types_tenant ON employment_types(tenant_id);
 -- Employee
 CREATE TABLE employees (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL, -- Employee ID
     
@@ -143,7 +143,7 @@ CREATE INDEX idx_employees_user ON employees(tenant_id, user_id);
 -- Leave Type
 CREATE TABLE leave_types (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     leave_type_name VARCHAR(500),
@@ -180,7 +180,7 @@ CREATE INDEX idx_leave_types_tenant ON leave_types(tenant_id);
 -- Leave Allocation (Employee leave balance)
 CREATE TABLE leave_allocations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     
@@ -214,7 +214,7 @@ CREATE INDEX idx_leave_allocations_type ON leave_allocations(tenant_id, leave_ty
 -- Leave Application
 CREATE TABLE leave_applications (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     
@@ -258,7 +258,7 @@ CREATE INDEX idx_leave_applications_dates ON leave_applications(tenant_id, from_
 -- Attendance
 CREATE TABLE attendances (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     

@@ -3,7 +3,7 @@
 -- Workflow (State machine definition)
 CREATE TABLE workflows (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     workflow_name VARCHAR(500),
@@ -39,7 +39,7 @@ CREATE INDEX idx_workflows_doctype ON workflows(tenant_id, document_type);
 -- Workflow State (States in the workflow)
 CREATE TABLE workflow_states (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     workflow_state_name VARCHAR(500),
@@ -66,7 +66,7 @@ CREATE INDEX idx_workflow_states_tenant ON workflow_states(tenant_id);
 -- Workflow Action (Actions that trigger transitions)
 CREATE TABLE workflow_actions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     workflow_action_name VARCHAR(500),
@@ -84,7 +84,7 @@ CREATE INDEX idx_workflow_actions_tenant ON workflow_actions(tenant_id);
 -- Workflow Transition (Allowed state transitions)
 CREATE TABLE workflow_transitions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     workflow_id UUID NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
     idx INT DEFAULT 0,
@@ -122,7 +122,7 @@ CREATE INDEX idx_workflow_transitions_states ON workflow_transitions(tenant_id, 
 -- Workflow Action Log (Audit trail)
 CREATE TABLE workflow_action_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     -- Document reference
     doctype VARCHAR(255) NOT NULL,
@@ -153,7 +153,7 @@ CREATE INDEX idx_workflow_action_logs_date ON workflow_action_logs(tenant_id, cr
 -- Document Workflow State (Current state of a document)
 CREATE TABLE document_workflow_states (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     -- Document reference
     doctype VARCHAR(255) NOT NULL,

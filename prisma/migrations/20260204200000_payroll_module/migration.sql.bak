@@ -3,7 +3,7 @@
 -- Salary Component (Earnings/Deductions)
 CREATE TABLE salary_components (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     salary_component_name VARCHAR(500),
@@ -47,7 +47,7 @@ CREATE INDEX idx_salary_components_type ON salary_components(tenant_id, componen
 -- Salary Structure (Template for employee salaries)
 CREATE TABLE salary_structures (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     
@@ -81,7 +81,7 @@ CREATE INDEX idx_salary_structures_tenant ON salary_structures(tenant_id);
 -- Salary Structure Detail (Components in structure)
 CREATE TABLE salary_structure_details (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     parent_id UUID NOT NULL REFERENCES salary_structures(id) ON DELETE CASCADE,
     idx INT DEFAULT 0,
@@ -111,7 +111,7 @@ CREATE INDEX idx_salary_structure_detail_tenant ON salary_structure_details(tena
 -- Salary Slip (Employee monthly payslip)
 CREATE TABLE salary_slips (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     
@@ -176,7 +176,7 @@ CREATE INDEX idx_salary_slips_status ON salary_slips(tenant_id, status);
 -- Salary Slip Detail (Earnings/Deductions on slip)
 CREATE TABLE salary_slip_details (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     parent_id UUID NOT NULL REFERENCES salary_slips(id) ON DELETE CASCADE,
     parentfield VARCHAR(50) DEFAULT 'earnings', -- earnings or deductions
@@ -200,7 +200,7 @@ CREATE INDEX idx_salary_slip_detail_tenant ON salary_slip_details(tenant_id);
 -- Payroll Entry (Bulk salary slip creation)
 CREATE TABLE payroll_entries (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     

@@ -3,7 +3,7 @@
 -- Asset Category (Depreciation rules)
 CREATE TABLE asset_categories (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     asset_category_name VARCHAR(500),
@@ -34,7 +34,7 @@ CREATE INDEX idx_asset_categories_tenant ON asset_categories(tenant_id);
 -- Asset (Individual fixed assets)
 CREATE TABLE assets (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     asset_name VARCHAR(500),
@@ -107,7 +107,7 @@ CREATE INDEX idx_assets_location ON assets(tenant_id, location);
 -- Asset Movement (Location/Custodian changes)
 CREATE TABLE asset_movements (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     
@@ -134,7 +134,7 @@ CREATE INDEX idx_asset_movements_tenant ON asset_movements(tenant_id);
 -- Asset Movement Item (Individual asset movements)
 CREATE TABLE asset_movement_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     parent_id UUID NOT NULL REFERENCES asset_movements(id) ON DELETE CASCADE,
     idx INT DEFAULT 0,
@@ -159,7 +159,7 @@ CREATE INDEX idx_asset_movement_items_tenant ON asset_movement_items(tenant_id);
 -- Depreciation Schedule (Auto-generated depreciation entries)
 CREATE TABLE asset_depreciation_schedules (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     asset_id UUID NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
     idx INT DEFAULT 0,

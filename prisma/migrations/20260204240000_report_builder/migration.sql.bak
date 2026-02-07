@@ -3,7 +3,7 @@
 -- Report (Custom saved reports)
 CREATE TABLE reports (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     report_name VARCHAR(500),
@@ -55,7 +55,7 @@ CREATE INDEX idx_reports_doctype ON reports(tenant_id, ref_doctype);
 -- Saved Report (User's saved filter configurations)
 CREATE TABLE saved_reports (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     
@@ -93,7 +93,7 @@ CREATE INDEX idx_saved_reports_user ON saved_reports(tenant_id, user_id);
 -- Dashboard (Custom dashboards)
 CREATE TABLE dashboards (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     dashboard_name VARCHAR(500),
@@ -125,7 +125,7 @@ CREATE INDEX idx_dashboards_module ON dashboards(tenant_id, module);
 -- Dashboard Chart (Charts on dashboard)
 CREATE TABLE dashboard_charts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     chart_name VARCHAR(500),
@@ -184,7 +184,7 @@ CREATE INDEX idx_dashboard_charts_dashboard ON dashboard_charts(tenant_id, dashb
 -- Number Card (KPI cards)
 CREATE TABLE number_cards (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     card_name VARCHAR(500),
@@ -235,7 +235,7 @@ CREATE INDEX idx_number_cards_dashboard ON number_cards(tenant_id, dashboard);
 -- Scheduled Report (Auto-send reports)
 CREATE TABLE scheduled_reports (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     
     name VARCHAR(255) NOT NULL,
     
