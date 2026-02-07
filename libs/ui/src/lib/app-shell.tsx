@@ -29,6 +29,7 @@ interface AppShellProps {
     user?: { name: string; email: string; avatar?: string };
     title?: string;
     description?: string;
+    navFooter?: React.ReactNode;
 }
 
 const defaultNavItems: NavItem[] = [
@@ -39,12 +40,13 @@ const defaultNavItems: NavItem[] = [
     { label: 'Settings', icon: Settings, href: '/app/settings' },
 ];
 
-export const AppShell = ({ 
-    children, 
+export const AppShell = ({
+    children,
     navItems = defaultNavItems,
     user = { name: 'Demo User', email: 'demo@noslag.com' },
     title = 'NoSlag',
-    description = 'Enterprise Platform'
+    description = 'Enterprise Platform',
+    navFooter,
 }: AppShellProps) => {
     const [collapsed, setCollapsed] = useState(false);
     const [searchOpen, setSearchOpen] = useState(false);
@@ -116,6 +118,13 @@ export const AppShell = ({
                         })()
                     ))}
                 </div>
+
+                {/* Nav Footer (optional extra content) */}
+                {navFooter && !collapsed && (
+                    <div className="px-2 pb-2">
+                        {navFooter}
+                    </div>
+                )}
 
                 {/* Sidebar Footer */}
                 <div className="p-4 border-t flex flex-col gap-4">

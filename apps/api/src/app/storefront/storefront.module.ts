@@ -24,6 +24,11 @@ import { ThemesModule } from './themes/themes.module';
 import { InventoryManagementModule } from '../inventory-management/inventory-management.module';
 import { WorkersModule } from '../workers/workers.module';
 import { OnboardingModule } from '../onboarding/onboarding.module';
+import { UploadController } from './uploads/upload.controller';
+import { StoreSettingsController } from './settings/store-settings.controller';
+import { StoreSettingsService } from './settings/store-settings.service';
+import { DashboardController } from './dashboard/dashboard.controller';
+import { DashboardService } from './dashboard/dashboard.service';
 
 @Module({
   imports: [
@@ -60,6 +65,9 @@ import { OnboardingModule } from '../onboarding/onboarding.module';
     EmailPreferencesController,
     SendGridWebhookController,
     OnboardingController,
+    UploadController,
+    StoreSettingsController,
+    DashboardController,
   ],
   providers: [
     ProductsService,
@@ -70,6 +78,8 @@ import { OnboardingModule } from '../onboarding/onboarding.module';
     OrdersService,
     EmailPreferencesService,
     OnboardingService,
+    StoreSettingsService,
+    DashboardService,
   ],
   exports: [
     CustomerAuthModule,

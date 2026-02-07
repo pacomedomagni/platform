@@ -2,12 +2,14 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { Prisma } from '@prisma/client';
+import * as crypto from 'crypto';
 import {
   ListProductsDto,
   CreateProductListingDto,
   UpdateProductListingDto,
   CreateCategoryDto,
 } from './dto';
+import { CreateSimpleProductDto } from './simple-product.dto';
 
 @Injectable()
 export class ProductsService {
@@ -148,7 +150,7 @@ export class ProductsService {
   }
 
   /**
-   * Get a single product by ID (for cart/checkout)
+   * Get a single product by ID (for cart/checkout, published only)
    */
   async getProductById(tenantId: string, id: string) {
     const product = await this.prisma.productListing.findFirst({
@@ -178,6 +180,38 @@ export class ProductsService {
     }
 
     return this.mapProductToDetailResponse(product);
+  }
+
+  /**
+   * Get a single product by ID for admin (includes unpublished)
+   */
+  async getProductByIdAdmin(tenantId: string, id: string) {
+    const product = await this.prisma.productListing.findFirst({
+      where: { tenantId, id },
+      include: {
+        category: {
+          select: { id: true, name: true, slug: true },
+        },
+        item: {
+          select: {
+            code: true,
+            stockUomCode: true,
+            warehouseItemBalances: {
+              select: { actualQty: true, reservedQty: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!product) {
+      throw new NotFoundException('Product listing not found');
+    }
+
+    return {
+      ...this.mapProductToDetailResponse(product),
+      isPublished: product.isPublished,
+    };
   }
 
   /**
@@ -466,6 +500,142 @@ export class ProductsService {
       description: category.description,
       imageUrl: category.imageUrl,
       productCount: category._count.products,
+    };
+  }
+
+  /**
+   * Create a product with auto-generated ERP Item (merchant-friendly)
+   */
+  async createSimpleProduct(tenantId: string, dto: CreateSimpleProductDto) {
+    // Auto-generate item code
+    const code = `PRD-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+
+    // Ensure "Each" UOM exists
+    await this.prisma.uom.upsert({
+      where: { code: 'EACH' },
+      update: {},
+      create: { code: 'EACH', name: 'Each' },
+    });
+
+    // Find first active warehouse for this tenant
+    const warehouse = await this.prisma.warehouse.findFirst({
+      where: { tenantId, isActive: true, deletedAt: null },
+    });
+
+    // Create the ERP Item
+    const item = await this.prisma.item.create({
+      data: {
+        tenantId,
+        code,
+        name: dto.name,
+        stockUomCode: 'EACH',
+        isStockItem: true,
+        isActive: true,
+      },
+    });
+
+    // If warehouse exists, create a WarehouseItemBalance so stock tracking works
+    if (warehouse) {
+      await this.prisma.warehouseItemBalance.create({
+        data: {
+          tenantId,
+          itemId: item.id,
+          warehouseId: warehouse.id,
+          actualQty: 0,
+          reservedQty: 0,
+        },
+      }).catch(() => {
+        // Balance may already exist — ignore
+      });
+    }
+
+    // Generate slug from name
+    const baseSlug = dto.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .substring(0, 80);
+
+    // Ensure slug uniqueness
+    let slug = baseSlug;
+    const existingSlug = await this.prisma.productListing.findFirst({
+      where: { tenantId, slug },
+    });
+    if (existingSlug) {
+      slug = `${baseSlug}-${crypto.randomBytes(3).toString('hex')}`;
+    }
+
+    // Create the ProductListing using existing method
+    return this.createProductListing(tenantId, {
+      itemId: item.id,
+      slug,
+      displayName: dto.name,
+      shortDescription: dto.description,
+      longDescription: dto.longDescription,
+      price: dto.price,
+      compareAtPrice: dto.compareAtPrice,
+      images: dto.images,
+      categoryId: dto.categoryId,
+      isFeatured: dto.isFeatured,
+      isPublished: dto.isPublished ?? true,
+    });
+  }
+
+  /**
+   * List all products for admin (including unpublished)
+   */
+  async listAdminProducts(tenantId: string, dto: ListProductsDto) {
+    const {
+      search,
+      sortBy = 'createdAt',
+      sortOrder = 'desc',
+      limit = 20,
+      offset = 0,
+    } = dto;
+
+    const where: Prisma.ProductListingWhereInput = { tenantId };
+
+    if (search) {
+      where.OR = [
+        { displayName: { contains: search, mode: 'insensitive' } },
+        { shortDescription: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const orderBy: Prisma.ProductListingOrderByWithRelationInput = {};
+    switch (sortBy) {
+      case 'price': orderBy.price = sortOrder; break;
+      case 'name': orderBy.displayName = sortOrder; break;
+      default: orderBy.createdAt = sortOrder;
+    }
+
+    const [products, total] = await Promise.all([
+      this.prisma.productListing.findMany({
+        where,
+        orderBy,
+        take: limit,
+        skip: offset,
+        include: {
+          category: { select: { id: true, name: true, slug: true } },
+          item: {
+            select: {
+              code: true,
+              warehouseItemBalances: {
+                select: { actualQty: true, reservedQty: true },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.productListing.count({ where }),
+    ]);
+
+    return {
+      data: products.map((p) => ({
+        ...this.mapProductToResponse(p),
+        isPublished: p.isPublished,
+      })),
+      pagination: { total, limit, offset, hasMore: offset + products.length < total },
     };
   }
 

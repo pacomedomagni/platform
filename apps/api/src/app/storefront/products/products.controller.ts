@@ -17,6 +17,7 @@ import {
   UpdateProductListingDto,
   CreateCategoryDto,
 } from './dto';
+import { CreateSimpleProductDto } from './simple-product.dto';
 import { StoreAdminGuard } from '@platform/auth';
 
 @Controller('store')
@@ -131,6 +132,54 @@ export class ProductsController {
       throw new BadRequestException('Tenant ID required');
     }
     return this.productsService.updateProductListing(tenantId, id, dto);
+  }
+
+  /**
+   * Simple product creation (merchant-friendly, auto-creates ERP Item)
+   * POST /api/v1/store/admin/products/simple
+   */
+  @Post('admin/products/simple')
+  @UseGuards(StoreAdminGuard)
+  async createSimpleProduct(
+    @Headers('x-tenant-id') tenantId: string,
+    @Body() dto: CreateSimpleProductDto
+  ) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID required');
+    }
+    return this.productsService.createSimpleProduct(tenantId, dto);
+  }
+
+  /**
+   * List all products for admin (including unpublished)
+   * GET /api/v1/store/admin/products
+   */
+  @Get('admin/products')
+  @UseGuards(StoreAdminGuard)
+  async listAdminProducts(
+    @Headers('x-tenant-id') tenantId: string,
+    @Query() query: ListProductsDto
+  ) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID required');
+    }
+    return this.productsService.listAdminProducts(tenantId, query);
+  }
+
+  /**
+   * Get single product by ID for admin (including unpublished)
+   * GET /api/v1/store/admin/products/:id
+   */
+  @Get('admin/products/:id')
+  @UseGuards(StoreAdminGuard)
+  async getAdminProduct(
+    @Headers('x-tenant-id') tenantId: string,
+    @Param('id') id: string
+  ) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID required');
+    }
+    return this.productsService.getProductByIdAdmin(tenantId, id);
   }
 
   /**
