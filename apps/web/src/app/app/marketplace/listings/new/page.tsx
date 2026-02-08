@@ -91,16 +91,16 @@ export default function CreateListingPage() {
       }
 
       // Load products
-      const productsRes = await fetch('/api/v1/products/listings', {
+      const productsRes = await fetch('/api/v1/store/admin/products', {
         headers: authHeaders(),
       });
       if (productsRes.ok) {
         const productsData = await productsRes.json();
-        setProducts(productsData);
+        setProducts(Array.isArray(productsData) ? productsData : productsData.products || []);
       }
 
       // Load warehouses
-      const warehousesRes = await fetch('/api/v1/warehouses', {
+      const warehousesRes = await fetch('/api/v1/inventory/warehouses', {
         headers: authHeaders(),
       });
       if (warehousesRes.ok) {

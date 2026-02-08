@@ -22,6 +22,19 @@ export class InventoryController {
     }
   }
 
+  @Get('warehouses')
+  async listWarehouses(@Req() req: RequestWithUser) {
+    const tenantId = req.user?.tenantId;
+    if (!tenantId) throw new BadRequestException('Missing tenantId');
+    this.ensureInventoryAccess(req.user);
+
+    return this.prisma.warehouse.findMany({
+      where: { tenantId, isActive: true },
+      select: { id: true, code: true, name: true, isActive: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
   @Get('stock-balance')
   async getStockBalance(
     @Req() req: RequestWithUser,
