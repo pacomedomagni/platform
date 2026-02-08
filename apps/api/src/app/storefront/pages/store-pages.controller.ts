@@ -1,7 +1,7 @@
 import { Controller, Get, Put, Delete, Param, Body, Headers, UseGuards, BadRequestException } from '@nestjs/common';
 import { StorePagesService } from './store-pages.service';
 import { UpsertStorePageDto } from './store-pages.dto';
-import { StoreAdminGuard } from '../guards/store-admin.guard';
+import { StoreAdminGuard } from '@platform/auth';
 
 @Controller('store')
 export class StorePagesController {

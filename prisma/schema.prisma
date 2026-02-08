@@ -143,6 +143,12 @@ model Tenant {
   // Product import jobs
   productImportJobs ProductImportJob[]
 
+  // Branch 12: Digital, Analytics, Reports, Page Builder
+  pageSections     PageSection[]
+  digitalDownloads DigitalDownload[]
+  funnelEvents     FunnelEvent[]
+  scheduledReports ScheduledReport[]
+
   @@map("tenants")
 }
 
@@ -1144,6 +1150,12 @@ model ProductListing {
 
   sortOrder Int @default(0)
 
+  // Digital product fields
+  isDigital       Boolean @default(false)
+  digitalFileKey  String? // S3 key or file reference
+  downloadLimit   Int?    // Max download count per purchase
+  downloadExpiry  Int?    // Expiry in days after purchase
+
   // Review stats (cached for performance)
   averageRating Decimal? @default(0) @db.Decimal(3, 2)
   reviewCount   Int      @default(0)
@@ -1159,6 +1171,7 @@ model ProductListing {
   priceOverrides ProductPriceOverride[]
   translations   ProductTranslation[]
   marketplaceListings MarketplaceListing[]
+  digitalDownloads    DigitalDownload[]
 
   @@unique([tenantId, slug])
   @@unique([tenantId, itemId])
@@ -1468,6 +1481,7 @@ model Order {
   giftCardsGenerated GiftCard[]            @relation("GiftCardSource")
   shipments          Shipment[]
   marketplaceOrder   MarketplaceOrder?
+  digitalDownloads   DigitalDownload[]
 
   @@unique([tenantId, orderNumber])
   @@index([tenantId, customerId])
@@ -2849,6 +2863,8 @@ model StorePage {
   content     String  @db.Text
   isPublished Boolean @default(true)
 
+  sections PageSection[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -2878,4 +2894,97 @@ model ProductImportJob {
 
   @@index([tenantId])
   @@map("product_import_jobs")
+}
+
+// ==================== PAGE BUILDER ====================
+
+model PageSection {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  pageId String
+  page   StorePage @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  type     String // hero, features, products, testimonials, cta, text, image, gallery, newsletter, faq, banner
+  config   Json   @default("{}") // Section-specific configuration
+  position Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([pageId])
+  @@index([tenantId])
+  @@map("page_sections")
+}
+
+// ==================== DIGITAL PRODUCTS ====================
+
+model DigitalDownload {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  orderId   String
+  order     Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   ProductListing @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  downloadCount Int       @default(0)
+  maxDownloads  Int?
+  expiresAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([tenantId])
+  @@map("digital_downloads")
+}
+
+// ==================== FUNNEL ANALYTICS ====================
+
+model FunnelEvent {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  sessionId  String
+  customerId String?
+  eventType  String  // page_view, product_view, add_to_cart, begin_checkout, purchase
+  productId  String?
+  metadata   Json    @default("{}")
+  utmSource  String?
+  utmMedium  String?
+  utmCampaign String?
+  referrer   String?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, eventType])
+  @@index([tenantId, sessionId])
+  @@index([tenantId, createdAt])
+  @@map("funnel_events")
+}
+
+// ==================== SCHEDULED REPORTS ====================
+
+model ScheduledReport {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  reportType String     // sales_summary, inventory_snapshot, customer_activity, order_fulfillment
+  schedule   String     // cron expression
+  recipients String[]   // Email addresses
+  format     String     @default("csv") // csv, pdf, xlsx
+  isActive   Boolean    @default(true)
+  lastRunAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@map("scheduled_reports")
 }

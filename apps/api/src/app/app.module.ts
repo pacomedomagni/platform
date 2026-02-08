@@ -16,6 +16,7 @@ import { ProvisioningModule } from './provisioning/provisioning.module';
 import { StorefrontModule } from './storefront/storefront.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { AnalyticsFunnelModule } from './analytics/analytics-funnel.module';
 import { OperationsModule } from './operations/operations.module';
 import { InventoryManagementModule } from './inventory-management/inventory-management.module';
 import { CurrencyModule } from './currency/currency.module';
@@ -65,6 +66,7 @@ import { DomainResolverModule } from './storefront/domain-resolver/domain-resolv
     StorefrontModule,
     DashboardModule,
     AnalyticsModule,
+    AnalyticsFunnelModule,
     OperationsModule,
     InventoryManagementModule,
     CurrencyModule,

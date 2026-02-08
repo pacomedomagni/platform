@@ -1,4 +1,4 @@
-import { Module, DynamicModule, Global } from '@nestjs/common';
+import { Module, DynamicModule, Global, InjectionToken } from '@nestjs/common';
 import { StorageService } from './storage.service';
 import {
   StorageModuleOptions,
@@ -39,7 +39,7 @@ export class StorageModule {
 
   static forRootAsync(options: {
     useFactory: (...args: unknown[]) => Promise<StorageModuleOptions> | StorageModuleOptions;
-    inject?: unknown[];
+    inject?: InjectionToken[];
   }): DynamicModule {
     const providerFactory = {
       provide: STORAGE_PROVIDER,

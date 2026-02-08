@@ -35,6 +35,12 @@ import { ProductImportController } from './products/product-import.controller';
 import { ProductImportService } from './products/product-import.service';
 import { ShippingAdminController, ShippingPublicController } from './shipping/shipping.controller';
 import { ShippingService } from './shipping/shipping.service';
+import { PageSectionsController } from './pages/sections.controller';
+import { PageSectionsService } from './pages/sections.service';
+import { DigitalDownloadController } from './digital/digital-download.controller';
+import { DigitalFulfillmentService } from './digital/digital-fulfillment.service';
+import { ScheduledReportsController } from '../operations/scheduled-reports.controller';
+import { ScheduledReportsService } from '../operations/scheduled-reports.service';
 
 @Module({
   imports: [
@@ -78,6 +84,9 @@ import { ShippingService } from './shipping/shipping.service';
     ProductImportController,
     ShippingAdminController,
     ShippingPublicController,
+    PageSectionsController,
+    DigitalDownloadController,
+    ScheduledReportsController,
   ],
   providers: [
     ProductsService,
@@ -93,6 +102,9 @@ import { ShippingService } from './shipping/shipping.service';
     StorePagesService,
     ProductImportService,
     ShippingService,
+    PageSectionsService,
+    DigitalFulfillmentService,
+    ScheduledReportsService,
   ],
   exports: [
     CustomerAuthModule,
