@@ -5,6 +5,7 @@ import { Search, User } from 'lucide-react';
 import { StoreProviders } from './_components/store-providers';
 import { CartIcon } from './_components/cart-icon';
 import { CurrencySwitcher } from './_components/currency-switcher';
+import { LanguageSwitcher } from './_components/language-switcher';
 import { generateOrganizationSchema, serializeJsonLd } from '@/lib/seo/schema';
 import { WelcomeWizard } from '../../components/onboarding/welcome-wizard';
 import { ProductTour } from '../../components/onboarding/product-tour';
@@ -135,6 +136,7 @@ export default function StorefrontLayout({ children }: { children: React.ReactNo
                   type="search"
                 />
               </div>
+              <LanguageSwitcher />
               <CurrencySwitcher />
               <Link
                 href="/storefront/account"
@@ -260,8 +262,12 @@ export default function StorefrontLayout({ children }: { children: React.ReactNo
               </div>
             </div>
           </div>
-          <div className="border-t border-border py-6 text-center text-xs text-muted-foreground">
-            © 2026 NoSlag. All rights reserved.
+          <div className="border-t border-border py-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-muted-foreground">
+            <p>© 2026 NoSlag. All rights reserved.</p>
+            <div className="flex items-center gap-4">
+              <LanguageSwitcher />
+              <CurrencySwitcher />
+            </div>
           </div>
         </footer>
       </div>
