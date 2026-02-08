@@ -2,6 +2,11 @@ FROM node:20 AS builder
 
 WORKDIR /app
 
+# Copy workspace configuration files first
+COPY nx.json ./
+COPY tsconfig.base.json ./
+COPY eslint.config.mjs ./
+
 # Copy dependency definitions
 COPY package*.json ./
 COPY .npmrc* ./

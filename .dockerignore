@@ -16,6 +16,7 @@ node_modules
 dist
 build
 .next
+**/.next
 out
 
 # Testing
@@ -24,8 +25,6 @@ coverage
 **/*.spec.ts
 **/*.test.ts
 **/__tests__
-**/test
-**/tests
 cypress
 e2e
 apps/api-e2e
@@ -69,7 +68,9 @@ docs
 .eslintcache
 .prettierrc
 prettier.config.js
-eslint.config.mjs
+# eslint.config.mjs excluded but root one needed for build
+apps/**/eslint.config.mjs
+libs/**/eslint.config.mjs
 jest.config.ts
 jest.preset.js
 tsconfig.spec.json
