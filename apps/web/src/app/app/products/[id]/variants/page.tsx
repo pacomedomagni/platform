@@ -66,6 +66,83 @@ export default function ProductVariantsPage() {
     }
   };
 
+  const handleBulkGenerate = async () => {
+    try {
+      setIsLoading(true);
+      const activeTypes = attributeTypes.filter((t) => t.values.length > 0);
+      if (activeTypes.length === 0) {
+        alert('No attribute values found to generate variants from.');
+        setIsLoading(false);
+        return;
+      }
+
+      // Generate combinations
+      const typeValues = activeTypes.map((t) =>
+        t.values.map((v) => ({
+          attributeTypeId: t.id,
+          attributeValueId: v.id,
+        }))
+      );
+
+      const combinations = cartesianProduct(typeValues);
+
+      // Filter out existing ones
+      const existingSignatures = new Set(
+        variants.map((v) =>
+          v.attributes
+            .map((a) => `${a.attributeType.id}:${a.attributeValue.id}`)
+            .sort()
+            .join('|')
+        )
+      );
+
+      const newCombinations = combinations.filter((combo) => {
+        const sig = combo
+          .map((c) => `${c.attributeTypeId}:${c.attributeValueId}`)
+          .sort()
+          .join('|');
+        return !existingSignatures.has(sig);
+      });
+
+      if (newCombinations.length === 0) {
+        alert('All possible variants already exist.');
+        setIsLoading(false);
+        return;
+      }
+
+      if (
+        !confirm(
+          `This will generate ${newCombinations.length} new variants. Continue?`
+        )
+      ) {
+        setIsLoading(false);
+        return;
+      }
+
+      // Create DTOs
+      const dtos: CreateVariantDto[] = newCombinations.map((combo) => ({
+        productListingId: productId,
+        attributes: combo.map((c) => ({
+          attributeTypeId: c.attributeTypeId,
+          attributeValueId: c.attributeValueId,
+        })),
+        stockQty: 0,
+        price: 0,
+        trackInventory: true,
+      }));
+
+      await variantsApi.bulkCreate(productId, dtos);
+
+      await loadData();
+      alert(`Successfully created ${newCombinations.length} variants.`);
+    } catch (error) {
+      console.error('Failed to generate variants:', error);
+      alert('Failed to generate variants');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -157,10 +234,7 @@ export default function ProductVariantsPage() {
             size="sm"
             variant="outline"
             className="mt-3 border-blue-300 bg-white text-blue-700 hover:bg-blue-100"
-            onClick={() => {
-              /* TODO: Implement bulk generation */
-              alert('Bulk generation feature coming soon!');
-            }}
+            onClick={handleBulkGenerate}
           >
             Generate All Combinations
           </Button>
@@ -602,5 +676,14 @@ function VariantFormModal({
         </form>
       </Card>
     </div>
+  );
+}
+
+function cartesianProduct<T>(arrays: T[][]): T[][] {
+  return arrays.reduce<T[][]>(
+    (acc, curr) => {
+      return acc.flatMap((a) => curr.map((c) => [...a, c]));
+    },
+    [[]]
   );
 }

@@ -72,18 +72,38 @@ export class CheckoutService {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${itemKey}))`;
       }
 
-      // Re-query fresh balances after acquiring locks
+      // Re-query fresh balances and RESERVE stock
       for (const item of cart.items) {
-        const freshBalances = await tx.warehouseItemBalance.findMany({
+        // Fetch all balances for this item, sorted by creation (FIFO-ish reservation or just prefer older stock)
+        const balances = await tx.warehouseItemBalance.findMany({
           where: { tenantId, itemId: item.product.item.id },
+          orderBy: { createdAt: 'asc' },
         });
-        const availableQty = freshBalances.reduce(
-          (sum, b) => sum + Number(b.actualQty) - Number(b.reservedQty),
-          0
-        );
-        if (item.quantity > availableQty) {
+
+        // Calculate total available across all warehouses
+        let remainingToReserve = item.quantity;
+
+        for (const balance of balances) {
+          if (remainingToReserve <= 0) break;
+
+          const availableInBalance = Number(balance.actualQty) - Number(balance.reservedQty);
+          
+          if (availableInBalance > 0) {
+            const take = Math.min(remainingToReserve, availableInBalance);
+            
+            // Reserve logic: Increment reservedQty
+            await tx.warehouseItemBalance.update({
+              where: { id: balance.id },
+              data: { reservedQty: { increment: take } },
+            });
+
+            remainingToReserve -= take;
+          }
+        }
+
+        if (remainingToReserve > 0) {
           throw new BadRequestException(
-            `Insufficient stock for ${item.product.displayName}. Available: ${availableQty}`
+            `Insufficient stock for ${item.product.displayName}. Requested: ${item.quantity}, Shortage: ${remainingToReserve}`
           );
         }
       }
@@ -245,8 +265,9 @@ export class CheckoutService {
         paymentProvider = 'stripe';
       }
     } catch (error) {
-      // Log error but don't fail checkout — payment can be retried via getCheckout or retryPaymentIntent
-      console.error('Failed to create payment intent:', error);
+      // Log error and FAIL checkout 
+      this.logger.error('Failed to create payment intent:', error);
+      throw new BadRequestException('Payment initialization failed. Please try again.');
     }
 
     return this.mapOrderToCheckoutResponse(result, stripeClientSecret, paymentProvider);

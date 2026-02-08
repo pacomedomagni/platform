@@ -85,4 +85,10 @@ export class UniversalController {
   async cancel(@Param('doctype') docType: string, @Param('name') name: string, @Req() req: any) {
     return this.docService.cancel(docType, name, req.user);
   }
+
+  @Post(':doctype/:name/amend')
+  @UseGuards(AuthGuard('jwt'))
+  async amend(@Param('doctype') docType: string, @Param('name') name: string, @Req() req: any) {
+    return this.docService.amend(docType, name, req.user);
+  }
 }

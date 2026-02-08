@@ -498,6 +498,41 @@ export class DocService {
       return { status: 'cancelled', name };
   }
 
+  async amend(docType: string, name: string, user: any) {
+      await this.permissionService.ensurePermission(docType, user.roles, 'create');
+      await this.assertDocTypeExists(docType);
+      
+      const existing = await this.findOne(docType, name, user);
+      
+      // Strict check: must be cancelled
+      if (existing.docstatus !== 2) {
+          throw new BadRequestException('Document must be cancelled (docstatus=2) to be amended');
+      }
+
+      // Clone and clean
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { id, name: oldName, creation, modified, createdAt, updatedAt, docstatus, idx, ...data } = existing;
+      
+      data.amendedFrom = oldName;
+
+      // Clean children (remove system fields)
+      const fieldsMeta = await this.getDocFieldMeta(docType);
+      const childFields = fieldsMeta.filter(f => f.type === 'Table');
+
+      for (const field of childFields) {
+           if (data[field.name] && Array.isArray(data[field.name])) {
+               data[field.name] = data[field.name].map((child: any) => {
+                   // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                   const { id, name, creation, modified, parent, parenttype, parentfield, parentId, tenantId, idx, ...childData } = child;
+                   return childData;
+               });
+           }
+      }
+
+      // Create new draft
+      return this.create(docType, data, user);
+  }
+
   private async logAudit(action: string, docType: string, docName: string, user: any) {
     const tenantId = user?.tenantId;
     if (!tenantId || !docName) return;

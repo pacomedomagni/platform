@@ -127,6 +127,21 @@ export class EcommerceController {
     return this.variantsService.createVariant(tenantId, dto);
   }
 
+  @Post('admin/products/:productId/variants/bulk')
+  @UseGuards(StoreAdminGuard)
+  async bulkCreateVariants(
+    @Headers('x-tenant-id') tenantId: string,
+    @Param('productId') productId: string,
+    @Body() body: { variants: CreateVariantDto[] }
+  ) {
+    if (!tenantId) throw new BadRequestException('Tenant ID required');
+    
+    // Ensure all variants target this product
+    const variants = body.variants.map(v => ({ ...v, productListingId: productId }));
+    
+    return this.variantsService.bulkCreateVariants(tenantId, variants);
+  }
+
   @Put('admin/variants/:id')
   @UseGuards(StoreAdminGuard)
   async updateVariant(

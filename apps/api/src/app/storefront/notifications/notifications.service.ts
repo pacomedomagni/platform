@@ -316,45 +316,60 @@ export class NotificationsService {
     channel: { type: string; provider: string; config: unknown },
     data: { recipient: string; content: string },
   ): Promise<string | null> {
-    const config = channel.config as {
-      accountSid?: string;
-      authToken?: string;
-      fromNumber?: string;
-    };
+    const providerKey = channel.provider.toLowerCase();
+    const provider = PROVIDERS[providerKey];
 
-    if (channel.provider === 'twilio') {
+    if (!provider) {
+        throw new BadRequestException(
+        `Provider "${channel.provider}" is not supported. Supported: ${Object.keys(PROVIDERS).join(', ')}`,
+        );
+    }
+
+    const isWhatsApp = channel.type.toLowerCase() === 'whatsapp';
+    
+    try {
+        const sid = await provider.send(channel.config, data.recipient, data.content, isWhatsApp);
+        this.logger.log(`Sent via ${channel.provider} (${channel.type}): ${sid}`);
+        return sid;
+    } catch (e) {
+        this.logger.error(`Failed to send via ${channel.provider}: ${e.message}`, e.stack);
+        throw e;
+    }
+  }
+}
+
+// --- Provider Abstraction ---
+
+interface NotificationProvider {
+  send(config: any, recipient: string, content: string, isWhatsApp: boolean): Promise<string>;
+}
+
+class TwilioProvider implements NotificationProvider {
+  async send(config: any, recipient: string, content: string, isWhatsApp: boolean): Promise<string> {
       if (!config.accountSid || !config.authToken || !config.fromNumber) {
         throw new BadRequestException(
           'Twilio credentials not configured. Please set Account SID, Auth Token, and From Number.',
         );
       }
-
       const client = twilio(config.accountSid, config.authToken);
+      const from = isWhatsApp ? `whatsapp:${config.fromNumber}` : config.fromNumber;
+      const to = isWhatsApp ? `whatsapp:${recipient}` : recipient;
 
-      const isWhatsApp = channel.type.toLowerCase() === 'whatsapp';
-      const from = isWhatsApp
-        ? `whatsapp:${config.fromNumber}`
-        : config.fromNumber;
-      const to = isWhatsApp
-        ? `whatsapp:${data.recipient}`
-        : data.recipient;
-
-      const message = await client.messages.create({
-        body: data.content,
-        from,
-        to,
-      });
-
-      this.logger.log(
-        `Twilio ${channel.type} message sent: ${message.sid} to ${data.recipient}`,
-      );
-
+      const message = await client.messages.create({ body: content, from, to });
       return message.sid;
-    }
-
-    // For unsupported providers, throw clear error
-    throw new BadRequestException(
-      `Provider "${channel.provider}" is not supported. Currently supported: twilio`,
-    );
   }
 }
+
+class MockProvider implements NotificationProvider {
+  async send(config: any, recipient: string, content: string, isWhatsApp: boolean): Promise<string> {
+     Logger.log(`[MockProvider] Sending ${isWhatsApp ? 'WhatsApp' : 'SMS'} to ${recipient}: ${content}`);
+     // Simulate latency
+     await new Promise(r => setTimeout(r, 100));
+     return `mock-${Date.now()}`;
+  }
+}
+
+const PROVIDERS: Record<string, NotificationProvider> = {
+  'twilio': new TwilioProvider(),
+  'mock': new MockProvider(),
+};

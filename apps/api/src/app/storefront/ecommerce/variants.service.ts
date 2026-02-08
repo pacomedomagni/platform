@@ -235,6 +235,76 @@ export class VariantsService {
     });
   }
 
+  async bulkCreateVariants(tenantId: string, dtos: CreateVariantDto[]) {
+    if (dtos.length === 0) return [];
+    
+    // Verify product listing exists (check first one)
+    const productListingId = dtos[0].productListingId;
+    const product = await this.prisma.productListing.findFirst({
+      where: { id: productListingId, tenantId },
+    });
+
+    if (!product) {
+      throw new NotFoundException('Product not found');
+    }
+
+    // Verify all attribute types and values exist for all variants
+    // Optimization: Load all attribute types and values for the tenant once
+    const allTypes = await this.prisma.itemAttributeType.findMany({ where: { tenantId } });
+    const allValues = await this.prisma.itemAttributeValue.findMany({ where: { tenantId } });
+    
+    const typeIds = new Set(allTypes.map(t => t.id));
+    const valueIds = new Set(allValues.map(v => v.id));
+
+    for (const dto of dtos) {
+      if (dto.productListingId !== productListingId) {
+        throw new BadRequestException('All variants must belong to the same product');
+      }
+      for (const attr of dto.attributes) {
+        if (!typeIds.has(attr.attributeTypeId)) {
+           throw new BadRequestException(`Attribute type ${attr.attributeTypeId} not found`);
+        }
+        if (!valueIds.has(attr.attributeValueId)) {
+           throw new BadRequestException(`Attribute value ${attr.attributeValueId} not found`);
+        }
+      }
+    }
+
+    // Transactional creation
+    return this.prisma.$transaction(
+      dtos.map((dto) => 
+        this.prisma.productVariant.create({
+          data: {
+            tenantId,
+            productListingId: dto.productListingId,
+            sku: dto.sku,
+            barcode: dto.barcode,
+            price: dto.price,
+            compareAtPrice: dto.compareAtPrice,
+            imageUrl: dto.imageUrl,
+            stockQty: dto.stockQty ?? 0,
+            trackInventory: dto.trackInventory ?? true,
+            allowBackorder: dto.allowBackorder ?? false,
+            attributes: {
+              create: dto.attributes.map((attr) => ({
+                attributeTypeId: attr.attributeTypeId,
+                attributeValueId: attr.attributeValueId,
+              })),
+            },
+          },
+          include: {
+            attributes: {
+              include: {
+                attributeType: true,
+                attributeValue: true,
+              },
+            },
+          },
+        })
+      )
+    );
+  }
+
   async updateVariant(tenantId: string, id: string, dto: UpdateVariantDto) {
     const existing = await this.prisma.productVariant.findFirst({
       where: { id, tenantId },

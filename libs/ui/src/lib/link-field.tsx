@@ -42,27 +42,26 @@ interface LinkFieldProps {
   field: DocFieldDefinition;
   value: string;
   onChange: (val: string) => void;
+  /** Optional custom fetcher for testing or different API structures */
+  fetchOptions?: (doctype: string) => Promise<any[]>;
 }
-
-// We need a way to fetch data. passing a fetcher prop or using a global fetcher context is best.
-// For now, let's assume a global fetcher function exists or we mock it.
-// To keep libs/ui pure, we should probably pass `fetchOptions`.
-// But for simplicity in this monolith, I'll allow passing a fetch callback 
-// OR assume a default API location if we want to be opinionated.
-// Better: Add a prop `fetchList: (doctype) => Promise<any[]>`
 
 // Cache expiry time in milliseconds (5 minutes)
 const CACHE_TTL = 5 * 60 * 1000;
 
-export const LinkField = ({ field, value, onChange }: LinkFieldProps) => {
+export const LinkField = ({ field, value, onChange, fetchOptions }: LinkFieldProps) => {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [lastFetchTime, setLastFetchTime] = useState<number>(0);
+  
+  // Use options as the standard source for DocType, fallback to target
+  const docType = field.options || field.target;
 
   // Fetch logic with cache expiry
   useEffect(() => {
     if (!open) return; // Only fetch when opened
+    if (!docType) return;
     
     // Check if cache is still valid
     const now = Date.now();
@@ -72,22 +71,29 @@ export const LinkField = ({ field, value, onChange }: LinkFieldProps) => {
     const load = async () => {
         setLoading(true);
         try {
-            // Hardcoded fetch for now, matching the desk api structure
-            // In a real lib we would inject this dependency
-            const res = await fetch(`/api/v1/${field.target}`);
-            if (res.ok) {
-                const json = await res.json();
-                setItems(json);
+            let data: any[] = [];
+            if (fetchOptions) {
+                data = await fetchOptions(docType);
+            } else {
+                // Default to standard Universal Controller endpoint
+                const res = await fetch(`/api/v1/${docType}`);
+                if (res.ok) {
+                    data = await res.json();
+                }
+            }
+            
+            if (Array.isArray(data)) {
+                setItems(data);
                 setLastFetchTime(Date.now());
             }
         } catch (e) {
-            console.error("Link fetch failed", e);
+            console.error(`Link fetch failed for ${docType}`, e);
         } finally {
             setLoading(false);
         }
     };
     load();
-  }, [open, field.target, items.length, lastFetchTime]);
+  }, [open, docType, items.length, lastFetchTime, fetchOptions]);
   
   // Force refresh when dropdown opens after being closed for a while
   const handleOpenChange = (isOpen: boolean) => {
@@ -116,7 +122,7 @@ export const LinkField = ({ field, value, onChange }: LinkFieldProps) => {
         </PopoverTrigger>
         <PopoverContent className="w-[320px] p-0" align="start">
           <Command>
-            <CommandInput placeholder={`Search ${field.target}...`} />
+            <CommandInput placeholder={`Search ${docType}...`} />
             <CommandList>
                 {loading && <div className="py-2 px-2 text-sm text-muted-foreground">Loading...</div>}
                 <CommandEmpty>No results found.</CommandEmpty>

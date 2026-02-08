@@ -266,7 +266,7 @@ export class PaymentsService {
 
   /**
    * Deduct stock for order items
-   * Also releases stock reservations made during checkout
+   * Intelligence: Deducts from warehouses where stock was reserved (or has availability)
    */
   private async deductStockForOrder(order: any) {
     if (!order.items || order.items.length === 0) {
@@ -274,63 +274,131 @@ export class PaymentsService {
       return;
     }
 
-    // Get default warehouse (in production, this would be based on shipping location)
-    const warehouse = await this.prisma.warehouse.findFirst({
-      where: {
-        tenantId: order.tenantId,
-        isActive: true,
-      },
-      orderBy: { createdAt: 'asc' },
-    });
+    // Track allocations to perform batched movements later
+    // Map<WarehouseCode, { itemCode: string; quantity: number; rate: number }[]>
+    const warehouseMovements = new Map<string, any[]>();
+    
+    // Track reservations to release
+    // Array<{ itemId: string; warehouseId: string; qty: number }>
+    const reservationsToRelease = [];
 
-    if (!warehouse) {
-      throw new Error(`No active warehouse found for tenant ${order.tenantId}`);
+    for (const orderItem of order.items) {
+      let remainingToDeduct = orderItem.quantity;
+      if (remainingToDeduct === 0) continue;
+
+      // Find warehouses with stock (prioritizing those with reservations/active stock)
+      // Matches the reservation logic in checkout.service.ts
+      const balances = await this.prisma.warehouseItemBalance.findMany({
+        where: {
+          tenantId: order.tenantId,
+          itemId: orderItem.product.item.id,
+          actualQty: { gt: 0 },
+        },
+        include: { warehouse: true },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      if (balances.length === 0) {
+        this.logger.error(`CRITICAL: No stock found for item ${orderItem.product.item.code} in order ${order.orderNumber} despite passing checkout validation.`);
+        // Fallback: Force deduct from first active warehouse to maintain ledger integrity (will go negative)
+        const fallbackWarehouse = await this.prisma.warehouse.findFirst({
+           where: { tenantId: order.tenantId, isActive: true }
+        });
+        if (fallbackWarehouse) {
+           this.addToMap(warehouseMovements, fallbackWarehouse.code, orderItem, remainingToDeduct);
+           // We can't release reservation properly if we don't know where it is, but we'll try to release from fallback
+           reservationsToRelease.push({ 
+             itemId: orderItem.product.item.id, 
+             warehouseId: fallbackWarehouse.id, 
+             qty: remainingToDeduct 
+           });
+        }
+        continue;
+      }
+
+      for (const balance of balances) {
+        if (remainingToDeduct <= 0) break;
+
+        // We use actualQty as the limit for deduction logic here
+        // (Checkout reserved it, so actualQty satisfies it)
+        const availableInBalance = Number(balance.actualQty);
+        const take = Math.min(remainingToDeduct, availableInBalance);
+
+        if (take > 0) {
+          this.addToMap(warehouseMovements, balance.warehouse.code, orderItem, take);
+          
+          reservationsToRelease.push({
+            itemId: orderItem.product.item.id,
+            warehouseId: balance.warehouseId,
+            qty: take,
+          });
+
+          remainingToDeduct -= take;
+        }
+      }
+
+      // If still remaining (data inconsistency), force deduct from last checked warehouse
+      if (remainingToDeduct > 0 && balances.length > 0) {
+        const lastBalance = balances[balances.length - 1];
+        this.addToMap(warehouseMovements, lastBalance.warehouse.code, orderItem, remainingToDeduct);
+        reservationsToRelease.push({
+            itemId: orderItem.product.item.id,
+            warehouseId: lastBalance.warehouseId,
+            qty: remainingToDeduct,
+        });
+      }
     }
 
-    // Prepare stock movement items
-    const items = order.items.map((orderItem: any) => ({
-      itemCode: orderItem.product.item.code,
-      quantity: orderItem.quantity,
-      rate: Number(orderItem.unitPrice),
-    }));
+    // Execute Stock Movements (Decrement Actual Qty)
+    for (const [warehouseCode, items] of warehouseMovements.entries()) {
+      await this.stockMovementService.createMovement(
+        { tenantId: order.tenantId },
+        {
+          movementType: MovementType.ISSUE,
+          postingDate: new Date().toISOString().split('T')[0],
+          warehouseCode,
+          items,
+          reference: `Order ${order.orderNumber}`,
+          remarks: `Stock issued for order ${order.orderNumber} (Payment ID: ${order.stripePaymentIntentId})`,
+        }
+      );
+    }
 
-    // Issue stock via stock movement service (this decrements actualQty)
-    await this.stockMovementService.createMovement(
-      { tenantId: order.tenantId },
-      {
-        movementType: MovementType.ISSUE,
-        postingDate: new Date().toISOString().split('T')[0],
-        warehouseCode: warehouse.code,
-        items,
-        reference: `Order ${order.orderNumber}`,
-        remarks: `Stock issued for order ${order.orderNumber} (Payment ID: ${order.stripePaymentIntentId})`,
-      }
-    );
-
-    // Release stock reservations (decrement reservedQty)
-    // Stock was reserved during checkout, now we release it since actualQty was already decremented
-    await this.releaseStockReservations(order, warehouse.id);
+    // Release Stock Reservations (Decrement Reserved Qty)
+    for (const res of reservationsToRelease) {
+      await this.prisma.warehouseItemBalance.update({
+        where: {
+          tenantId_itemId_warehouseId: {
+              tenantId: order.tenantId,
+              itemId: res.itemId,
+              warehouseId: res.warehouseId
+          }
+        },
+        data: {
+          reservedQty: { decrement: res.qty },
+        },
+      });
+    }
 
     this.logger.log(`Stock deducted and reservations released for order: ${order.orderNumber}`);
   }
 
+  private addToMap(map: Map<string, any[]>, key: string, orderItem: any, qty: number) {
+    const list = map.get(key) || [];
+    list.push({
+      itemCode: orderItem.product.item.code,
+      quantity: qty,
+      rate: Number(orderItem.unitPrice),
+    });
+    map.set(key, list);
+  }
+
   /**
    * Release stock reservations for order items
-   * Called after stock movement is created (actualQty already decremented)
+   * Legacy method - kept if needed but deductStockForOrder now handles this internally per warehouse
    */
   private async releaseStockReservations(order: any, warehouseId: string) {
-    for (const orderItem of order.items) {
-      await this.prisma.warehouseItemBalance.updateMany({
-        where: {
-          tenantId: order.tenantId,
-          itemId: orderItem.product.item.id,
-          warehouseId,
-        },
-        data: {
-          reservedQty: { decrement: orderItem.quantity },
-        },
-      });
-    }
+     // No-op, handled in deductStockForOrder
   }
 
   /**
