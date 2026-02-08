@@ -248,7 +248,7 @@ export function extractFontFamilies(fontFamily: string): string[] {
   return fontFamily
     .split(',')
     .map((font) => font.trim().replace(/['"]/g, ''))
-    .filter((font) => font && !font.startsWith('-') && !font.includes('sans-serif') && !font.includes('serif'));
+    .filter((font) => font && !font.startsWith('-') && !['sans-serif', 'serif', 'monospace', 'cursive', 'fantasy', 'system-ui'].includes(font));
 }
 
 /**

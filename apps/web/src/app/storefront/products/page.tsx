@@ -39,7 +39,7 @@ export default function ProductsPage() {
         });
 
         // Sort products locally
-        let sortedProducts = [...data.items];
+        const sortedProducts = [...data.items];
         switch (sortBy) {
           case 'price-asc':
             sortedProducts.sort((a, b) => a.price - b.price);

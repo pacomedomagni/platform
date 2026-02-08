@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '@platform/db';
+import { EmailService, EmailTemplateService } from '@platform/email';
 import { OperationType, OperationStatus, Prisma, FailedOperation } from '@prisma/client';
 
 interface CreateFailedOperationDto {
@@ -281,8 +282,6 @@ export class FailedOperationsService {
       throw new Error('Email payload missing emailOptions');
     }
 
-    const { EmailService } = await import('@platform/email');
-    const { EmailTemplateService } = await import('@platform/email');
     const templateService = new EmailTemplateService();
     const emailService = new EmailService(
       emailOptions.smtpOptions || { smtp: {} },

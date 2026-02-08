@@ -122,7 +122,7 @@ export class SquareOAuthService {
       return { tenantId };
     } catch (error: any) {
       this.logger.error(`Square OAuth callback failed: ${error.message}`);
-      await this.prisma.oAuthState.delete({ where: { id: state } }).catch(() => {});
+      await this.prisma.oAuthState.delete({ where: { id: state } }).catch(() => { /* cleanup best-effort */ });
       throw new BadRequestException('Failed to connect Square account');
     }
   }

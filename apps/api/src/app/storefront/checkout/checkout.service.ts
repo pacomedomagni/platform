@@ -171,7 +171,7 @@ export class CheckoutService {
 
     // Create payment intent — route through connected account if tenant has one
     let stripeClientSecret: string | null = null;
-    let paymentProvider: string = 'stripe';
+    let paymentProvider = 'stripe';
     try {
       const tenant = await this.prisma.tenant.findUnique({
         where: { id: tenantId },
@@ -291,7 +291,7 @@ export class CheckoutService {
     };
 
     let clientSecret: string | null = null;
-    let paymentProvider = 'stripe';
+    const paymentProvider = 'stripe';
 
     if (
       tenant?.paymentProvider === 'stripe' &&

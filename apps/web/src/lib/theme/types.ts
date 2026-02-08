@@ -130,7 +130,7 @@ export interface CreateThemeDto {
   [key: string]: unknown;
 }
 
-export interface UpdateThemeDto extends Partial<CreateThemeDto> {}
+export type UpdateThemeDto = Partial<CreateThemeDto>;
 
 export interface ThemePreset {
   id: string;

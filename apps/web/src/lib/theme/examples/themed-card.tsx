@@ -250,7 +250,7 @@ export function ThemePreview() {
         <ThemedInput
           placeholder="Enter some text..."
           value=""
-          onChange={() => {}}
+          onChange={() => { /* noop */ }}
         />
       </div>
 

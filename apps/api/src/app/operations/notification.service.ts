@@ -157,7 +157,7 @@ export class NotificationService {
     const limit = query.limit || 20;
     const offset = (page - 1) * limit;
 
-    let filtered = this.notifications.filter(n => {
+    const filtered = this.notifications.filter(n => {
       if (n.tenantId !== ctx.tenantId) return false;
       if (query.userId && n.userId !== query.userId) return false;
       if (query.types && query.types.length > 0 && !query.types.includes(n.type)) return false;

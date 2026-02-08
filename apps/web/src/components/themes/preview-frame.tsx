@@ -63,7 +63,8 @@ export function PreviewFrame({
   const handleRefresh = () => {
     if (iframeRef.current) {
       setIsLoading(true);
-      iframeRef.current.src = iframeRef.current.src;
+      const currentSrc = iframeRef.current.src;
+      iframeRef.current.src = currentSrc;
     }
   };
 
