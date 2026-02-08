@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import api from '../../../lib/api';
+import { Pagination } from '../_components/pagination';
 
 interface DraftLineItem {
   productName: string;
@@ -57,6 +58,9 @@ export default function DraftOrdersPage() {
   const [form, setForm] = useState({ ...emptyForm });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
 
   const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
   const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '-';
@@ -64,11 +68,13 @@ export default function DraftOrdersPage() {
   const loadOrders = async () => {
     setLoading(true);
     try {
-      const res = await api.get('/v1/store/admin/orders/all', { params: { status: 'DRAFT' } });
+      const res = await api.get('/v1/store/admin/orders/all', { params: { status: 'DRAFT', page, limit: 20 } });
       const data = res.data.data || res.data || [];
       setOrders(data);
+      if (res.data.totalPages != null) setTotalPages(res.data.totalPages);
+      if (res.data.total != null) setTotalItems(res.data.total);
       setStats({
-        count: data.length,
+        count: res.data.total != null ? res.data.total : data.length,
         totalValue: data.reduce((s: number, o: DraftOrder) => s + (o.grandTotal || 0), 0),
       });
     } catch (err: any) {
@@ -78,7 +84,7 @@ export default function DraftOrdersPage() {
     }
   };
 
-  useEffect(() => { loadOrders(); }, []);
+  useEffect(() => { loadOrders(); }, [page]);
 
   const subtotal = () => form.lineItems.reduce((s, li) => s + li.quantity * li.unitPrice, 0);
   const taxAmount = () => subtotal() * (form.taxRate / 100);
@@ -232,6 +238,7 @@ export default function DraftOrdersPage() {
             ))}
           </tbody>
         </table>
+        <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={20} onPageChange={(p) => setPage(p)} />
       </div>
 
       {/* Create/Edit Modal */}

@@ -21,6 +21,9 @@ interface NavItem {
     icon: React.ElementType;
     href: string;
     isActive?: boolean;
+    section?: string;
+    badge?: string;
+    external?: boolean;
 }
 
 interface AppShellProps {
@@ -81,42 +84,53 @@ export const AppShell = ({
                 </div>
 
                 {/* Sidebar Nav */}
-                <div className="flex-1 overflow-y-auto py-4 px-2 space-y-1">
-                    {navItems.map((item) => (
-                        (() => {
-                            const isActive = item.isActive || pathname === item.href || pathname?.startsWith(item.href + '/');
-                            return (
-                        <a 
-                            key={item.label}
-                            href={item.href} 
-                            className={cn(
-                                "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors relative group",
-                                isActive 
-                                    ? "bg-indigo-50/70 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200" 
-                                    : "text-slate-600 hover:bg-slate-100/70 dark:text-slate-400 dark:hover:bg-slate-900"
-                            )}
-                            aria-current={isActive ? 'page' : undefined}
-                        >
-                            <item.icon className={cn("h-5 w-5 shrink-0 transition-colors", isActive ? "text-indigo-600" : "text-slate-500")} />
-                            <span 
-                                className={cn(
-                                    "transition-all duration-300 whitespace-nowrap overflow-hidden",
-                                    collapsed ? "w-0 opacity-0" : "w-auto opacity-100"
+                <div className="flex-1 overflow-y-auto py-4 px-2 space-y-0.5">
+                    {navItems.map((item, idx) => {
+                        const isActive = item.isActive || pathname === item.href || pathname?.startsWith(item.href + '/');
+                        const showSection = item.section && !collapsed && (idx === 0 || navItems[idx - 1]?.section !== item.section);
+                        return (
+                            <React.Fragment key={item.label}>
+                                {showSection && (
+                                    <div className={cn("px-3 pt-4 pb-1.5", idx > 0 && "mt-2 border-t border-slate-100 dark:border-slate-800")}>
+                                        <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">{item.section}</span>
+                                    </div>
                                 )}
-                            >
-                                {item.label}
-                            </span>
-                            
-                            {/* Tooltip for collapsed state */}
-                            {collapsed && (
-                                <div className="absolute left-full ml-2 px-2 py-1 bg-slate-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50">
-                                    {item.label}
-                                </div>
-                            )}
-                        </a>
-                            );
-                        })()
-                    ))}
+                                <a
+                                    href={item.href}
+                                    {...(item.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+                                    className={cn(
+                                        "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors relative group",
+                                        isActive
+                                            ? "bg-indigo-50/70 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200"
+                                            : "text-slate-600 hover:bg-slate-100/70 dark:text-slate-400 dark:hover:bg-slate-900"
+                                    )}
+                                    aria-current={isActive ? 'page' : undefined}
+                                >
+                                    <item.icon className={cn("h-5 w-5 shrink-0 transition-colors", isActive ? "text-indigo-600" : "text-slate-500")} />
+                                    <span
+                                        className={cn(
+                                            "transition-all duration-300 whitespace-nowrap overflow-hidden flex-1",
+                                            collapsed ? "w-0 opacity-0" : "w-auto opacity-100"
+                                        )}
+                                    >
+                                        {item.label}
+                                    </span>
+                                    {item.badge && !collapsed && (
+                                        <span className="ml-auto text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                                            {item.badge}
+                                        </span>
+                                    )}
+
+                                    {/* Tooltip for collapsed state */}
+                                    {collapsed && (
+                                        <div className="absolute left-full ml-2 px-2 py-1 bg-slate-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50">
+                                            {item.label}
+                                        </div>
+                                    )}
+                                </a>
+                            </React.Fragment>
+                        );
+                    })}
                 </div>
 
                 {/* Nav Footer (optional extra content) */}

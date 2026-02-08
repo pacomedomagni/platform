@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import api from '../../../lib/api';
+import { Pagination } from '../_components/pagination';
 
 interface POLineItem {
   description: string;
@@ -82,6 +83,9 @@ export default function PurchaseOrdersPage() {
   const [receiveNotes, setReceiveNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
 
   const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
   const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '-';
@@ -96,11 +100,13 @@ export default function PurchaseOrdersPage() {
   const loadOrders = async () => {
     setLoading(true);
     try {
-      const params: Record<string, string> = {};
+      const params: Record<string, string | number> = { page, limit: 20 };
       if (search) params.search = search;
       if (statusFilter) params.status = statusFilter;
       const res = await api.get('/v1/store/admin/purchase-orders', { params });
       setOrders(res.data.data || res.data || []);
+      if (res.data.totalPages != null) setTotalPages(res.data.totalPages);
+      if (res.data.total != null) setTotalItems(res.data.total);
     } catch (err: any) {
       console.error('Failed to load purchase orders:', err);
     } finally {
@@ -112,7 +118,7 @@ export default function PurchaseOrdersPage() {
   useEffect(() => {
     const t = setTimeout(() => loadOrders(), 300);
     return () => clearTimeout(t);
-  }, [search, statusFilter]);
+  }, [search, statusFilter, page]);
 
   const openCreate = () => {
     setEditingId(null);
@@ -276,8 +282,8 @@ export default function PurchaseOrdersPage() {
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search purchase orders..." className="flex-1 border rounded-lg px-3 py-2 text-sm" />
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="border rounded-lg px-3 py-2 text-sm sm:w-52">
+        <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} placeholder="Search purchase orders..." className="flex-1 border rounded-lg px-3 py-2 text-sm" />
+        <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1); }} className="border rounded-lg px-3 py-2 text-sm sm:w-52">
           <option value="">All Statuses</option>
           {['DRAFT', 'SUBMITTED', 'APPROVED', 'PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED'].map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
         </select>
@@ -323,6 +329,7 @@ export default function PurchaseOrdersPage() {
             ))}
           </tbody>
         </table>
+        <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={20} onPageChange={(p) => setPage(p)} />
       </div>
 
       {/* Create/Edit Modal */}

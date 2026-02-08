@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import api from '../../../lib/api';
+import { Pagination } from '../_components/pagination';
 
 interface Customer {
   id: string;
@@ -40,6 +41,9 @@ export default function CrmPage() {
   const [customerSearch, setCustomerSearch] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
 
   // Notes state
   const [notes, setNotes] = useState<Note[]>([]);
@@ -58,10 +62,12 @@ export default function CrmPage() {
 
   const loadCustomers = async () => {
     try {
-      const params: any = {};
+      const params: any = { page, limit: 20 };
       if (customerSearch) params.search = customerSearch;
       const res = await api.get('/v1/store/admin/customers', { params });
       setCustomers(res.data.data || res.data || []);
+      if (res.data.totalPages != null) setTotalPages(res.data.totalPages);
+      if (res.data.total != null) setTotalItems(res.data.total);
     } catch (err) {
       console.error('Failed to load customers:', err);
     } finally {
@@ -86,7 +92,7 @@ export default function CrmPage() {
   useEffect(() => {
     const debounce = setTimeout(() => { loadCustomers(); }, 300);
     return () => clearTimeout(debounce);
-  }, [customerSearch]);
+  }, [customerSearch, page]);
 
   const selectCustomer = async (customer: Customer) => {
     setSelectedCustomer(customer);
@@ -235,7 +241,7 @@ export default function CrmPage() {
         <div className="w-80 flex-shrink-0 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden">
           <div className="p-3 border-b border-slate-200">
             <input
-              value={customerSearch} onChange={(e) => setCustomerSearch(e.target.value)}
+              value={customerSearch} onChange={(e) => { setCustomerSearch(e.target.value); setPage(1); }}
               placeholder="Search customers..."
               className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
             />
@@ -258,6 +264,7 @@ export default function CrmPage() {
               ))
             )}
           </div>
+          <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={20} onPageChange={(p) => setPage(p)} />
         </div>
 
         {/* Main Area */}

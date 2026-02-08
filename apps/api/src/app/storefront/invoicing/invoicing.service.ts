@@ -89,8 +89,17 @@ export class InvoicingService {
   }
 
   async createInvoice(tenantId: string, data: any) {
-    const nextNum = await this.prisma.invoice.count({ where: { tenantId } });
-    const invoiceNumber = `INV-${String(nextNum + 1).padStart(5, '0')}`;
+    const lastInvoice = await this.prisma.invoice.findFirst({
+      where: { tenantId },
+      orderBy: { createdAt: 'desc' },
+      select: { invoiceNumber: true },
+    });
+    let nextNum = 1;
+    if (lastInvoice?.invoiceNumber) {
+      const match = lastInvoice.invoiceNumber.match(/INV-(\d+)/);
+      if (match) nextNum = parseInt(match[1], 10) + 1;
+    }
+    const invoiceNumber = `INV-${String(nextNum).padStart(5, '0')}`;
 
     const items = data.items || [];
     const subtotal = items.reduce((sum: number, i: any) => sum + (Number(i.quantity) * Number(i.unitPrice) - Number(i.discount || 0)), 0);

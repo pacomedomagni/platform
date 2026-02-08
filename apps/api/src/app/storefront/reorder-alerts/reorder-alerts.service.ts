@@ -256,8 +256,17 @@ export class ReorderAlertsService {
     }
 
     // Generate PO number
-    const poCount = await this.prisma.purchaseOrder.count({ where: { tenantId } });
-    const poNumber = `PO-${String(poCount + 1).padStart(5, '0')}`;
+    const lastPO = await this.prisma.purchaseOrder.findFirst({
+      where: { tenantId },
+      orderBy: { createdAt: 'desc' },
+      select: { poNumber: true },
+    });
+    let nextPONum = 1;
+    if (lastPO?.poNumber) {
+      const match = lastPO.poNumber.match(/PO-(\d+)/);
+      if (match) nextPONum = parseInt(match[1], 10) + 1;
+    }
+    const poNumber = `PO-${String(nextPONum).padStart(5, '0')}`;
 
     const unitPrice = item.productListing?.costPrice ? Number(item.productListing.costPrice) : 0;
     const quantity = Number(alert.suggestedQty);

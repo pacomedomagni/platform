@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import api from '../../../lib/api';
+import { Pagination } from '../_components/pagination';
 
 interface TaxRule {
   id: string;
@@ -35,12 +36,18 @@ export default function TaxRulesPage() {
   const [form, setForm] = useState({ ...emptyForm });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
 
   const loadRules = async () => {
     setLoading(true);
     try {
-      const res = await api.get('/v1/store/admin/tax-rules');
+      const res = await api.get('/v1/store/admin/tax-rules', { params: { page, limit: 20 } });
       setRules(res.data.data || res.data || []);
+      const total = res.data.pagination?.total ?? res.data.total ?? 0;
+      setTotalItems(total);
+      setTotalPages(Math.max(1, Math.ceil(total / 20)));
     } catch (err: any) {
       console.error('Failed to load tax rules:', err);
     } finally {
@@ -48,7 +55,7 @@ export default function TaxRulesPage() {
     }
   };
 
-  useEffect(() => { loadRules(); }, []);
+  useEffect(() => { loadRules(); }, [page]);
 
   const openCreate = () => {
     setEditingId(null);
@@ -161,6 +168,8 @@ export default function TaxRulesPage() {
           </tbody>
         </table>
       </div>
+
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={20} onPageChange={(p) => setPage(p)} />
 
       {/* Create/Edit Modal */}
       {showModal && (

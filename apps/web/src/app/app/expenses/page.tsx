@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import api from '../../../lib/api';
+import { Pagination } from '../_components/pagination';
 
 interface Expense {
   id: string;
@@ -58,6 +59,9 @@ export default function ExpensesPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [useNewCategory, setUseNewCategory] = useState(false);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
 
   const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
   const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '-';
@@ -79,13 +83,16 @@ export default function ExpensesPage() {
   const loadExpenses = async () => {
     setLoading(true);
     try {
-      const params: Record<string, string> = {};
+      const params: Record<string, string | number> = { page, limit: 20 };
       if (search) params.search = search;
       if (categoryFilter) params.category = categoryFilter;
       if (dateFrom) params.dateFrom = dateFrom;
       if (dateTo) params.dateTo = dateTo;
       const res = await api.get('/v1/store/admin/expenses', { params });
       setExpenses(res.data.data || res.data || []);
+      const total = res.data.pagination?.total ?? res.data.total ?? 0;
+      setTotalItems(total);
+      setTotalPages(Math.ceil(total / 20) || 1);
     } catch (err: any) {
       console.error('Failed to load expenses:', err);
     } finally {
@@ -101,7 +108,7 @@ export default function ExpensesPage() {
   useEffect(() => {
     const t = setTimeout(() => loadExpenses(), 300);
     return () => clearTimeout(t);
-  }, [search, categoryFilter, dateFrom, dateTo]);
+  }, [search, categoryFilter, dateFrom, dateTo, page]);
 
   const openCreate = () => {
     setEditingId(null);
@@ -219,13 +226,13 @@ export default function ExpensesPage() {
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3">
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search expenses..." className="flex-1 border rounded-lg px-3 py-2 text-sm" />
-        <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} className="border rounded-lg px-3 py-2 text-sm sm:w-44">
+        <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} placeholder="Search expenses..." className="flex-1 border rounded-lg px-3 py-2 text-sm" />
+        <select value={categoryFilter} onChange={e => { setCategoryFilter(e.target.value); setPage(1); }} className="border rounded-lg px-3 py-2 text-sm sm:w-44">
           <option value="">All Categories</option>
           {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
         </select>
-        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" placeholder="From" />
-        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="border rounded-lg px-3 py-2 text-sm" placeholder="To" />
+        <input type="date" value={dateFrom} onChange={e => { setDateFrom(e.target.value); setPage(1); }} className="border rounded-lg px-3 py-2 text-sm" placeholder="From" />
+        <input type="date" value={dateTo} onChange={e => { setDateTo(e.target.value); setPage(1); }} className="border rounded-lg px-3 py-2 text-sm" placeholder="To" />
       </div>
 
       {/* Table */}
@@ -269,6 +276,7 @@ export default function ExpensesPage() {
             ))}
           </tbody>
         </table>
+        <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={20} onPageChange={(p) => setPage(p)} />
       </div>
 
       {/* Create/Edit Modal */}

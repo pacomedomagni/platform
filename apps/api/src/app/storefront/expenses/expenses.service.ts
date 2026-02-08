@@ -61,8 +61,17 @@ export class ExpensesService {
   }
 
   async createExpense(tenantId: string, data: any) {
-    const nextNum = await this.prisma.expense.count({ where: { tenantId } });
-    const expenseNumber = `EXP-${String(nextNum + 1).padStart(5, '0')}`;
+    const lastExpense = await this.prisma.expense.findFirst({
+      where: { tenantId },
+      orderBy: { createdAt: 'desc' },
+      select: { expenseNumber: true },
+    });
+    let nextNum = 1;
+    if (lastExpense?.expenseNumber) {
+      const match = lastExpense.expenseNumber.match(/EXP-(\d+)/);
+      if (match) nextNum = parseInt(match[1], 10) + 1;
+    }
+    const expenseNumber = `EXP-${String(nextNum).padStart(5, '0')}`;
 
     const expense = await this.prisma.expense.create({
       data: {

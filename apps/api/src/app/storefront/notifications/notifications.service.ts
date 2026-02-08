@@ -1,9 +1,12 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { Prisma } from '@prisma/client';
+import twilio from 'twilio';
 
 @Injectable()
 export class NotificationsService {
+  private readonly logger = new Logger(NotificationsService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async listChannels(tenantId: string) {
@@ -309,25 +312,49 @@ export class NotificationsService {
     };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private async dispatchToProvider(
     channel: { type: string; provider: string; config: unknown },
     data: { recipient: string; content: string },
   ): Promise<string | null> {
-    // Provider dispatch placeholder
-    // In production, integrate with Twilio, MessageBird, etc.
-    //
-    // Example for Twilio:
-    // const config = channel.config as { accountSid: string; authToken: string; fromNumber: string };
-    // const client = twilio(config.accountSid, config.authToken);
-    // const message = await client.messages.create({
-    //   body: data.content,
-    //   from: channel.type === 'whatsapp' ? `whatsapp:${config.fromNumber}` : config.fromNumber,
-    //   to: channel.type === 'whatsapp' ? `whatsapp:${data.recipient}` : data.recipient,
-    // });
-    // return message.sid;
+    const config = channel.config as {
+      accountSid?: string;
+      authToken?: string;
+      fromNumber?: string;
+    };
 
-    // For now, return a mock external ID
-    return `mock_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    if (channel.provider === 'twilio') {
+      if (!config.accountSid || !config.authToken || !config.fromNumber) {
+        throw new BadRequestException(
+          'Twilio credentials not configured. Please set Account SID, Auth Token, and From Number.',
+        );
+      }
+
+      const client = twilio(config.accountSid, config.authToken);
+
+      const isWhatsApp = channel.type.toLowerCase() === 'whatsapp';
+      const from = isWhatsApp
+        ? `whatsapp:${config.fromNumber}`
+        : config.fromNumber;
+      const to = isWhatsApp
+        ? `whatsapp:${data.recipient}`
+        : data.recipient;
+
+      const message = await client.messages.create({
+        body: data.content,
+        from,
+        to,
+      });
+
+      this.logger.log(
+        `Twilio ${channel.type} message sent: ${message.sid} to ${data.recipient}`,
+      );
+
+      return message.sid;
+    }
+
+    // For unsupported providers, throw clear error
+    throw new BadRequestException(
+      `Provider "${channel.provider}" is not supported. Currently supported: twilio`,
+    );
   }
 }

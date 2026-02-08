@@ -3,13 +3,22 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
+  Logger,
+  Optional,
+  Inject,
 } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { Prisma, ReturnStatus } from '@prisma/client';
+import { StripeService } from '../payments/stripe.service';
 
 @Injectable()
 export class ReturnsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(ReturnsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() @Inject(StripeService) private readonly stripeService?: StripeService,
+  ) {}
 
   /**
    * List returns with pagination, filter by status.
@@ -329,7 +338,7 @@ export class ReturnsService {
   }
 
   /**
-   * Process refund - set REFUNDED with refund amount.
+   * Process refund - attempts Stripe refund if original_payment, then marks REFUNDED.
    */
   async processRefund(
     tenantId: string,
@@ -354,13 +363,43 @@ export class ReturnsService {
       );
     }
 
+    const refundMethod = data.refundMethod || 'original_payment';
+    let stripeRefundId: string | null = null;
+
+    // If refunding to original payment method, attempt Stripe refund
+    if (refundMethod === 'original_payment' && returnRequest.orderId) {
+      const order = await this.prisma.order.findFirst({
+        where: { id: returnRequest.orderId, tenantId },
+        select: { stripePaymentIntentId: true },
+      });
+
+      if (order?.stripePaymentIntentId && this.stripeService?.isConfigured()) {
+        try {
+          const refund = await this.stripeService.createRefund(
+            order.stripePaymentIntentId,
+            data.refundAmount,
+            'requested_by_customer',
+            `refund_return_${id}`,
+          );
+          stripeRefundId = refund.id;
+          this.logger.log(`Stripe refund ${refund.id} created for return ${id}`);
+        } catch (err) {
+          this.logger.error(`Stripe refund failed for return ${id}: ${err}`);
+          throw new BadRequestException(
+            'Failed to process Stripe refund. Please try again or use a different refund method.',
+          );
+        }
+      }
+    }
+
     const updated = await this.prisma.returnRequest.update({
       where: { id },
       data: {
         status: 'REFUNDED',
         refundAmount: data.refundAmount,
-        refundMethod: data.refundMethod || 'original_payment',
+        refundMethod,
         refundedAt: new Date(),
+        ...(stripeRefundId && { notes: `${returnRequest.notes || ''}\nStripe Refund: ${stripeRefundId}`.trim() }),
       },
       include: { items: true },
     });

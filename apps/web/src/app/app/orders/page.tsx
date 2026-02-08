@@ -6,6 +6,7 @@ import { Download, RefreshCw, Package, Clock, Truck, CheckCircle } from 'lucide-
 import api from '../../../lib/api';
 import { OrderFilters } from './_components/order-filters';
 import { OrderTable } from './_components/order-table';
+import { Pagination } from '../_components/pagination';
 
 interface OrderStats {
   pending: number;
@@ -41,16 +42,22 @@ export default function OrdersPage() {
   const [status, setStatus] = useState('');
   const [paymentStatus, setPaymentStatus] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
 
   const loadOrders = async () => {
     try {
-      const params: any = {};
+      const params: any = { page, limit: 20 };
       if (search) params.search = search;
       if (status) params.status = status;
       if (paymentStatus) params.paymentStatus = paymentStatus;
 
       const res = await api.get('/v1/store/admin/orders/all', { params });
       setOrders(res.data.data || []);
+      const total = res.data.pagination?.total ?? res.data.total ?? 0;
+      setTotalItems(total);
+      setTotalPages(Math.max(1, Math.ceil(total / 20)));
 
       // Calculate stats
       const allOrders = res.data.data || [];
@@ -94,11 +101,12 @@ export default function OrdersPage() {
     setSearch('');
     setStatus('');
     setPaymentStatus('');
+    setPage(1);
   };
 
   useEffect(() => {
     loadOrders();
-  }, [search, status, paymentStatus]);
+  }, [search, status, paymentStatus, page]);
 
   // Auto-refresh every 30 seconds
   useEffect(() => {
@@ -109,7 +117,7 @@ export default function OrdersPage() {
     }, 30000);
 
     return () => clearInterval(interval);
-  }, [autoRefresh, search, status, paymentStatus]);
+  }, [autoRefresh, search, status, paymentStatus, page]);
 
   const statCards = [
     {
@@ -192,9 +200,9 @@ export default function OrdersPage() {
           search={search}
           status={status}
           paymentStatus={paymentStatus}
-          onSearchChange={setSearch}
-          onStatusChange={setStatus}
-          onPaymentStatusChange={setPaymentStatus}
+          onSearchChange={(v) => { setSearch(v); setPage(1); }}
+          onStatusChange={(v) => { setStatus(v); setPage(1); }}
+          onPaymentStatusChange={(v) => { setPaymentStatus(v); setPage(1); }}
           onClear={handleClearFilters}
         />
       </Card>
@@ -202,6 +210,7 @@ export default function OrdersPage() {
       {/* Orders Table */}
       <Card className="p-5">
         <OrderTable orders={orders} loading={loading} />
+        <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={20} onPageChange={(p) => setPage(p)} />
       </Card>
     </div>
   );

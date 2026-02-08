@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import api from '../../../lib/api';
+import { Pagination } from '../_components/pagination';
 
 interface DiscountRule {
   id: string;
@@ -70,11 +71,17 @@ export default function DiscountRulesPage() {
   const [testQuantity, setTestQuantity] = useState('');
   const [testResults, setTestResults] = useState<any[] | null>(null);
   const [testLoading, setTestLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
 
   const loadRules = async () => {
     try {
-      const res = await api.get('/v1/store/admin/discount-rules');
+      const res = await api.get('/v1/store/admin/discount-rules', { params: { page, limit: 20 } });
       setRules(res.data.data || res.data || []);
+      const total = res.data.pagination?.total ?? res.data.total ?? 0;
+      setTotalItems(total);
+      setTotalPages(Math.max(1, Math.ceil(total / 20)));
     } catch (err) {
       console.error('Failed to load discount rules:', err);
     } finally {
@@ -84,7 +91,7 @@ export default function DiscountRulesPage() {
 
   useEffect(() => {
     loadRules();
-  }, []);
+  }, [page]);
 
   const openCreate = () => {
     setEditingId(null);
@@ -299,6 +306,8 @@ export default function DiscountRulesPage() {
           </table>
         </div>
       </div>
+
+      <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={20} onPageChange={(p) => setPage(p)} />
 
       {/* Test Discount Section */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">

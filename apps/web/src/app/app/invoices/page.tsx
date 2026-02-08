@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import api from '../../../lib/api';
+import { Pagination } from '../_components/pagination';
 
 interface LineItem {
   description: string;
@@ -75,6 +76,9 @@ export default function InvoicesPage() {
   const [paymentForm, setPaymentForm] = useState({ amount: 0, date: new Date().toISOString().split('T')[0], method: 'bank_transfer', reference: '', notes: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
 
   const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
   const fmtDate = (d: string) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '-';
@@ -89,11 +93,17 @@ export default function InvoicesPage() {
   const loadInvoices = async () => {
     setLoading(true);
     try {
-      const params: Record<string, string> = {};
+      const params: Record<string, string | number> = { page, limit: 20 };
       if (search) params.search = search;
       if (statusFilter) params.status = statusFilter;
       const res = await api.get('/v1/store/admin/invoices', { params });
       setInvoices(res.data.data || res.data || []);
+      const pagination = res.data.pagination;
+      if (pagination) {
+        const total = pagination.total || 0;
+        setTotalItems(total);
+        setTotalPages(Math.ceil(total / 20) || 1);
+      }
     } catch (err: any) {
       console.error('Failed to load invoices:', err);
     } finally {
@@ -106,9 +116,13 @@ export default function InvoicesPage() {
   }, []);
 
   useEffect(() => {
+    setPage(1);
+  }, [search, statusFilter]);
+
+  useEffect(() => {
     const t = setTimeout(() => loadInvoices(), 300);
     return () => clearTimeout(t);
-  }, [search, statusFilter]);
+  }, [search, statusFilter, page]);
 
   const openCreate = () => {
     setEditingId(null);
@@ -305,6 +319,7 @@ export default function InvoicesPage() {
             ))}
           </tbody>
         </table>
+        <Pagination page={page} totalPages={totalPages} totalItems={totalItems} pageSize={20} onPageChange={(p) => setPage(p)} />
       </div>
 
       {/* Create/Edit Modal */}

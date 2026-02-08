@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import api from '../../../lib/api';
+import { Pagination } from '../_components/pagination';
 
 interface ReturnStats {
   totalReturns: number;
@@ -63,6 +64,9 @@ export default function ReturnsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showRefundModal, setShowRefundModal] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
 
   // Create form state
   const [createOrderNumber, setCreateOrderNumber] = useState('');
@@ -79,7 +83,7 @@ export default function ReturnsPage() {
 
   const loadData = async () => {
     try {
-      const params: any = {};
+      const params: any = { page, limit: 20 };
       if (search) params.search = search;
       if (statusFilter) params.status = statusFilter;
       const [returnsRes, statsRes] = await Promise.all([
@@ -87,6 +91,9 @@ export default function ReturnsPage() {
         api.get('/v1/store/admin/returns/stats'),
       ]);
       setReturns(returnsRes.data.data || returnsRes.data || []);
+      const pagination = returnsRes.data.pagination || returnsRes.data.meta || {};
+      setTotalItems(pagination.total || pagination.totalItems || 0);
+      setTotalPages(pagination.totalPages || pagination.lastPage || Math.ceil((pagination.total || 0) / 20) || 1);
       const s = statsRes.data.data || statsRes.data || {};
       setStats({
         totalReturns: s.totalReturns || 0,
@@ -104,7 +111,7 @@ export default function ReturnsPage() {
 
   useEffect(() => {
     loadData();
-  }, [search, statusFilter]);
+  }, [search, statusFilter, page]);
 
   const lookupOrder = async () => {
     if (!createOrderNumber.trim()) return;
@@ -222,10 +229,10 @@ export default function ReturnsPage() {
       {/* Filters */}
       <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-wrap gap-3">
         <input
-          value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search returns..."
+          value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder="Search returns..."
           className="flex-1 min-w-[200px] px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
         />
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+        <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
           className="px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
           <option value="">All Statuses</option>
           {statuses.map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
@@ -363,6 +370,15 @@ export default function ReturnsPage() {
             </div>
           );
         })()}
+
+        {/* Pagination */}
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          totalItems={totalItems}
+          pageSize={20}
+          onPageChange={(p) => setPage(p)}
+        />
       </div>
 
       {/* Create Return Modal */}

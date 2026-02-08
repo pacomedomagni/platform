@@ -81,8 +81,17 @@ export class PurchaseOrdersService {
   }
 
   async createPurchaseOrder(tenantId: string, data: any) {
-    const nextNum = await this.prisma.purchaseOrder.count({ where: { tenantId } });
-    const poNumber = `PO-${String(nextNum + 1).padStart(5, '0')}`;
+    const lastPO = await this.prisma.purchaseOrder.findFirst({
+      where: { tenantId },
+      orderBy: { createdAt: 'desc' },
+      select: { poNumber: true },
+    });
+    let nextNum = 1;
+    if (lastPO?.poNumber) {
+      const match = lastPO.poNumber.match(/PO-(\d+)/);
+      if (match) nextNum = parseInt(match[1], 10) + 1;
+    }
+    const poNumber = `PO-${String(nextNum).padStart(5, '0')}`;
 
     const items = data.items || [];
     const subtotal = items.reduce((sum: number, i: any) => sum + Number(i.quantity) * Number(i.unitPrice), 0);
