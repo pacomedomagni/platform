@@ -48,7 +48,7 @@ export default function OrdersPage() {
 
   const loadOrders = async () => {
     try {
-      const params: any = { page, limit: 20 };
+      const params: any = { offset: (page - 1) * 20, limit: 20 };
       if (search) params.search = search;
       if (status) params.status = status;
       if (paymentStatus) params.paymentStatus = paymentStatus;

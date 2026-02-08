@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Put,
   Param,
   Query,
@@ -129,6 +130,21 @@ export class OrdersController {
       carrier: body.carrier,
       trackingNumber: body.trackingNumber,
     });
+  }
+
+  /**
+   * Process refund for an order (admin)
+   * POST /api/v1/store/admin/orders/:id/refund
+   */
+  @Post('admin/:id/refund')
+  @UseGuards(StoreAdminGuard)
+  async processRefund(
+    @Headers('x-tenant-id') tenantId: string,
+    @Param('id') id: string,
+    @Body() body: { amount: number; reason: string; type: 'full' | 'partial' },
+  ) {
+    if (!tenantId) throw new BadRequestException('Tenant ID required');
+    return this.ordersService.processRefund(tenantId, id, body);
   }
 
   // ============ HELPERS ============

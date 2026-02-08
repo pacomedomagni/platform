@@ -25,7 +25,7 @@ interface PageSeo {
   title: string;
   metaTitle: string;
   metaDescription: string;
-  ogImageUrl: string;
+  ogImage: string;
   slug: string;
 }
 
@@ -176,7 +176,7 @@ export default function SeoPage() {
     setSelectedPage(page);
     setPageMetaTitle(page.metaTitle || '');
     setPageMetaDesc(page.metaDescription || '');
-    setPageOgImage(page.ogImageUrl || '');
+    setPageOgImage(page.ogImage || '');
     setPageSaved(false);
   };
 
@@ -188,7 +188,7 @@ export default function SeoPage() {
       await api.put(`/v1/store/admin/seo/pages/${selectedPage.id}`, {
         metaTitle: pageMetaTitle,
         metaDescription: pageMetaDesc,
-        ogImageUrl: pageOgImage,
+        ogImage: pageOgImage,
       });
       setPageSaved(true);
       loadAudit();

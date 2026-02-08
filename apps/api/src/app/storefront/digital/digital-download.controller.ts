@@ -1,55 +1,49 @@
 import {
-  Controller, Get, Post, Param, Headers, Req,
+  Controller, Get, Post, Param, Headers,
   BadRequestException, UseGuards,
 } from '@nestjs/common';
 import { StoreAdminGuard } from '@platform/auth';
 import { DigitalFulfillmentService } from './digital-fulfillment.service';
+import { CustomerAuthGuard } from '../auth/customer-auth.guard';
+import { CurrentCustomer } from '../auth/current-customer.decorator';
+import { CurrentTenant } from '../auth/current-tenant.decorator';
 
 @Controller('store')
 export class DigitalDownloadController {
   constructor(private readonly digitalService: DigitalFulfillmentService) {}
 
   /**
-   * Get downloads for a customer (requires customer_token auth header)
+   * Get downloads for a customer (requires customer auth)
    */
   @Get('downloads/customer')
+  @UseGuards(CustomerAuthGuard)
   async getCustomerDownloads(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('authorization') auth: string,
+    @CurrentTenant() tenantId: string,
+    @CurrentCustomer() customerId: string,
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
-    if (!auth) throw new BadRequestException('Authorization required');
-    // Extract customer ID from JWT (simplified - in production use a guard)
-    const token = auth.replace('Bearer ', '');
-    try {
-      const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-      const customerId = payload.sub || payload.customerId;
-      if (!customerId) throw new BadRequestException('Invalid token');
-      return this.digitalService.listCustomerDownloads(tenantId, customerId);
-    } catch {
-      throw new BadRequestException('Invalid authorization token');
-    }
+    return this.digitalService.listCustomerDownloads(tenantId, customerId);
   }
 
   @Get('downloads/:orderId')
+  @UseGuards(CustomerAuthGuard)
   async getDownloads(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('authorization') auth: string,
+    @CurrentTenant() tenantId: string,
+    @CurrentCustomer() customerId: string,
     @Param('orderId') orderId: string,
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
-    if (!auth) throw new BadRequestException('Authorization required');
     return this.digitalService.getDownloads(tenantId, orderId);
   }
 
   @Post('downloads/:downloadId/track')
+  @UseGuards(CustomerAuthGuard)
   async trackDownload(
-    @Headers('x-tenant-id') tenantId: string,
-    @Headers('authorization') auth: string,
+    @CurrentTenant() tenantId: string,
+    @CurrentCustomer() customerId: string,
     @Param('downloadId') downloadId: string,
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
-    if (!auth) throw new BadRequestException('Authorization required');
     return this.digitalService.trackDownload(tenantId, downloadId);
   }
 

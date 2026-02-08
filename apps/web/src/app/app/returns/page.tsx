@@ -83,7 +83,7 @@ export default function ReturnsPage() {
 
   const loadData = async () => {
     try {
-      const params: any = { page, limit: 20 };
+      const params: any = { offset: (page - 1) * 20, limit: 20 };
       if (search) params.search = search;
       if (statusFilter) params.status = statusFilter;
       const [returnsRes, statsRes] = await Promise.all([

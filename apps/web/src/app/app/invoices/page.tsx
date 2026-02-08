@@ -19,9 +19,9 @@ interface Invoice {
   invoiceDate: string;
   dueDate: string;
   status: string;
-  total: number;
-  paidAmount: number;
-  dueAmount: number;
+  grandTotal: number;
+  amountPaid: number;
+  amountDue: number;
   lineItems: LineItem[];
   billingAddress?: { street?: string; city?: string; state?: string; zip?: string; country?: string };
   notes?: string;
@@ -35,7 +35,7 @@ interface InvoiceStats {
   overdue: number;
   paid: number;
   totalRevenue: number;
-  outstanding: number;
+  totalOutstanding: number;
 }
 
 const emptyForm = {
@@ -64,7 +64,7 @@ const statusColors: Record<string, string> = {
 
 export default function InvoicesPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [stats, setStats] = useState<InvoiceStats>({ total: 0, draft: 0, sent: 0, overdue: 0, paid: 0, totalRevenue: 0, outstanding: 0 });
+  const [stats, setStats] = useState<InvoiceStats>({ total: 0, draft: 0, sent: 0, overdue: 0, paid: 0, totalRevenue: 0, totalOutstanding: 0 });
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -93,7 +93,7 @@ export default function InvoicesPage() {
   const loadInvoices = async () => {
     setLoading(true);
     try {
-      const params: Record<string, string | number> = { page, limit: 20 };
+      const params: Record<string, string | number> = { offset: (page - 1) * 20, limit: 20 };
       if (search) params.search = search;
       if (statusFilter) params.status = statusFilter;
       const res = await api.get('/v1/store/admin/invoices', { params });
@@ -246,7 +246,7 @@ export default function InvoicesPage() {
     { label: 'Overdue', value: stats.overdue },
     { label: 'Paid', value: stats.paid },
     { label: 'Total Revenue', value: fmt(stats.totalRevenue) },
-    { label: 'Outstanding', value: fmt(stats.outstanding) },
+    { label: 'Outstanding', value: fmt(stats.totalOutstanding) },
   ];
 
   return (
@@ -305,9 +305,9 @@ export default function InvoicesPage() {
                 <td className="p-3">{inv.partyName}<br /><span className="text-xs text-slate-400">{inv.partyEmail}</span></td>
                 <td className="p-3">{fmtDate(inv.invoiceDate)}</td>
                 <td className="p-3">{fmtDate(inv.dueDate)}</td>
-                <td className="p-3 text-right font-medium">{fmt(inv.total)}</td>
-                <td className="p-3 text-right">{fmt(inv.paidAmount)}</td>
-                <td className="p-3 text-right">{fmt(inv.dueAmount)}</td>
+                <td className="p-3 text-right font-medium">{fmt(inv.grandTotal)}</td>
+                <td className="p-3 text-right">{fmt(inv.amountPaid)}</td>
+                <td className="p-3 text-right">{fmt(inv.amountDue)}</td>
                 <td className="p-3"><span className={`px-2 py-1 rounded-full text-xs font-medium ${statusColors[inv.status] || 'bg-gray-100 text-gray-600'}`}>{inv.status.replace('_', ' ')}</span></td>
                 <td className="p-3 text-right space-x-2">
                   <button onClick={() => openEdit(inv)} className="text-blue-600 hover:underline text-xs">View</button>

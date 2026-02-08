@@ -83,7 +83,7 @@ export default function ExpensesPage() {
   const loadExpenses = async () => {
     setLoading(true);
     try {
-      const params: Record<string, string | number> = { page, limit: 20 };
+      const params: Record<string, string | number> = { offset: (page - 1) * 20, limit: 20 };
       if (search) params.search = search;
       if (categoryFilter) params.category = categoryFilter;
       if (dateFrom) params.dateFrom = dateFrom;

@@ -261,6 +261,43 @@ export class PurchaseOrdersService {
         data: { status: allReceived ? 'RECEIVED' : 'PARTIALLY_RECEIVED' },
       });
 
+      // Post stock to warehouse item balances
+      const warehouseId = data.warehouseId || po.deliveryWarehouseId;
+      if (warehouseId) {
+        const itemsWithId = data.items.filter((item: any) => item.itemId);
+        for (const item of itemsWithId) {
+          const receivedQty = Number(item.quantityReceived);
+          await tx.warehouseItemBalance.upsert({
+            where: {
+              tenantId_itemId_warehouseId: {
+                tenantId,
+                itemId: item.itemId,
+                warehouseId,
+              },
+            },
+            create: {
+              tenantId,
+              itemId: item.itemId,
+              warehouseId,
+              actualQty: receivedQty,
+              reservedQty: 0,
+            },
+            update: {
+              actualQty: { increment: receivedQty },
+            },
+          });
+        }
+
+        // Mark goods receipt as stock posted
+        await tx.goodsReceipt.update({
+          where: { id: gr.id },
+          data: {
+            stockPosted: true,
+            stockPostedAt: new Date(),
+          },
+        });
+      }
+
       return gr;
     });
 

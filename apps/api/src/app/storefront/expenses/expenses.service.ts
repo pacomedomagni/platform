@@ -61,40 +61,42 @@ export class ExpensesService {
   }
 
   async createExpense(tenantId: string, data: any) {
-    const lastExpense = await this.prisma.expense.findFirst({
-      where: { tenantId },
-      orderBy: { createdAt: 'desc' },
-      select: { expenseNumber: true },
-    });
-    let nextNum = 1;
-    if (lastExpense?.expenseNumber) {
-      const match = lastExpense.expenseNumber.match(/EXP-(\d+)/);
-      if (match) nextNum = parseInt(match[1], 10) + 1;
-    }
-    const expenseNumber = `EXP-${String(nextNum).padStart(5, '0')}`;
+    const expense = await this.prisma.$transaction(async (tx) => {
+      const lastExpense = await tx.expense.findFirst({
+        where: { tenantId },
+        orderBy: { createdAt: 'desc' },
+        select: { expenseNumber: true },
+      });
+      let nextNum = 1;
+      if (lastExpense?.expenseNumber) {
+        const match = lastExpense.expenseNumber.match(/EXP-(\d+)/);
+        if (match) nextNum = parseInt(match[1], 10) + 1;
+      }
+      const expenseNumber = `EXP-${String(nextNum).padStart(5, '0')}`;
 
-    const expense = await this.prisma.expense.create({
-      data: {
-        tenantId,
-        expenseNumber,
-        categoryId: data.categoryId,
-        description: data.description,
-        amount: Number(data.amount),
-        currency: data.currency || 'USD',
-        exchangeRate: Number(data.exchangeRate || 1),
-        expenseDate: new Date(data.expenseDate || Date.now()),
-        paymentMethod: data.paymentMethod || 'cash',
-        supplierId: data.supplierId,
-        supplierName: data.supplierName,
-        receiptUrl: data.receiptUrl,
-        notes: data.notes,
-        isRecurring: data.isRecurring || false,
-        recurringSchedule: data.recurringSchedule,
-      },
-      include: { category: true },
+      return tx.expense.create({
+        data: {
+          tenantId,
+          expenseNumber,
+          categoryId: data.categoryId,
+          description: data.description,
+          amount: Number(data.amount),
+          currency: data.currency || 'USD',
+          exchangeRate: Number(data.exchangeRate || 1),
+          expenseDate: new Date(data.expenseDate || Date.now()),
+          paymentMethod: data.paymentMethod || 'cash',
+          supplierId: data.supplierId,
+          supplierName: data.supplierName,
+          receiptUrl: data.receiptUrl,
+          notes: data.notes,
+          isRecurring: data.isRecurring || false,
+          recurringSchedule: data.recurringSchedule,
+        },
+        include: { category: true },
+      });
     });
 
-    this.logger.log(`Expense ${expenseNumber} created for tenant ${tenantId}`);
+    this.logger.log(`Expense ${expense.expenseNumber} created for tenant ${tenantId}`);
     return expense;
   }
 

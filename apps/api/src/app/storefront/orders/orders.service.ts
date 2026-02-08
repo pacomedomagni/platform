@@ -2,7 +2,7 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { EmailService } from '@platform/email';
-import { Prisma, OrderStatus } from '@prisma/client';
+import { Prisma, OrderStatus, PaymentStatus } from '@prisma/client';
 import { ListOrdersDto } from './dto';
 
 type OrderWithItems = Prisma.OrderGetPayload<{
@@ -286,6 +286,62 @@ export class OrdersService {
       this.sendOrderStatusEmailAsync(orderId, 'store-order-cancelled').catch(err =>
         this.logger.error(`Cancelled email failed for order ${orderId}: ${err.message}`));
     }
+
+    return this.getOrder(tenantId, orderId);
+  }
+
+  /**
+   * Process refund for an order (admin)
+   */
+  async processRefund(
+    tenantId: string,
+    orderId: string,
+    body: { amount: number; reason: string; type: 'full' | 'partial' },
+  ) {
+    const order = await this.prisma.order.findFirst({
+      where: { id: orderId, tenantId },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    // Validate the order is in a refundable state
+    const refundableStatuses: string[] = ['DELIVERED', 'SHIPPED', 'CONFIRMED'];
+    if (!refundableStatuses.includes(order.status)) {
+      throw new BadRequestException(
+        `Order cannot be refunded in status: ${order.status}. Must be one of: ${refundableStatuses.join(', ')}`,
+      );
+    }
+
+    const refundAmount = body.type === 'full' ? Number(order.grandTotal) : body.amount;
+
+    if (refundAmount <= 0) {
+      throw new BadRequestException('Refund amount must be greater than zero');
+    }
+
+    if (refundAmount > Number(order.grandTotal)) {
+      throw new BadRequestException('Refund amount cannot exceed order total');
+    }
+
+    const paymentStatus: PaymentStatus =
+      body.type === 'full' ? 'REFUNDED' : 'PARTIALLY_REFUNDED';
+
+    const updatedOrder = await this.prisma.order.update({
+      where: { id: orderId },
+      data: {
+        status: 'REFUNDED' as OrderStatus,
+        paymentStatus,
+        refundedAt: new Date(),
+        internalNotes: order.internalNotes
+          ? `${order.internalNotes}\nRefund (${body.type}): $${refundAmount} - ${body.reason}`
+          : `Refund (${body.type}): $${refundAmount} - ${body.reason}`,
+      },
+    });
+
+    this.logger.log(
+      `Order ${order.orderNumber} refunded: type=${body.type}, amount=${refundAmount}, reason=${body.reason}`,
+    );
 
     return this.getOrder(tenantId, orderId);
   }
