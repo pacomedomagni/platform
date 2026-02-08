@@ -1,6 +1,7 @@
 /**
  * Theme Engine
  * Core functions for applying themes to the DOM
+ * Supports light/dark mode with WCAG AA compliant colors
  */
 
 import type { Theme, ThemeColors } from './types';
@@ -16,21 +17,60 @@ const THEME_STYLE_ID = 'noslag-theme-dynamic';
 const THEME_FONT_LINK_ID = 'noslag-theme-fonts';
 
 /**
- * Apply theme colors as CSS variables to :root
+ * Get current color mode from document
  */
-export function applyThemeColors(colors: ThemeColors): void {
+export function getCurrentColorMode(): 'light' | 'dark' {
+  if (!isBrowser()) return 'light';
+  return document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+}
+
+/**
+ * Apply theme colors as CSS variables to :root
+ * Applies both light and dark mode colors using CSS custom properties
+ */
+export function applyThemeColors(colors: ThemeColors, darkColors?: ThemeColors): void {
   if (!isBrowser()) return;
 
   const root = document.documentElement;
 
+  // Apply light mode colors as base
   Object.entries(colors).forEach(([key, value]) => {
-    // Convert camelCase to kebab-case (e.g., cardForeground -> card-foreground)
     const cssKey = key.replace(/([A-Z])/g, '-$1').toLowerCase();
-
-    // Convert hex to HSL for CSS variables
     const hsl = hexToHSL(value);
     root.style.setProperty(`--${cssKey}`, hslToString(hsl));
   });
+
+  // If dark colors provided, generate dark mode CSS and inject it
+  if (darkColors) {
+    applyDarkModeColors(darkColors);
+  }
+}
+
+/**
+ * Apply dark mode colors as a separate style block
+ * This allows the colors to automatically switch based on .dark class
+ */
+function applyDarkModeColors(darkColors: ThemeColors): void {
+  if (!isBrowser()) return;
+
+  const darkStyleId = 'noslag-theme-dark';
+  let styleEl = document.getElementById(darkStyleId) as HTMLStyleElement;
+
+  if (!styleEl) {
+    styleEl = document.createElement('style');
+    styleEl.id = darkStyleId;
+    document.head.appendChild(styleEl);
+  }
+
+  let css = '.dark {\n';
+  Object.entries(darkColors).forEach(([key, value]) => {
+    const cssKey = key.replace(/([A-Z])/g, '-$1').toLowerCase();
+    const hsl = hexToHSL(value);
+    css += `  --${cssKey}: ${hslToString(hsl)};\n`;
+  });
+  css += '}\n';
+
+  styleEl.textContent = css;
 }
 
 /**
@@ -307,8 +347,8 @@ export function applyCustomCSS(customCSS?: string): void {
 export async function applyTheme(theme: Theme): Promise<void> {
   if (!isBrowser()) return;
 
-  // Apply colors
-  applyThemeColors(theme.colors);
+  // Apply colors (including dark mode if available)
+  applyThemeColors(theme.colors, theme.darkColors);
 
   // Apply typography
   applyTypographyStyles(theme);
@@ -347,6 +387,12 @@ export function removeTheme(): void {
   const styleElement = document.getElementById(THEME_STYLE_ID);
   if (styleElement) {
     styleElement.remove();
+  }
+
+  // Remove dark mode styles
+  const darkStyleElement = document.getElementById('noslag-theme-dark');
+  if (darkStyleElement) {
+    darkStyleElement.remove();
   }
 
   // Remove custom CSS

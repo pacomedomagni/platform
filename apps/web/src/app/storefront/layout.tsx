@@ -6,9 +6,11 @@ import { StoreProviders } from './_components/store-providers';
 import { CartIcon } from './_components/cart-icon';
 import { CurrencySwitcher } from './_components/currency-switcher';
 import { LanguageSwitcher } from './_components/language-switcher';
+import { ColorModeToggleSimple } from './_components/color-mode-toggle';
 import { generateOrganizationSchema, serializeJsonLd } from '@/lib/seo/schema';
 import { WelcomeWizard } from '../../components/onboarding/welcome-wizard';
 import { ProductTour } from '../../components/onboarding/product-tour';
+import { colorModeScript } from '@/lib/color-mode-store';
 
 export const metadata: Metadata = {
   title: {
@@ -78,12 +80,16 @@ const organizationSchema = generateOrganizationSchema({
 export default function StorefrontLayout({ children }: { children: React.ReactNode }) {
   return (
     <StoreProviders>
+      {/* Prevent flash of wrong color mode */}
+      <script dangerouslySetInnerHTML={{ __html: colorModeScript }} />
       {/* JSON-LD structured data for Organization */}
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: serializeJsonLd(organizationSchema) }}
       />
-      <div className="min-h-screen bg-background text-foreground">
+      {/* Meta theme color for mobile browsers - will be updated by color mode store */}
+      <meta name="theme-color" content="#ffffff" />
+      <div className="min-h-screen bg-background text-foreground transition-colors duration-200">
         {/* Skip to content link for keyboard navigation */}
         <a
           href="#main-content"
@@ -136,6 +142,7 @@ export default function StorefrontLayout({ children }: { children: React.ReactNo
                   type="search"
                 />
               </div>
+              <ColorModeToggleSimple />
               <LanguageSwitcher />
               <CurrencySwitcher />
               <Link

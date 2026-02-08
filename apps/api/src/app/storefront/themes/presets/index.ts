@@ -1,7 +1,7 @@
-export { modernPreset } from './modern.preset';
-export { minimalPreset } from './minimal.preset';
-export { boldPreset } from './bold.preset';
-export { classicPreset } from './classic.preset';
+export { modernPreset, modernColorPalette } from './modern.preset';
+export { minimalPreset, minimalColorPalette } from './minimal.preset';
+export { boldPreset, boldColorPalette } from './bold.preset';
+export { classicPreset, classicColorPalette } from './classic.preset';
 
 /**
  * All available theme presets
@@ -11,6 +11,16 @@ export const THEME_PRESETS = {
   minimal: require('./minimal.preset').minimalPreset,
   bold: require('./bold.preset').boldPreset,
   classic: require('./classic.preset').classicPreset,
+};
+
+/**
+ * All available color palettes (light + dark)
+ */
+export const COLOR_PALETTES = {
+  modern: require('./modern.preset').modernColorPalette,
+  minimal: require('./minimal.preset').minimalColorPalette,
+  bold: require('./bold.preset').boldColorPalette,
+  classic: require('./classic.preset').classicColorPalette,
 };
 
 /**
@@ -25,4 +35,11 @@ export function getAllPresets() {
  */
 export function getPresetBySlug(slug: string) {
   return THEME_PRESETS[slug as keyof typeof THEME_PRESETS];
+}
+
+/**
+ * Get color palette (light + dark) by preset slug
+ */
+export function getColorPaletteBySlug(slug: string) {
+  return COLOR_PALETTES[slug as keyof typeof COLOR_PALETTES];
 }

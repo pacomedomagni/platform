@@ -82,6 +82,8 @@ export interface Theme {
   tenantId: string;
   isActive: boolean;
   colors: ThemeColors;
+  /** Dark mode colors - WCAG AA compliant */
+  darkColors?: ThemeColors;
   fontFamily: string;
   headingFont?: string;
   fontSize: 'sm' | 'base' | 'lg';
