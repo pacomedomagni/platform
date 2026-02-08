@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+ 
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import {
@@ -354,7 +354,7 @@ export class VariantsService {
 
   // ============ BULK OPERATIONS ============
 
-  async bulkCreateVariants(tenantId: string, productListingId: string, variants: CreateVariantDto[]) {
+  async bulkCreateVariantsForProduct(tenantId: string, productListingId: string, variants: CreateVariantDto[]) {
     // Verify product listing exists
     const product = await this.prisma.productListing.findFirst({
       where: { id: productListingId, tenantId },
