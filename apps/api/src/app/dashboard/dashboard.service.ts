@@ -306,29 +306,29 @@ export class DashboardService {
     // Get top selling products from order items
     // Use raw query to avoid Prisma circular type inference issues with complex groupBy
     const topProducts = await this.db.$queryRaw<Array<{
-      productCode: string;
-      productName: string;
+      sku: string;
+      name: string;
       totalQty: number;
       totalRevenue: number;
     }>>`
-      SELECT 
-        oi."productCode",
-        oi."productName",
+      SELECT
+        oi."sku",
+        oi."name",
         SUM(oi."quantity")::float as "totalQty",
-        SUM(oi."lineTotal")::float as "totalRevenue"
+        SUM(oi."totalPrice")::float as "totalRevenue"
       FROM "order_items" oi
       INNER JOIN "orders" o ON o.id = oi."orderId"
       WHERE o."tenantId" = ${tenantId}
         AND o."paymentStatus" = 'CAPTURED'
-      GROUP BY oi."productCode", oi."productName"
+      GROUP BY oi."sku", oi."name"
       ORDER BY "totalRevenue" DESC
       LIMIT ${limit}
     `;
 
     return topProducts.map((p, idx) => ({
       id: `top-${idx}`,
-      code: p.productCode,
-      name: p.productName,
+      code: p.sku,
+      name: p.name,
       salesCount: Number(p.totalQty || 0),
       revenue: Number(p.totalRevenue || 0),
     }));

@@ -24,6 +24,16 @@ export default function EmailPreferencesPage() {
   });
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  const authHeaders = () => {
+    const token = localStorage.getItem('customer_token') || '';
+    const tenantId = localStorage.getItem('tenantId') || '';
+    return {
+      Authorization: `Bearer ${token}`,
+      'x-tenant-id': tenantId,
+      'Content-Type': 'application/json',
+    };
+  };
+
   useEffect(() => {
     fetchPreferences();
   }, []);
@@ -31,7 +41,7 @@ export default function EmailPreferencesPage() {
   const fetchPreferences = async () => {
     try {
       const response = await fetch('/api/v1/storefront/email-preferences', {
-        credentials: 'include',
+        headers: authHeaders(),
       });
 
       if (response.ok) {
@@ -63,10 +73,7 @@ export default function EmailPreferencesPage() {
     try {
       const response = await fetch('/api/v1/storefront/email-preferences', {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
+        headers: authHeaders(),
         body: JSON.stringify({
           marketing: preferences.marketing,
           orderUpdates: preferences.orderUpdates,
@@ -99,7 +106,7 @@ export default function EmailPreferencesPage() {
     try {
       const response = await fetch('/api/v1/storefront/email-preferences/unsubscribe/all', {
         method: 'POST',
-        credentials: 'include',
+        headers: authHeaders(),
       });
 
       if (response.ok) {

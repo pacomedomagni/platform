@@ -210,6 +210,13 @@ export class OperationsController {
     return this.jobService.findMany(ctx, { type, status, page, limit });
   }
 
+  @Get('jobs/stats')
+  @Roles('admin')
+  async getJobStats(@Tenant() tenantId: string, @Request() req: RequestWithUser) {
+    const ctx = this.getContext(tenantId, req);
+    return this.jobService.getStats(ctx);
+  }
+
   @Get('jobs/:id')
   @Roles('admin')
   async getJob(@Tenant() tenantId: string, @Request() req: RequestWithUser, @Param('id') id: string) {
@@ -241,13 +248,6 @@ export class OperationsController {
   async retryJob(@Tenant() tenantId: string, @Request() req: RequestWithUser, @Param('id') id: string) {
     const ctx = this.getContext(tenantId, req);
     return this.jobService.retryJob(ctx, id);
-  }
-
-  @Get('jobs/stats')
-  @Roles('admin')
-  async getJobStats(@Tenant() tenantId: string, @Request() req: RequestWithUser) {
-    const ctx = this.getContext(tenantId, req);
-    return this.jobService.getStats(ctx);
   }
 
   // ==========================================

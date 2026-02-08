@@ -50,6 +50,7 @@ export class SeoController {
   }
 
   @Get('sitemap.xml')
+  @UseGuards(StoreAdminGuard)
   async generateSitemap(
     @Headers('x-tenant-id') tenantId: string,
     @Res() res: Response,
@@ -63,6 +64,7 @@ export class SeoController {
   }
 
   @Get('structured-data/:productId')
+  @UseGuards(StoreAdminGuard)
   async getStructuredData(
     @Headers('x-tenant-id') tenantId: string,
     @Param('productId') productId: string,

@@ -34,13 +34,12 @@ interface CurrencyState {
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
 
 function getTenantId(): string {
-  if (typeof window === 'undefined') return 'default';
-  const hostname = window.location.hostname;
-  const parts = hostname.split('.');
-  if (parts.length > 2) {
-    return parts[0];
-  }
-  return process.env.NEXT_PUBLIC_TENANT_ID || 'default';
+  if (typeof window === 'undefined') return process.env.NEXT_PUBLIC_TENANT_ID || 'default';
+  // Use resolved tenant from session, or localStorage, or env fallback
+  return sessionStorage.getItem('resolved_tenant_id')
+    || localStorage.getItem('tenantId')
+    || process.env.NEXT_PUBLIC_TENANT_ID
+    || 'default';
 }
 
 export const useCurrencyStore = create<CurrencyState>()(

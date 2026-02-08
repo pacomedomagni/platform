@@ -45,7 +45,6 @@ import { MerchantVerificationController } from './merchant-verification.controll
     OnboardingService,
     StripeConnectService,
     SquareOAuthService,
-    SquareOAuthController,
     SquarePaymentService,
     EncryptionService,
     MerchantVerificationService,

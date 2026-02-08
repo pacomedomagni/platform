@@ -1,16 +1,19 @@
 'use client';
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
 import { Button, Input, Card, Label } from '@platform/ui';
 import { Loader2, Command, ShieldCheck } from 'lucide-react';
 import api from '../../lib/api';
 
-export default function LoginPage() {
+function LoginForm() {
     const router = useRouter();
+    const searchParams = useSearchParams();
     const [loading, setLoading] = useState(false);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
+    const [showForgot, setShowForgot] = useState(searchParams.get('forgot') === 'true');
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -55,6 +58,22 @@ export default function LoginPage() {
                 </div>
 
                 <Card className="p-8 border-slate-200 dark:border-slate-800 shadow-xl bg-white dark:bg-slate-900">
+                    {showForgot ? (
+                        <div className="space-y-4">
+                            <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Reset your password</h3>
+                            <p className="text-sm text-slate-500">
+                                Please contact your organization administrator to reset your password.
+                            </p>
+                            <Button
+                                variant="outline"
+                                className="w-full h-11"
+                                onClick={() => setShowForgot(false)}
+                            >
+                                Back to sign in
+                            </Button>
+                        </div>
+                    ) : (
+                    <>
                     <form onSubmit={handleLogin} className="space-y-6">
                         {error && (
                             <div className="p-3 text-sm text-red-500 bg-red-50 rounded-md border border-red-100">
@@ -63,11 +82,11 @@ export default function LoginPage() {
                         )}
                         <div className="space-y-2">
                             <Label htmlFor="email">Email address</Label>
-                            <Input 
-                                id="email" 
-                                type="email" 
-                                placeholder="name@company.com" 
-                                required 
+                            <Input
+                                id="email"
+                                type="email"
+                                placeholder="name@company.com"
+                                required
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
                                 className="h-11"
@@ -76,14 +95,14 @@ export default function LoginPage() {
                         <div className="space-y-2">
                             <div className="flex items-center justify-between">
                                 <Label htmlFor="password">Password</Label>
-                                <a href="/login?forgot=true" className="text-sm font-medium text-indigo-600 hover:text-indigo-500">
+                                <button type="button" onClick={() => setShowForgot(true)} className="text-sm font-medium text-indigo-600 hover:text-indigo-500">
                                     Forgot password?
-                                </a>
+                                </button>
                             </div>
-                            <Input 
-                                id="password" 
-                                type="password" 
-                                required 
+                            <Input
+                                id="password"
+                                type="password"
+                                required
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 className="h-11"
@@ -107,6 +126,8 @@ export default function LoginPage() {
                             Sign up
                         </a>
                     </div>
+                    </>
+                    )}
                 </Card>
 
                 <p className="text-center text-xs text-slate-400">
@@ -114,5 +135,13 @@ export default function LoginPage() {
                 </p>
             </div>
         </div>
+    );
+}
+
+export default function LoginPage() {
+    return (
+        <Suspense fallback={null}>
+            <LoginForm />
+        </Suspense>
     );
 }

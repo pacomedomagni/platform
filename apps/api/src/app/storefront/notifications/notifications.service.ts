@@ -222,7 +222,7 @@ export class NotificationsService {
         isActive: true,
         type: { in: ['whatsapp', 'sms'] },
       },
-      orderBy: { type: 'asc' }, // sms before whatsapp alphabetically, but prefer whatsapp
+      orderBy: { type: 'desc' }, // whatsapp before sms alphabetically (desc)
     });
 
     if (!channel) {

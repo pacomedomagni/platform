@@ -53,7 +53,7 @@ export default function ScheduledReportsPage() {
 
   async function fetchReports() {
     try {
-      const res = await fetch('/api/store/admin/reports/scheduled', { headers });
+      const res = await fetch('/api/v1/store/admin/reports/scheduled', { headers });
       if (res.ok) {
         setReports(await res.json());
       }
@@ -65,7 +65,7 @@ export default function ScheduledReportsPage() {
   async function createReport(e: React.FormEvent) {
     e.preventDefault();
     const recipients = form.recipients.split(',').map((r) => r.trim()).filter(Boolean);
-    const res = await fetch('/api/store/admin/reports/scheduled', {
+    const res = await fetch('/api/v1/store/admin/reports/scheduled', {
       method: 'POST',
       headers,
       body: JSON.stringify({ ...form, recipients }),
@@ -78,7 +78,7 @@ export default function ScheduledReportsPage() {
   }
 
   async function toggleActive(id: string, isActive: boolean) {
-    await fetch(`/api/store/admin/reports/scheduled/${id}`, {
+    await fetch(`/api/v1/store/admin/reports/scheduled/${id}`, {
       method: 'PUT',
       headers,
       body: JSON.stringify({ isActive: !isActive }),
@@ -88,7 +88,7 @@ export default function ScheduledReportsPage() {
 
   async function deleteReport(id: string) {
     if (!confirm('Delete this scheduled report?')) return;
-    await fetch(`/api/store/admin/reports/scheduled/${id}`, {
+    await fetch(`/api/v1/store/admin/reports/scheduled/${id}`, {
       method: 'DELETE',
       headers,
     });

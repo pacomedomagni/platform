@@ -49,6 +49,16 @@ export default function CreateListingPage() {
     autoPublish: false,
   });
 
+  const authHeaders = () => {
+    const token = localStorage.getItem('access_token') || '';
+    const tenantId = localStorage.getItem('tenantId') || '';
+    return {
+      Authorization: `Bearer ${token}`,
+      'x-tenant-id': tenantId,
+      'Content-Type': 'application/json',
+    };
+  };
+
   useEffect(() => {
     loadData();
   }, []);
@@ -73,7 +83,7 @@ export default function CreateListingPage() {
     try {
       // Load connections
       const connectionsRes = await fetch('/api/v1/marketplace/connections', {
-        credentials: 'include',
+        headers: authHeaders(),
       });
       if (connectionsRes.ok) {
         const connectionsData = await connectionsRes.json();
@@ -82,7 +92,7 @@ export default function CreateListingPage() {
 
       // Load products
       const productsRes = await fetch('/api/v1/products/listings', {
-        credentials: 'include',
+        headers: authHeaders(),
       });
       if (productsRes.ok) {
         const productsData = await productsRes.json();
@@ -91,7 +101,7 @@ export default function CreateListingPage() {
 
       // Load warehouses
       const warehousesRes = await fetch('/api/v1/warehouses', {
-        credentials: 'include',
+        headers: authHeaders(),
       });
       if (warehousesRes.ok) {
         const warehousesData = await warehousesRes.json();
@@ -142,8 +152,7 @@ export default function CreateListingPage() {
     try {
       const res = await fetch('/api/v1/marketplace/listings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
+        headers: authHeaders(),
         body: JSON.stringify({
           connectionId: formData.connectionId,
           productListingId: formData.productListingId,
@@ -166,7 +175,7 @@ export default function CreateListingPage() {
             `/api/v1/marketplace/listings/${listing.id}/publish`,
             {
               method: 'POST',
-              credentials: 'include',
+              headers: authHeaders(),
             }
           );
 

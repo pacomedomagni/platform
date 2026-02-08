@@ -89,18 +89,6 @@ export class InvoicingService {
   }
 
   async createInvoice(tenantId: string, data: any) {
-    const lastInvoice = await this.prisma.invoice.findFirst({
-      where: { tenantId },
-      orderBy: { createdAt: 'desc' },
-      select: { invoiceNumber: true },
-    });
-    let nextNum = 1;
-    if (lastInvoice?.invoiceNumber) {
-      const match = lastInvoice.invoiceNumber.match(/INV-(\d+)/);
-      if (match) nextNum = parseInt(match[1], 10) + 1;
-    }
-    const invoiceNumber = `INV-${String(nextNum).padStart(5, '0')}`;
-
     const items = data.items || [];
     const subtotal = items.reduce((sum: number, i: any) => sum + (Number(i.quantity) * Number(i.unitPrice) - Number(i.discount || 0)), 0);
     const taxAmount = items.reduce((sum: number, i: any) => {
@@ -109,57 +97,71 @@ export class InvoicingService {
     }, 0);
     const grandTotal = subtotal + taxAmount - Number(data.discountAmount || 0);
 
-    const invoice = await this.prisma.invoice.create({
-      data: {
-        tenantId,
-        invoiceNumber,
-        status: data.status || 'DRAFT',
-        partyType: data.partyType || 'Customer',
-        partyId: data.partyId,
-        partyName: data.partyName,
-        partyEmail: data.partyEmail,
-        billingAddressLine1: data.billingAddressLine1,
-        billingAddressLine2: data.billingAddressLine2,
-        billingCity: data.billingCity,
-        billingState: data.billingState,
-        billingPostalCode: data.billingPostalCode,
-        billingCountry: data.billingCountry,
-        invoiceDate: new Date(data.invoiceDate || Date.now()),
-        dueDate: new Date(data.dueDate || Date.now() + 30 * 86400000),
-        orderId: data.orderId,
-        currency: data.currency || 'USD',
-        subtotal,
-        taxAmount,
-        discountAmount: Number(data.discountAmount || 0),
-        grandTotal,
-        amountDue: grandTotal,
-        notes: data.notes,
-        termsAndConditions: data.termsAndConditions,
-        internalNotes: data.internalNotes,
-        items: {
-          create: items.map((item: any, idx: number) => {
-            const lineTotal = Number(item.quantity) * Number(item.unitPrice) - Number(item.discount || 0);
-            const itemTax = lineTotal * Number(item.taxRate || 0);
-            return {
-              tenantId,
-              description: item.description,
-              itemId: item.itemId,
-              productListingId: item.productListingId,
-              quantity: Number(item.quantity),
-              unitPrice: Number(item.unitPrice),
-              discount: Number(item.discount || 0),
-              taxRate: Number(item.taxRate || 0),
-              taxAmount: itemTax,
-              totalPrice: lineTotal + itemTax,
-              sortOrder: idx,
-            };
-          }),
+    const invoice = await this.prisma.$transaction(async (tx) => {
+      const lastInvoice = await tx.invoice.findFirst({
+        where: { tenantId },
+        orderBy: { createdAt: 'desc' },
+        select: { invoiceNumber: true },
+      });
+      let nextNum = 1;
+      if (lastInvoice?.invoiceNumber) {
+        const match = lastInvoice.invoiceNumber.match(/INV-(\d+)/);
+        if (match) nextNum = parseInt(match[1], 10) + 1;
+      }
+      const invoiceNumber = `INV-${String(nextNum).padStart(5, '0')}`;
+
+      return tx.invoice.create({
+        data: {
+          tenantId,
+          invoiceNumber,
+          status: data.status || 'DRAFT',
+          partyType: data.partyType || 'Customer',
+          partyId: data.partyId,
+          partyName: data.partyName,
+          partyEmail: data.partyEmail,
+          billingAddressLine1: data.billingAddressLine1,
+          billingAddressLine2: data.billingAddressLine2,
+          billingCity: data.billingCity,
+          billingState: data.billingState,
+          billingPostalCode: data.billingPostalCode,
+          billingCountry: data.billingCountry,
+          invoiceDate: new Date(data.invoiceDate || Date.now()),
+          dueDate: new Date(data.dueDate || Date.now() + 30 * 86400000),
+          orderId: data.orderId,
+          currency: data.currency || 'USD',
+          subtotal,
+          taxAmount,
+          discountAmount: Number(data.discountAmount || 0),
+          grandTotal,
+          amountDue: grandTotal,
+          notes: data.notes,
+          termsAndConditions: data.termsAndConditions,
+          internalNotes: data.internalNotes,
+          items: {
+            create: items.map((item: any, idx: number) => {
+              const lineTotal = Number(item.quantity) * Number(item.unitPrice) - Number(item.discount || 0);
+              const itemTax = lineTotal * Number(item.taxRate || 0);
+              return {
+                tenantId,
+                description: item.description,
+                itemId: item.itemId,
+                productListingId: item.productListingId,
+                quantity: Number(item.quantity),
+                unitPrice: Number(item.unitPrice),
+                discount: Number(item.discount || 0),
+                taxRate: Number(item.taxRate || 0),
+                taxAmount: itemTax,
+                totalPrice: lineTotal + itemTax,
+                sortOrder: idx,
+              };
+            }),
+          },
         },
-      },
-      include: { items: true },
+        include: { items: true },
+      });
     });
 
-    this.logger.log(`Invoice ${invoiceNumber} created for tenant ${tenantId}`);
+    this.logger.log(`Invoice ${invoice.invoiceNumber} created for tenant ${tenantId}`);
     return invoice;
   }
 

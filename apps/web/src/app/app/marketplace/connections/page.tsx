@@ -325,8 +325,13 @@ function ConnectionCard({
 
   const loadStatus = async () => {
     try {
+      const token = localStorage.getItem('access_token') || '';
+      const tenantId = localStorage.getItem('tenantId') || '';
       const res = await fetch(`/api/v1/marketplace/connections/${connection.id}/status`, {
-        credentials: 'include',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'x-tenant-id': tenantId,
+        },
       });
       if (res.ok) {
         setStatus(await res.json());

@@ -71,6 +71,8 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [setupBannerDismissed, setSetupBannerDismissed] = useState(true);
+  const [publishing, setPublishing] = useState(false);
+  const [verifyingSent, setVerifyingSent] = useState(false);
 
   useEffect(() => {
     const done = localStorage.getItem('merchant_setup_done');
@@ -133,8 +135,6 @@ export default function Dashboard() {
     );
   }
 
-  const [publishing, setPublishing] = useState(false);
-
   const showChecklist =
     !data.checklist.emailVerified ||
     !data.checklist.paymentsConnected ||
@@ -175,14 +175,12 @@ export default function Dashboard() {
     },
   ];
 
-  const [verifyingSent, setVerifyingSent] = useState(false);
-
   const handleResendVerification = async () => {
     setVerifyingSent(true);
     try {
       const token = localStorage.getItem('access_token');
       const tenantId = localStorage.getItem('tenantId');
-      const res = await fetch('/api/onboarding/resend-verification', {
+      const res = await fetch('/api/v1/onboarding/resend-verification', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,

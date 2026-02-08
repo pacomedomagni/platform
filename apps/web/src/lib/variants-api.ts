@@ -4,15 +4,9 @@
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
 
-// Get tenant ID from subdomain or default
 function getTenantId(): string {
-  if (typeof window === 'undefined') return 'default';
-  const hostname = window.location.hostname;
-  const parts = hostname.split('.');
-  if (parts.length > 2) {
-    return parts[0];
-  }
-  return process.env.NEXT_PUBLIC_TENANT_ID || 'default';
+  if (typeof window === 'undefined') return process.env.NEXT_PUBLIC_TENANT_ID || 'default';
+  return localStorage.getItem('tenantId') || process.env.NEXT_PUBLIC_TENANT_ID || 'default';
 }
 
 // Base fetch with tenant header
@@ -32,7 +26,7 @@ async function apiFetch<T>(
 
   // Add auth token if available
   if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('admin_token') || localStorage.getItem('customer_token');
+    const token = localStorage.getItem('access_token') || localStorage.getItem('customer_token');
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }

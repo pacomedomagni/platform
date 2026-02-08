@@ -172,6 +172,27 @@ model Tenant {
   notificationChannels NotificationChannel[]
   notificationLogs    NotificationLog[]
 
+  // Multi-Currency
+  storeCurrencies        StoreCurrency[]
+  productPriceOverrides  ProductPriceOverride[]
+  variantPriceOverrides  VariantPriceOverride[]
+
+  // Shipping
+  shippingCarriers           ShippingCarrier[]
+  shippingZones              ShippingZone[]
+  shippingRates              ShippingRate[]
+  shippingWeightTiers        ShippingWeightTier[]
+  shipments                  Shipment[]
+  shipmentEvents             ShipmentEvent[]
+
+  // Internationalization (i18n)
+  storeLanguages             StoreLanguage[]
+  productTranslations        ProductTranslation[]
+  categoryTranslations       CategoryTranslation[]
+  attributeTranslations      AttributeTranslation[]
+  shippingRateTranslations   ShippingRateTranslation[]
+  contentTranslations        ContentTranslation[]
+
   @@map("tenants")
 }
 
@@ -398,8 +419,9 @@ model Item {
   salesUomCode    String?
   salesUom        Uom?    @relation("ItemSalesUom", fields: [salesUomCode], references: [code], onDelete: SetNull)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   batches               Batch[]
   serials               Serial[]
@@ -716,6 +738,7 @@ model Account {
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
   glEntries GlEntry[]
 
   @@unique([tenantId, code])
@@ -786,8 +809,9 @@ model Customer {
   website String?
   notes   String?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   storeCustomers StoreCustomer[]
 
@@ -830,8 +854,9 @@ model Supplier {
   website String?
   notes   String?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   @@unique([tenantId, code])
   @@index([tenantId, supplierName])
@@ -968,8 +993,9 @@ model BankAccount {
   isDefault Boolean @default(false)
   isActive  Boolean @default(true)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   @@unique([tenantId, name])
   @@index([tenantId])
@@ -1995,6 +2021,7 @@ model WishlistItem {
 model StoreCurrency {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   currencyCode       String // ISO 4217 (USD, EUR, GBP)
   symbol             String // $, €, £
@@ -2019,6 +2046,7 @@ model StoreCurrency {
 model ProductPriceOverride {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   productListingId String
   productListing   ProductListing @relation(fields: [productListingId], references: [id], onDelete: Cascade)
@@ -2039,6 +2067,7 @@ model ProductPriceOverride {
 model VariantPriceOverride {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   variantId String
   variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
@@ -2063,6 +2092,7 @@ model VariantPriceOverride {
 model ShippingCarrier {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   name          String // UPS, FedEx, USPS, DHL
   code          String // ups, fedex, usps, dhl
@@ -2089,6 +2119,7 @@ model ShippingCarrier {
 model ShippingZone {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   name      String
   countries String[] @default([])
@@ -2109,6 +2140,7 @@ model ShippingZone {
 model ShippingRate {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   zoneId String
   zone   ShippingZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
@@ -2146,6 +2178,7 @@ model ShippingRate {
 model ShippingWeightTier {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   rateId String
   rate   ShippingRate @relation(fields: [rateId], references: [id], onDelete: Cascade)
@@ -2165,6 +2198,7 @@ model ShippingWeightTier {
 model Shipment {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   orderId String
   order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -2200,6 +2234,7 @@ model Shipment {
 model ShipmentEvent {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   shipmentId String
   shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
@@ -2225,6 +2260,7 @@ model ShipmentEvent {
 model StoreLanguage {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   languageCode String // ISO 639-1 (en, es, fr)
   countryCode  String? // ISO 3166-1 for regional variants
@@ -2246,6 +2282,7 @@ model StoreLanguage {
 model ProductTranslation {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   productListingId String
   productListing   ProductListing @relation(fields: [productListingId], references: [id], onDelete: Cascade)
@@ -2272,6 +2309,7 @@ model ProductTranslation {
 model CategoryTranslation {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   categoryId String
   category   ProductCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
@@ -2295,6 +2333,7 @@ model CategoryTranslation {
 model AttributeTranslation {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   attributeTypeId String?
   attributeType   ItemAttributeType? @relation(fields: [attributeTypeId], references: [id], onDelete: Cascade)
@@ -2316,6 +2355,7 @@ model AttributeTranslation {
 model ShippingRateTranslation {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   shippingRateId String
   shippingRate   ShippingRate @relation(fields: [shippingRateId], references: [id], onDelete: Cascade)
@@ -2336,6 +2376,7 @@ model ShippingRateTranslation {
 model ContentTranslation {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   contentKey   String // e.g., "checkout.title", "policy.returns"
   languageCode String

@@ -54,6 +54,16 @@ export default function MarketplaceListingsPage() {
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [syncing, setSyncing] = useState<string | null>(null);
 
+  const authHeaders = () => {
+    const token = localStorage.getItem('access_token') || '';
+    const tenantId = localStorage.getItem('tenantId') || '';
+    return {
+      Authorization: `Bearer ${token}`,
+      'x-tenant-id': tenantId,
+      'Content-Type': 'application/json',
+    };
+  };
+
   useEffect(() => {
     loadData();
   }, [selectedConnection, selectedStatus]);
@@ -63,7 +73,7 @@ export default function MarketplaceListingsPage() {
     try {
       // Load connections
       const connectionsRes = await fetch('/api/v1/marketplace/connections', {
-        credentials: 'include',
+        headers: authHeaders(),
       });
       if (connectionsRes.ok) {
         const connectionsData = await connectionsRes.json();
@@ -80,7 +90,7 @@ export default function MarketplaceListingsPage() {
       }
 
       const listingsRes = await fetch(`/api/v1/marketplace/listings?${params}`, {
-        credentials: 'include',
+        headers: authHeaders(),
       });
       if (listingsRes.ok) {
         const listingsData = await listingsRes.json();
@@ -99,7 +109,7 @@ export default function MarketplaceListingsPage() {
     try {
       const res = await fetch(`/api/v1/marketplace/listings/${listingId}/publish`, {
         method: 'POST',
-        credentials: 'include',
+        headers: authHeaders(),
       });
 
       if (res.ok) {
@@ -121,7 +131,7 @@ export default function MarketplaceListingsPage() {
     try {
       const res = await fetch(`/api/v1/marketplace/listings/${listingId}/end`, {
         method: 'POST',
-        credentials: 'include',
+        headers: authHeaders(),
       });
 
       if (res.ok) {
@@ -142,7 +152,7 @@ export default function MarketplaceListingsPage() {
     try {
       const res = await fetch(`/api/v1/marketplace/listings/${listingId}/sync-inventory`, {
         method: 'POST',
-        credentials: 'include',
+        headers: authHeaders(),
       });
 
       if (res.ok) {
@@ -166,7 +176,7 @@ export default function MarketplaceListingsPage() {
     try {
       const res = await fetch(`/api/v1/marketplace/listings/${listingId}`, {
         method: 'DELETE',
-        credentials: 'include',
+        headers: authHeaders(),
       });
 
       if (res.ok) {

@@ -50,8 +50,8 @@ export default function FunnelAnalyticsPage() {
       const qs = params.toString() ? `?${params.toString()}` : '';
 
       const [funnelRes, sourcesRes] = await Promise.all([
-        fetch(`/api/analytics/funnel${qs}`, { headers }),
-        fetch(`/api/analytics/sources${qs}`, { headers }),
+        fetch(`/api/v1/analytics/funnel${qs}`, { headers }),
+        fetch(`/api/v1/analytics/sources${qs}`, { headers }),
       ]);
 
       if (funnelRes.ok) {

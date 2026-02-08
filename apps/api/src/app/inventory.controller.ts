@@ -98,6 +98,7 @@ export class InventoryController {
 
       const balances = await tx.warehouseItemBalance.findMany({
         where: {
+          tenantId,
           ...(item ? { itemId: item.id } : {}),
           ...(warehouse ? { warehouseId: warehouse.id } : {}),
         },
@@ -215,6 +216,7 @@ export class InventoryController {
 
       const locations = await tx.location.findMany({
         where: {
+          tenantId,
           ...(warehouse ? { warehouseId: warehouse.id } : {}),
           isActive: true,
         },
@@ -698,6 +700,7 @@ export class InventoryController {
 
       const balances = await tx.warehouseItemBalance.findMany({
         where: {
+          tenantId,
           ...(warehouse ? { warehouseId: warehouse.id } : {}),
           ...(item ? { itemId: item.id } : {}),
         },

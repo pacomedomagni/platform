@@ -49,7 +49,7 @@ export default function PageBuilderPage() {
 
   async function fetchSections() {
     try {
-      const res = await fetch(`/api/store/admin/pages/${pageId}/sections`, { headers });
+      const res = await fetch(`/api/v1/store/admin/pages/${pageId}/sections`, { headers });
       if (res.ok) {
         setSections(await res.json());
       }
@@ -59,7 +59,7 @@ export default function PageBuilderPage() {
   }
 
   async function addSection(type: string) {
-    const res = await fetch(`/api/store/admin/pages/${pageId}/sections`, {
+    const res = await fetch(`/api/v1/store/admin/pages/${pageId}/sections`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ type, config: {} }),
@@ -73,7 +73,7 @@ export default function PageBuilderPage() {
     if (!editingSection) return;
     try {
       const config = JSON.parse(configJson);
-      await fetch(`/api/store/admin/pages/${pageId}/sections/${editingSection.id}`, {
+      await fetch(`/api/v1/store/admin/pages/${pageId}/sections/${editingSection.id}`, {
         method: 'PUT',
         headers,
         body: JSON.stringify({ config }),
@@ -87,7 +87,7 @@ export default function PageBuilderPage() {
 
   async function deleteSection(sectionId: string) {
     if (!confirm('Delete this section?')) return;
-    await fetch(`/api/store/admin/pages/${pageId}/sections/${sectionId}`, {
+    await fetch(`/api/v1/store/admin/pages/${pageId}/sections/${sectionId}`, {
       method: 'DELETE',
       headers,
     });
@@ -102,7 +102,7 @@ export default function PageBuilderPage() {
     const ids = newSections.map((s) => s.id);
     [ids[index], ids[swapIndex]] = [ids[swapIndex], ids[index]];
 
-    await fetch(`/api/store/admin/pages/${pageId}/sections/reorder`, {
+    await fetch(`/api/v1/store/admin/pages/${pageId}/sections/reorder`, {
       method: 'PUT',
       headers,
       body: JSON.stringify({ sectionIds: ids }),

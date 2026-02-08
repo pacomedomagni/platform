@@ -40,15 +40,15 @@ export class MonitoringService {
   /**
    * Get comprehensive system metrics
    */
-  async getMetrics(): Promise<MonitoringMetrics> {
+  async getMetrics(tenantId: string): Promise<MonitoringMetrics> {
     const [
       failedOps,
       stockMetrics,
       systemHealth,
     ] = await Promise.all([
-      this.getFailedOperationsMetrics(),
-      this.getStockReservationMetrics(),
-      this.getSystemHealthMetrics(),
+      this.getFailedOperationsMetrics(tenantId),
+      this.getStockReservationMetrics(tenantId),
+      this.getSystemHealthMetrics(tenantId),
     ]);
 
     return {
@@ -67,21 +67,23 @@ export class MonitoringService {
   /**
    * Get failed operations metrics
    */
-  private async getFailedOperationsMetrics() {
+  private async getFailedOperationsMetrics(tenantId: string) {
     const [pending, retrying, failed, succeeded, total] = await Promise.all([
       this.prisma.failedOperation.count({
-        where: { status: OperationStatus.PENDING },
+        where: { tenantId, status: OperationStatus.PENDING },
       }),
       this.prisma.failedOperation.count({
-        where: { status: OperationStatus.RETRYING },
+        where: { tenantId, status: OperationStatus.RETRYING },
       }),
       this.prisma.failedOperation.count({
-        where: { status: OperationStatus.FAILED },
+        where: { tenantId, status: OperationStatus.FAILED },
       }),
       this.prisma.failedOperation.count({
-        where: { status: OperationStatus.SUCCEEDED },
+        where: { tenantId, status: OperationStatus.SUCCEEDED },
       }),
-      this.prisma.failedOperation.count(),
+      this.prisma.failedOperation.count({
+        where: { tenantId },
+      }),
     ]);
 
     const retryRate = total > 0 ? ((succeeded + failed) / total) * 100 : 0;
@@ -100,8 +102,9 @@ export class MonitoringService {
   /**
    * Get stock reservation metrics and detect anomalies
    */
-  private async getStockReservationMetrics() {
+  private async getStockReservationMetrics(tenantId: string) {
     const balances = await this.prisma.warehouseItemBalance.findMany({
+      where: { tenantId },
       select: {
         actualQty: true,
         reservedQty: true,
@@ -147,7 +150,7 @@ export class MonitoringService {
   /**
    * Get system health metrics
    */
-  private async getSystemHealthMetrics() {
+  private async getSystemHealthMetrics(tenantId: string) {
     const now = new Date();
 
     const [
@@ -157,16 +160,16 @@ export class MonitoringService {
       failedPaymentsCount,
     ] = await Promise.all([
       this.prisma.cart.count({
-        where: { status: 'active', expiresAt: { gt: now } },
+        where: { tenantId, status: 'active', expiresAt: { gt: now } },
       }),
       this.prisma.cart.count({
-        where: { status: 'active', expiresAt: { lt: now } },
+        where: { tenantId, status: 'active', expiresAt: { lt: now } },
       }),
       this.prisma.order.count({
-        where: { status: 'PENDING', paymentStatus: 'PENDING' },
+        where: { tenantId, status: 'PENDING', paymentStatus: 'PENDING' },
       }),
       this.prisma.payment.count({
-        where: { status: 'FAILED' },
+        where: { tenantId, status: 'FAILED' },
       }),
     ]);
 
@@ -181,11 +184,11 @@ export class MonitoringService {
   /**
    * Check for critical alerts
    */
-  async checkAlerts(): Promise<{
+  async checkAlerts(tenantId: string): Promise<{
     critical: string[];
     warnings: string[];
   }> {
-    const metrics = await this.getMetrics();
+    const metrics = await this.getMetrics(tenantId);
     const critical: string[] = [];
     const warnings: string[] = [];
 
@@ -237,9 +240,10 @@ export class MonitoringService {
   /**
    * Get detailed failed operations report
    */
-  async getFailedOperationsReport(limit = 100) {
+  async getFailedOperationsReport(tenantId: string, limit = 100) {
     const operations = await this.prisma.failedOperation.findMany({
       where: {
+        tenantId,
         status: {
           in: [OperationStatus.PENDING, OperationStatus.RETRYING, OperationStatus.FAILED],
         },
@@ -248,7 +252,6 @@ export class MonitoringService {
       take: limit,
       select: {
         id: true,
-        tenantId: true,
         operationType: true,
         status: true,
         referenceId: true,
@@ -268,9 +271,10 @@ export class MonitoringService {
   /**
    * Get stock reservation anomalies
    */
-  async getStockAnomalies() {
+  async getStockAnomalies(tenantId: string) {
     const anomalies = await this.prisma.warehouseItemBalance.findMany({
       where: {
+        tenantId,
         OR: [
           { actualQty: { lt: 0 } }, // Negative stock
           {

@@ -131,54 +131,56 @@ export class ReturnsService {
       throw new NotFoundException('Order not found');
     }
 
-    // Generate return number: RET-00001
-    const lastReturn = await this.prisma.returnRequest.findFirst({
-      where: { tenantId },
-      orderBy: { createdAt: 'desc' },
-      select: { returnNumber: true },
-    });
-
-    let nextNumber = 1;
-    if (lastReturn?.returnNumber) {
-      const match = lastReturn.returnNumber.match(/RET-(\d+)/);
-      if (match) {
-        nextNumber = parseInt(match[1], 10) + 1;
-      }
-    }
-    const returnNumber = `RET-${String(nextNumber).padStart(5, '0')}`;
-
     const customerName = order.customer
       ? [order.customer.firstName, order.customer.lastName].filter(Boolean).join(' ')
       : undefined;
 
-    const returnRequest = await this.prisma.returnRequest.create({
-      data: {
-        tenantId,
-        returnNumber,
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-        customerId: order.customerId,
-        customerName: customerName || undefined,
-        customerEmail: order.email,
-        reason: data.reason,
-        notes: data.notes,
-        resolution: data.resolution,
-        status: 'REQUESTED',
-        items: {
-          create: data.items.map((item) => ({
-            tenantId,
-            orderItemId: item.orderItemId,
-            productName: item.productName,
-            sku: item.sku,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            reason: item.reason,
-          })),
+    // Generate return number and create within a transaction to prevent race conditions
+    const returnRequest = await this.prisma.$transaction(async (tx) => {
+      const lastReturn = await tx.returnRequest.findFirst({
+        where: { tenantId },
+        orderBy: { createdAt: 'desc' },
+        select: { returnNumber: true },
+      });
+
+      let nextNumber = 1;
+      if (lastReturn?.returnNumber) {
+        const match = lastReturn.returnNumber.match(/RET-(\d+)/);
+        if (match) {
+          nextNumber = parseInt(match[1], 10) + 1;
+        }
+      }
+      const returnNumber = `RET-${String(nextNumber).padStart(5, '0')}`;
+
+      return tx.returnRequest.create({
+        data: {
+          tenantId,
+          returnNumber,
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          customerId: order.customerId,
+          customerName: customerName || undefined,
+          customerEmail: order.email,
+          reason: data.reason,
+          notes: data.notes,
+          resolution: data.resolution,
+          status: 'REQUESTED',
+          items: {
+            create: data.items.map((item) => ({
+              tenantId,
+              orderItemId: item.orderItemId,
+              productName: item.productName,
+              sku: item.sku,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              reason: item.reason,
+            })),
+          },
         },
-      },
-      include: {
-        items: true,
-      },
+        include: {
+          items: true,
+        },
+      });
     });
 
     return this.mapReturnToResponse(returnRequest);

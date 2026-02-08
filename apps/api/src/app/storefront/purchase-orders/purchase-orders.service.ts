@@ -81,59 +81,61 @@ export class PurchaseOrdersService {
   }
 
   async createPurchaseOrder(tenantId: string, data: any) {
-    const lastPO = await this.prisma.purchaseOrder.findFirst({
-      where: { tenantId },
-      orderBy: { createdAt: 'desc' },
-      select: { poNumber: true },
-    });
-    let nextNum = 1;
-    if (lastPO?.poNumber) {
-      const match = lastPO.poNumber.match(/PO-(\d+)/);
-      if (match) nextNum = parseInt(match[1], 10) + 1;
-    }
-    const poNumber = `PO-${String(nextNum).padStart(5, '0')}`;
-
     const items = data.items || [];
     const subtotal = items.reduce((sum: number, i: any) => sum + Number(i.quantity) * Number(i.unitPrice), 0);
     const taxAmount = items.reduce((sum: number, i: any) => sum + Number(i.quantity) * Number(i.unitPrice) * Number(i.taxRate || 0), 0);
     const grandTotal = subtotal + taxAmount + Number(data.shippingCost || 0);
 
-    const po = await this.prisma.purchaseOrder.create({
-      data: {
-        tenantId,
-        poNumber,
-        status: data.status || 'DRAFT',
-        supplierId: data.supplierId,
-        supplierName: data.supplierName,
-        supplierEmail: data.supplierEmail,
-        deliveryWarehouseId: data.deliveryWarehouseId,
-        expectedDeliveryDate: data.expectedDeliveryDate ? new Date(data.expectedDeliveryDate) : null,
-        currency: data.currency || 'USD',
-        subtotal,
-        taxAmount,
-        shippingCost: Number(data.shippingCost || 0),
-        grandTotal,
-        orderDate: new Date(data.orderDate || Date.now()),
-        notes: data.notes,
-        internalNotes: data.internalNotes,
-        items: {
-          create: items.map((item: any, idx: number) => ({
-            tenantId,
-            itemId: item.itemId,
-            description: item.description,
-            quantity: Number(item.quantity),
-            unitPrice: Number(item.unitPrice),
-            taxRate: Number(item.taxRate || 0),
-            taxAmount: Number(item.quantity) * Number(item.unitPrice) * Number(item.taxRate || 0),
-            totalPrice: Number(item.quantity) * Number(item.unitPrice) * (1 + Number(item.taxRate || 0)),
-            sortOrder: idx,
-          })),
+    const po = await this.prisma.$transaction(async (tx) => {
+      const lastPO = await tx.purchaseOrder.findFirst({
+        where: { tenantId },
+        orderBy: { createdAt: 'desc' },
+        select: { poNumber: true },
+      });
+      let nextNum = 1;
+      if (lastPO?.poNumber) {
+        const match = lastPO.poNumber.match(/PO-(\d+)/);
+        if (match) nextNum = parseInt(match[1], 10) + 1;
+      }
+      const poNumber = `PO-${String(nextNum).padStart(5, '0')}`;
+
+      return tx.purchaseOrder.create({
+        data: {
+          tenantId,
+          poNumber,
+          status: data.status || 'DRAFT',
+          supplierId: data.supplierId,
+          supplierName: data.supplierName,
+          supplierEmail: data.supplierEmail,
+          deliveryWarehouseId: data.deliveryWarehouseId,
+          expectedDeliveryDate: data.expectedDeliveryDate ? new Date(data.expectedDeliveryDate) : null,
+          currency: data.currency || 'USD',
+          subtotal,
+          taxAmount,
+          shippingCost: Number(data.shippingCost || 0),
+          grandTotal,
+          orderDate: new Date(data.orderDate || Date.now()),
+          notes: data.notes,
+          internalNotes: data.internalNotes,
+          items: {
+            create: items.map((item: any, idx: number) => ({
+              tenantId,
+              itemId: item.itemId,
+              description: item.description,
+              quantity: Number(item.quantity),
+              unitPrice: Number(item.unitPrice),
+              taxRate: Number(item.taxRate || 0),
+              taxAmount: Number(item.quantity) * Number(item.unitPrice) * Number(item.taxRate || 0),
+              totalPrice: Number(item.quantity) * Number(item.unitPrice) * (1 + Number(item.taxRate || 0)),
+              sortOrder: idx,
+            })),
+          },
         },
-      },
-      include: { items: true },
+        include: { items: true },
+      });
     });
 
-    this.logger.log(`PO ${poNumber} created for tenant ${tenantId}`);
+    this.logger.log(`PO ${po.poNumber} created for tenant ${tenantId}`);
     return po;
   }
 
@@ -202,10 +204,19 @@ export class PurchaseOrdersService {
       throw new BadRequestException('PO must be approved before receiving goods');
     }
 
-    const nextNum = await this.prisma.goodsReceipt.count({ where: { tenantId } });
-    const receiptNumber = `GR-${String(nextNum + 1).padStart(5, '0')}`;
-
     const receipt = await this.prisma.$transaction(async (tx) => {
+      const lastReceipt = await tx.goodsReceipt.findFirst({
+        where: { tenantId },
+        orderBy: { createdAt: 'desc' },
+        select: { receiptNumber: true },
+      });
+      let nextNum = 1;
+      if (lastReceipt?.receiptNumber) {
+        const match = lastReceipt.receiptNumber.match(/GR-(\d+)/);
+        if (match) nextNum = parseInt(match[1], 10) + 1;
+      }
+      const receiptNumber = `GR-${String(nextNum).padStart(5, '0')}`;
+
       const gr = await tx.goodsReceipt.create({
         data: {
           tenantId,
@@ -253,7 +264,7 @@ export class PurchaseOrdersService {
       return gr;
     });
 
-    this.logger.log(`Goods receipt ${receiptNumber} created for PO ${po.poNumber}`);
+    this.logger.log(`Goods receipt ${receipt.receiptNumber} created for PO ${po.poNumber}`);
     return receipt;
   }
 
