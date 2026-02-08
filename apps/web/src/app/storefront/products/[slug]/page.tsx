@@ -5,9 +5,9 @@ import { Badge, Card } from '@platform/ui';
 import { Check, ShieldCheck, Truck } from 'lucide-react';
 import { formatCurrency } from '../../_lib/format';
 import { ProductCard } from '../../_components/product-card';
-import { ButtonLink } from '../../_components/button-link';
 import { ProductReviews } from './_components/product-reviews';
 import { VariantSelector } from './_components/variant-selector';
+import { AddToCartButtons } from './_components/add-to-cart-buttons';
 import { productsApi } from '@/lib/store-api';
 import {
   generateProductSchema,
@@ -181,17 +181,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
               <span className="text-muted-foreground">Lead time</span>
               <span className="font-semibold text-foreground">3-5 business days</span>
             </div>
-            <div className="flex flex-wrap gap-3">
-              <ButtonLink
-                href="/storefront/cart"
-                className="flex-1 bg-gradient-to-r from-primary via-secondary to-accent text-primary-foreground shadow-md hover:shadow-lg"
-              >
-                Add to cart
-              </ButtonLink>
-              <ButtonLink href="/storefront/checkout" variant="outline" className="flex-1">
-                Buy now
-              </ButtonLink>
-            </div>
+            <AddToCartButtons productId={product.id} />
           </Card>
           <div className="grid gap-3 md:grid-cols-3">
             {[

@@ -603,7 +603,7 @@ export class CheckoutService {
       discountTotal: Number(order.discountTotal),
       grandTotal: Number(order.grandTotal),
       stripePaymentIntentId: order.stripePaymentIntentId,
-      stripeClientSecret: clientSecret,
+      clientSecret: clientSecret,
     };
   }
 }

@@ -141,7 +141,7 @@ export default function CheckoutPage() {
       } else {
         // No payment needed (free order?) - redirect to confirmation
         await clearCart();
-        router.push(`/storefront/order-confirmation?order=${checkout.orderNumber}`);
+        router.push(`/storefront/order-confirmation?order_id=${checkout.id}`);
       }
     } catch (err) {
       console.error('Checkout error:', err);
@@ -153,7 +153,7 @@ export default function CheckoutPage() {
 
   const handlePaymentSuccess = async () => {
     await clearCart();
-    router.push(`/storefront/order-confirmation?order=${orderNumber}`);
+    router.push(`/storefront/order-confirmation?order_id=${orderId}`);
   };
 
   const handlePaymentError = (message: string) => {

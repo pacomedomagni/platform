@@ -26,7 +26,7 @@ export default function OrdersPage() {
 
     if (isAuthenticated) {
       ordersApi.list({ limit: 50 })
-        .then((data) => setOrders(data.orders))
+        .then((data: any) => setOrders(data.orders || data.data || []))
         .catch(console.error)
         .finally(() => setLoading(false));
     }

@@ -143,7 +143,7 @@ export default function CartPage() {
                 <div className="flex-1 space-y-2">
                   <div className="flex items-center justify-between">
                     <Link
-                      href={`/storefront/products/${item.productId}`}
+                      href={`/storefront/products/${item.productSlug || item.productId}`}
                       className="text-base font-semibold text-foreground hover:text-primary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded"
                     >
                       {item.name}

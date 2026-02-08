@@ -79,9 +79,10 @@ export const useCartStore = create<CartState>()(
         const mappedItems = cart.items.map(item => ({
           ...item,
           productId: item.product.id,
+          productSlug: item.product.slug,
           name: item.product.displayName,
           price: item.product.price,
-          image: item.product.images[0] || '',
+          image: item.product.images?.[0] || '',
           variant: undefined,
         }));
 

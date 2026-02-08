@@ -71,8 +71,8 @@ export default function SignupPage() {
 
       // Token should always be returned now (user created synchronously).
       // Fallback: redirect to login if something unexpected happens.
-      setError('Account created. Please sign in to continue.');
       setIsSubmitting(false);
+      router.push('/login');
     } catch (err: any) {
       setError(err.message);
       setIsSubmitting(false);

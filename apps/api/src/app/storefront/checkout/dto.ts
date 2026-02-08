@@ -110,5 +110,5 @@ export class CheckoutResponseDto {
   discountTotal: number;
   grandTotal: number;
   stripePaymentIntentId: string | null;
-  stripeClientSecret: string | null;
+  clientSecret: string | null;
 }

@@ -188,6 +188,7 @@ export const productsApi = {
 export interface CartItem {
   id: string;
   productId: string;  // Alias for product.id
+  productSlug?: string; // Alias for product.slug
   product: {
     id: string;
     slug: string;

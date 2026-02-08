@@ -175,6 +175,33 @@ export default function Dashboard() {
     },
   ];
 
+  const [verifyingSent, setVerifyingSent] = useState(false);
+
+  const handleResendVerification = async () => {
+    setVerifyingSent(true);
+    try {
+      const token = localStorage.getItem('access_token');
+      const tenantId = localStorage.getItem('tenantId');
+      const res = await fetch('/api/onboarding/resend-verification', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'x-tenant-id': tenantId || '',
+        },
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.message || 'Failed to send verification email');
+      } else {
+        alert('Verification email sent! Check your inbox.');
+      }
+    } catch {
+      alert('Failed to send verification email');
+    } finally {
+      setVerifyingSent(false);
+    }
+  };
+
   const handlePublish = async () => {
     setPublishing(true);
     try {
@@ -205,6 +232,8 @@ export default function Dashboard() {
       label: 'Verify your email',
       done: data.checklist.emailVerified,
       href: '#',
+      action: !data.checklist.emailVerified ? handleResendVerification : undefined,
+      buttonLabel: verifyingSent ? 'Sending...' : 'Send verification',
     },
     {
       label: 'Connect payments',
@@ -231,6 +260,7 @@ export default function Dashboard() {
       done: data.checklist.storePublished,
       href: '#',
       action: !data.checklist.storePublished ? handlePublish : undefined,
+      buttonLabel: publishing ? 'Publishing...' : 'Publish',
     },
   ];
 
@@ -362,10 +392,10 @@ export default function Dashboard() {
                         e.stopPropagation();
                         (item as any).action();
                       }}
-                      disabled={publishing}
+                      disabled={publishing || verifyingSent}
                       className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                     >
-                      {publishing ? 'Publishing...' : 'Publish'}
+                      {(item as any).buttonLabel || 'Go'}
                     </button>
                   ) : (
                     <ArrowRight className="h-4 w-4 text-slate-400" />

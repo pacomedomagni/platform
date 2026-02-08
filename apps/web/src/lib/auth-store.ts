@@ -82,6 +82,13 @@ export const useAuthStore = create<AuthState>()(
 
         try {
           const response = await authApi.register(data);
+
+          if (!response.token || !response.customer) {
+            // Duplicate email returns generic success without token
+            set({ isLoading: false });
+            return;
+          }
+
           localStorage.setItem('customer_token', response.token);
           set({
             customer: response.customer,
