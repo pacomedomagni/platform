@@ -76,16 +76,22 @@ export function useThemeLayout(): LayoutConfig {
   return useMemo(() => {
     if (!theme) {
       return {
-        layoutStyle: 'standard',
-        spacing: 'normal',
-        borderRadius: 'md',
+        layoutStyle: 'standard' as const,
+        headerStyle: 'classic' as const,
+        footerStyle: 'default' as const,
+        spacing: 'comfortable' as const,
+        containerMaxWidth: 1280,
+        borderRadius: 'md' as const,
       };
     }
 
     return {
-      layoutStyle: theme.layoutStyle,
-      spacing: theme.spacing,
-      borderRadius: theme.borderRadius,
+      layoutStyle: theme.layout?.layoutStyle || theme.layoutStyle,
+      headerStyle: theme.layout?.headerStyle || 'classic' as const,
+      footerStyle: theme.layout?.footerStyle || 'default' as const,
+      spacing: theme.layout?.spacing || 'comfortable' as const,
+      containerMaxWidth: theme.layout?.containerMaxWidth || 1280,
+      borderRadius: theme.layout?.borderRadius || theme.borderRadius,
     };
   }, [theme]);
 }
@@ -96,18 +102,28 @@ export function useThemeLayout(): LayoutConfig {
 export function useTypography(): TypographyConfig {
   const { theme } = useTheme();
 
-  return useMemo(() => {
+  return useMemo((): TypographyConfig => {
+    const defaultFont = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
     if (!theme) {
       return {
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        fontFamily: defaultFont,
+        bodyFont: defaultFont,
+        bodyWeight: '400',
+        headingFont: defaultFont,
+        headingWeight: '700',
+        baseFontSize: '16px',
         fontSize: 'base',
       };
     }
 
     return {
-      fontFamily: theme.fontFamily,
-      headingFont: theme.headingFont,
-      fontSize: theme.fontSize,
+      fontFamily: theme.typography?.fontFamily || theme.fontFamily,
+      bodyFont: theme.typography?.bodyFont || theme.fontFamily,
+      bodyWeight: theme.typography?.bodyWeight || '400',
+      headingFont: theme.typography?.headingFont || theme.headingFont || theme.fontFamily,
+      headingWeight: theme.typography?.headingWeight || '700',
+      baseFontSize: theme.typography?.baseFontSize || '16px',
+      fontSize: theme.typography?.fontSize || theme.fontSize,
     };
   }, [theme]);
 }
@@ -118,25 +134,32 @@ export function useTypography(): TypographyConfig {
 export function useComponentStyles() {
   const { theme } = useTheme();
 
-  return useMemo(() => {
+  return useMemo((): {
+    buttonStyle: string;
+    buttonRounding: string;
+    inputStyle: string;
+    cardStyle: string;
+    cardShadow: string;
+    navStyle: string;
+  } => {
     if (!theme) {
       return {
-        buttonStyle: 'solid' as const,
-        buttonRounding: 'md' as const,
-        inputStyle: 'outlined' as const,
-        cardStyle: 'elevated' as const,
-        cardShadow: 'md' as const,
-        navStyle: 'underline' as const,
+        buttonStyle: 'solid',
+        buttonRounding: 'md',
+        inputStyle: 'outlined',
+        cardStyle: 'elevated',
+        cardShadow: 'md',
+        navStyle: 'underline',
       };
     }
 
     return {
-      buttonStyle: theme.buttonStyle || 'solid',
-      buttonRounding: theme.buttonRounding || 'md',
-      inputStyle: theme.inputStyle || 'outlined',
-      cardStyle: theme.cardStyle || 'elevated',
-      cardShadow: theme.cardShadow || 'md',
-      navStyle: theme.navStyle || 'underline',
+      buttonStyle: theme.components?.buttonStyle || theme.buttonStyle || 'solid',
+      buttonRounding: theme.components?.buttonRounding || theme.buttonRounding || 'md',
+      inputStyle: theme.components?.inputStyle || theme.inputStyle || 'outlined',
+      cardStyle: theme.components?.cardStyle || theme.cardStyle || 'elevated',
+      cardShadow: theme.components?.cardShadow || theme.cardShadow || 'md',
+      navStyle: theme.components?.navStyle || theme.navStyle || 'underline',
     };
   }, [theme]);
 }

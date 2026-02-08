@@ -20,6 +20,7 @@ export interface ThemeColors {
   ring: string;
   success: string;
   warning: string;
+  destructive: string;
   error: string;
   info: string;
   chart1: string;
@@ -31,7 +32,11 @@ export interface ThemeColors {
 
 export interface TypographyConfig {
   fontFamily: string;
-  headingFont?: string;
+  bodyFont: string;
+  bodyWeight: string;
+  headingFont: string;
+  headingWeight: string;
+  baseFontSize: string;
   fontSize: 'sm' | 'base' | 'lg';
   fontWeightNormal?: number;
   fontWeightBold?: number;
@@ -41,7 +46,10 @@ export interface TypographyConfig {
 
 export interface LayoutConfig {
   layoutStyle: 'standard' | 'wide' | 'boxed';
-  spacing: 'compact' | 'normal' | 'relaxed';
+  headerStyle: 'classic' | 'minimal' | 'centered';
+  footerStyle: 'default' | 'minimal' | 'detailed';
+  spacing: 'compact' | 'comfortable' | 'spacious';
+  containerMaxWidth: number;
   borderRadius: 'none' | 'sm' | 'md' | 'lg' | 'xl';
   maxWidth?: number;
   headerHeight?: number;
@@ -49,17 +57,27 @@ export interface LayoutConfig {
 }
 
 export interface ComponentStyles {
-  buttonStyle?: 'solid' | 'outline' | 'ghost' | 'gradient';
+  buttonStyle: 'rounded' | 'square' | 'pill' | 'solid' | 'outline' | 'ghost' | 'gradient';
+  buttonSize: 'sm' | 'md' | 'lg';
   buttonRounding?: 'none' | 'sm' | 'md' | 'lg' | 'full';
-  inputStyle?: 'outlined' | 'filled' | 'underlined';
-  cardStyle?: 'flat' | 'elevated' | 'outlined';
+  inputStyle: 'outlined' | 'filled' | 'underlined';
+  cardStyle: 'shadow' | 'border' | 'flat' | 'elevated' | 'outlined';
+  cardRadius: number;
   cardShadow?: 'none' | 'sm' | 'md' | 'lg' | 'xl';
   navStyle?: 'pills' | 'underline' | 'filled';
+}
+
+export interface ThemeProductDisplay {
+  gridColumns: number;
+  imageRatio: 'square' | 'portrait' | 'landscape';
+  showQuickView: boolean;
+  showWishlist: boolean;
 }
 
 export interface Theme {
   id: string;
   name: string;
+  description?: string;
   slug: string;
   tenantId: string;
   isActive: boolean;
@@ -76,6 +94,10 @@ export interface Theme {
   cardStyle?: 'flat' | 'elevated' | 'outlined';
   cardShadow?: 'none' | 'sm' | 'md' | 'lg' | 'xl';
   navStyle?: 'pills' | 'underline' | 'filled';
+  typography: TypographyConfig;
+  layout: LayoutConfig;
+  components: ComponentStyles;
+  productDisplay: ThemeProductDisplay;
   customCSS?: string;
   isPreset: boolean;
   presetType?: 'modern' | 'elegant' | 'bold' | 'minimal';
@@ -85,6 +107,7 @@ export interface Theme {
 
 export interface CreateThemeDto {
   name: string;
+  description?: string;
   slug?: string;
   colors?: Partial<ThemeColors>;
   fontFamily?: string;
@@ -100,6 +123,11 @@ export interface CreateThemeDto {
   cardShadow?: 'none' | 'sm' | 'md' | 'lg' | 'xl';
   navStyle?: 'pills' | 'underline' | 'filled';
   customCSS?: string;
+  typography?: Partial<TypographyConfig>;
+  layout?: Partial<LayoutConfig>;
+  components?: Partial<ComponentStyles>;
+  productDisplay?: Partial<ThemeProductDisplay>;
+  [key: string]: unknown;
 }
 
 export interface UpdateThemeDto extends Partial<CreateThemeDto> {}
@@ -126,6 +154,11 @@ export interface FontLoadState {
   loaded: boolean;
   error: string | null;
 }
+
+// Aliases for backwards compatibility
+export type ThemeTypography = TypographyConfig;
+export type ThemeLayout = LayoutConfig;
+export type ThemeComponents = ComponentStyles;
 
 export type ColorFormat = 'hex' | 'rgb' | 'hsl';
 

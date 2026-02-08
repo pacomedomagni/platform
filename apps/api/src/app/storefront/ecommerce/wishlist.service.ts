@@ -58,6 +58,9 @@ export class WishlistService {
     const wishlist = await this.prisma.wishlist.findFirst({
       where: { id: wishlistId, tenantId, customerId },
       include: {
+        customer: {
+          select: { firstName: true },
+        },
         items: {
           include: {
             productListing: {

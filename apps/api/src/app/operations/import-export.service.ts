@@ -1,5 +1,6 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { Prisma } from '@prisma/client';
 import { Response } from 'express';
 import { BackgroundJobService } from './background-job.service';
 import { StockMovementService } from '../inventory-management/stock-movement.service';

@@ -159,6 +159,7 @@ export function getDefaultColors(): ThemeColors {
     ring: '#0070f3',
     success: '#22c55e',
     warning: '#f59e0b',
+    destructive: '#ef4444',
     error: '#ef4444',
     info: '#3b82f6',
     chart1: '#0070f3',

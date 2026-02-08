@@ -139,10 +139,11 @@ export const reviewsApi = {
     const formData = new FormData();
     files.forEach((file) => formData.append('images', file));
 
+    const tenantId = await resolveTenantId();
     const response = await fetch(`${API_BASE}/v1/store/reviews/upload-images`, {
       method: 'POST',
       headers: {
-        'x-tenant-id': getTenantId(),
+        'x-tenant-id': tenantId,
       },
       body: formData,
     });

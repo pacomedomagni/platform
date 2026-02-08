@@ -41,6 +41,32 @@ import { DigitalDownloadController } from './digital/digital-download.controller
 import { DigitalFulfillmentService } from './digital/digital-fulfillment.service';
 import { ScheduledReportsController } from '../operations/scheduled-reports.controller';
 import { ScheduledReportsService } from '../operations/scheduled-reports.service';
+import { InvoicingController } from './invoicing/invoicing.controller';
+import { InvoicingService } from './invoicing/invoicing.service';
+import { PurchaseOrdersController } from './purchase-orders/purchase-orders.controller';
+import { PurchaseOrdersService } from './purchase-orders/purchase-orders.service';
+import { ExpensesController } from './expenses/expenses.controller';
+import { ExpensesService } from './expenses/expenses.service';
+import { TaxRulesController } from './tax-rules/tax-rules.controller';
+import { TaxRulesService } from './tax-rules/tax-rules.service';
+import { BusinessHealthController } from './business-health/business-health.controller';
+import { BusinessHealthService } from './business-health/business-health.service';
+import { ReorderAlertsController } from './reorder-alerts/reorder-alerts.controller';
+import { ReorderAlertsService } from './reorder-alerts/reorder-alerts.service';
+import { NotificationsController } from './notifications/notifications.controller';
+import { NotificationsService } from './notifications/notifications.service';
+import { SeoController } from './seo/seo.controller';
+import { SeoService } from './seo/seo.service';
+import { AbandonedCartController } from './abandoned-cart/abandoned-cart.controller';
+import { AbandonedCartService } from './abandoned-cart/abandoned-cart.service';
+import { DiscountRulesController } from './discount-rules/discount-rules.controller';
+import { DiscountRulesService } from './discount-rules/discount-rules.service';
+import { ReturnsController } from './returns/returns.controller';
+import { ReturnsService } from './returns/returns.service';
+import { CrmController } from './crm/crm.controller';
+import { CrmService } from './crm/crm.service';
+import { ActivityController } from './activity/activity.controller';
+import { ActivityService } from './activity/activity.service';
 
 @Module({
   imports: [
@@ -87,6 +113,19 @@ import { ScheduledReportsService } from '../operations/scheduled-reports.service
     PageSectionsController,
     DigitalDownloadController,
     ScheduledReportsController,
+    InvoicingController,
+    PurchaseOrdersController,
+    ExpensesController,
+    TaxRulesController,
+    BusinessHealthController,
+    ReorderAlertsController,
+    NotificationsController,
+    SeoController,
+    AbandonedCartController,
+    DiscountRulesController,
+    ReturnsController,
+    CrmController,
+    ActivityController,
   ],
   providers: [
     ProductsService,
@@ -105,6 +144,19 @@ import { ScheduledReportsService } from '../operations/scheduled-reports.service
     PageSectionsService,
     DigitalFulfillmentService,
     ScheduledReportsService,
+    InvoicingService,
+    PurchaseOrdersService,
+    ExpensesService,
+    TaxRulesService,
+    BusinessHealthService,
+    ReorderAlertsService,
+    NotificationsService,
+    SeoService,
+    AbandonedCartService,
+    DiscountRulesService,
+    ReturnsService,
+    CrmService,
+    ActivityService,
   ],
   exports: [
     CustomerAuthModule,

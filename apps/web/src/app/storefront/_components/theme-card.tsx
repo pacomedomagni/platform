@@ -3,12 +3,14 @@
  */
 'use client';
 
-import { useThemeLayout } from '@/lib/theme';
-import { Card, CardProps } from '@platform/ui';
+import { useComponentStyles } from '@/lib/theme';
+import { Card } from '@platform/ui';
 import { cn } from '@platform/ui';
 
+type CardProps = React.ComponentPropsWithoutRef<typeof Card>;
+
 export function ThemedCard({ className, ...props }: CardProps) {
-  const { cardStyle } = useThemeLayout();
+  const { cardStyle } = useComponentStyles();
 
   const cardClass = cn(
     cardStyle === 'shadow' && 'shadow-md',

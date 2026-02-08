@@ -149,6 +149,29 @@ model Tenant {
   funnelEvents     FunnelEvent[]
   scheduledReports ScheduledReport[]
 
+  // Small Business Suite (Phase 1-3)
+  invoices            Invoice[]
+  invoiceItems        InvoiceItem[]
+  invoicePayments     InvoicePayment[]
+  purchaseOrders      PurchaseOrder[]
+  purchaseOrderItems  PurchaseOrderItem[]
+  goodsReceipts       GoodsReceipt[]
+  goodsReceiptItems   GoodsReceiptItem[]
+  taxRules            TaxRule[]
+  expenses            Expense[]
+  expenseCategories   ExpenseCategory[]
+  discountRules       DiscountRule[]
+  returnRequests      ReturnRequest[]
+  returnItems         ReturnItem[]
+  customerNotes       CustomerNote[]
+  customerTags        CustomerTag[]
+  customerTagLinks    CustomerTagLink[]
+  activityEvents      ActivityEvent[]
+  abandonedCartEmails AbandonedCartEmail[]
+  reorderAlerts       ReorderAlert[]
+  notificationChannels NotificationChannel[]
+  notificationLogs    NotificationLog[]
+
   @@map("tenants")
 }
 
@@ -1379,6 +1402,7 @@ model CartItem {
 }
 
 enum OrderStatus {
+  DRAFT
   PENDING
   CONFIRMED
   PROCESSING
@@ -2863,6 +2887,12 @@ model StorePage {
   content     String  @db.Text
   isPublished Boolean @default(true)
 
+  // SEO fields
+  metaTitle       String?
+  metaDescription String?
+  ogImage         String?
+  structuredData  Json?   // JSON-LD structured data
+
   sections PageSection[]
 
   createdAt DateTime @default(now())
@@ -2987,4 +3017,762 @@ model ScheduledReport {
 
   @@index([tenantId])
   @@map("scheduled_reports")
+}
+
+// ============================================================
+// SMALL BUSINESS SUITE - PHASE 1: Replace Their Other Tools
+// ============================================================
+
+// ─── Invoicing ───────────────────────────────────────────────
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  VIEWED
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+  WRITTEN_OFF
+}
+
+model Invoice {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  invoiceNumber String
+  status        InvoiceStatus @default(DRAFT)
+
+  // Party
+  partyType  String  @default("Customer") // Customer, Supplier
+  partyId    String?
+  partyName  String
+  partyEmail String?
+
+  // Addresses (snapshot)
+  billingAddressLine1 String?
+  billingAddressLine2 String?
+  billingCity         String?
+  billingState        String?
+  billingPostalCode   String?
+  billingCountry      String?
+
+  // Dates
+  invoiceDate DateTime @db.Date
+  dueDate     DateTime @db.Date
+  paidDate    DateTime?
+
+  // Linked order (optional)
+  orderId String?
+
+  // Currency
+  currency     String  @default("USD")
+  exchangeRate Decimal @default(1) @db.Decimal(18, 9)
+
+  // Totals
+  subtotal     Decimal @default(0) @db.Decimal(18, 2)
+  taxAmount    Decimal @default(0) @db.Decimal(18, 2)
+  discountAmount Decimal @default(0) @db.Decimal(18, 2)
+  grandTotal   Decimal @default(0) @db.Decimal(18, 2)
+  amountPaid   Decimal @default(0) @db.Decimal(18, 2)
+  amountDue    Decimal @default(0) @db.Decimal(18, 2)
+
+  // Tax
+  taxRuleId String?
+
+  // Notes
+  notes         String?
+  termsAndConditions String?
+  internalNotes String?
+
+  // Email tracking
+  sentAt   DateTime?
+  viewedAt DateTime?
+
+  // GL posting
+  glPosted    Boolean   @default(false)
+  glPostedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items    InvoiceItem[]
+  payments InvoicePayment[]
+
+  @@unique([tenantId, invoiceNumber])
+  @@index([tenantId, status])
+  @@index([tenantId, partyId])
+  @@index([tenantId, dueDate])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  // Item reference (optional)
+  itemId String?
+  productListingId String?
+
+  description String
+  quantity    Decimal @db.Decimal(18, 4)
+  unitPrice   Decimal @db.Decimal(18, 2)
+  discount    Decimal @default(0) @db.Decimal(18, 2)
+  taxRate     Decimal @default(0) @db.Decimal(8, 6)
+  taxAmount   Decimal @default(0) @db.Decimal(18, 2)
+  totalPrice  Decimal @db.Decimal(18, 2)
+
+  sortOrder Int @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([invoiceId])
+  @@map("invoice_items")
+}
+
+model InvoicePayment {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  amount      Decimal  @db.Decimal(18, 2)
+  paymentDate DateTime @db.Date
+  method      String   @default("bank_transfer") // bank_transfer, cash, card, cheque, other
+  reference   String?  // cheque number, transaction ID, etc.
+  notes       String?
+
+  // GL posting
+  glPosted   Boolean   @default(false)
+  glPostedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([invoiceId])
+  @@map("invoice_payments")
+}
+
+// ─── Purchase Orders ─────────────────────────────────────────
+
+enum PurchaseOrderStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+  CLOSED
+}
+
+model PurchaseOrder {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  poNumber String
+  status   PurchaseOrderStatus @default(DRAFT)
+
+  // Supplier
+  supplierId   String?
+  supplierName String
+  supplierEmail String?
+
+  // Delivery
+  deliveryWarehouseId String?
+  expectedDeliveryDate DateTime? @db.Date
+
+  // Currency
+  currency     String  @default("USD")
+  exchangeRate Decimal @default(1) @db.Decimal(18, 9)
+
+  // Totals
+  subtotal     Decimal @default(0) @db.Decimal(18, 2)
+  taxAmount    Decimal @default(0) @db.Decimal(18, 2)
+  shippingCost Decimal @default(0) @db.Decimal(18, 2)
+  grandTotal   Decimal @default(0) @db.Decimal(18, 2)
+
+  // Dates
+  orderDate    DateTime @db.Date
+  approvedAt   DateTime?
+  approvedBy   String?
+
+  // Notes
+  notes         String?
+  internalNotes String?
+
+  // GL posting
+  glPosted    Boolean   @default(false)
+  glPostedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items         PurchaseOrderItem[]
+  goodsReceipts GoodsReceipt[]
+
+  @@unique([tenantId, poNumber])
+  @@index([tenantId, status])
+  @@index([tenantId, supplierId])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  itemId      String?
+  description String
+  quantity    Decimal @db.Decimal(18, 4)
+  unitPrice   Decimal @db.Decimal(18, 2)
+  taxRate     Decimal @default(0) @db.Decimal(8, 6)
+  taxAmount   Decimal @default(0) @db.Decimal(18, 2)
+  totalPrice  Decimal @db.Decimal(18, 2)
+
+  quantityReceived Decimal @default(0) @db.Decimal(18, 4)
+
+  sortOrder Int @default(0)
+
+  createdAt DateTime @default(now())
+
+  goodsReceiptItems GoodsReceiptItem[]
+
+  @@index([purchaseOrderId])
+  @@map("purchase_order_items")
+}
+
+model GoodsReceipt {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  receiptNumber String
+
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+
+  warehouseId  String?
+  receivedDate DateTime @db.Date
+  receivedBy   String?
+
+  notes String?
+
+  // Stock posting
+  stockPosted   Boolean   @default(false)
+  stockPostedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items GoodsReceiptItem[]
+
+  @@unique([tenantId, receiptNumber])
+  @@index([purchaseOrderId])
+  @@map("goods_receipts")
+}
+
+model GoodsReceiptItem {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  goodsReceiptId String
+  goodsReceipt   GoodsReceipt @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
+
+  purchaseOrderItemId String
+  purchaseOrderItem   PurchaseOrderItem @relation(fields: [purchaseOrderItemId], references: [id], onDelete: Cascade)
+
+  itemId       String?
+  description  String
+  quantityReceived Decimal @db.Decimal(18, 4)
+  unitPrice    Decimal @db.Decimal(18, 2)
+
+  // Batch/Serial tracking
+  batchNo  String?
+  serialNos String[] // Array of serial numbers
+
+  createdAt DateTime @default(now())
+
+  @@index([goodsReceiptId])
+  @@map("goods_receipt_items")
+}
+
+// ─── Tax Rules ───────────────────────────────────────────────
+
+model TaxRule {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name        String  // "State Sales Tax", "VAT 20%"
+  rate        Decimal @db.Decimal(8, 6) // 0.07 for 7%
+  type        String  @default("percentage") // percentage, fixed
+  region      String? // State/Country code
+  description String?
+
+  // Tax behavior
+  isInclusive Boolean @default(false) // Tax-inclusive pricing
+  isDefault   Boolean @default(false)
+  isActive    Boolean @default(true)
+
+  // Applicability
+  appliesTo   String  @default("all") // all, products, services, shipping
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, name])
+  @@index([tenantId, isActive])
+  @@map("tax_rules")
+}
+
+// ─── Expenses ────────────────────────────────────────────────
+
+model ExpenseCategory {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name       String
+  glAccount  String? // Link to chart of accounts
+  isActive   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  expenses Expense[]
+
+  @@unique([tenantId, name])
+  @@map("expense_categories")
+}
+
+model Expense {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  expenseNumber String
+
+  categoryId String?
+  category   ExpenseCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  description   String
+  amount        Decimal  @db.Decimal(18, 2)
+  currency      String   @default("USD")
+  exchangeRate  Decimal  @default(1) @db.Decimal(18, 9)
+  expenseDate   DateTime @db.Date
+  paymentMethod String   @default("cash") // cash, card, bank_transfer, cheque
+
+  // Supplier (optional)
+  supplierId   String?
+  supplierName String?
+
+  // Receipt
+  receiptUrl String?
+
+  // Notes
+  notes String?
+
+  // Approval
+  isApproved Boolean   @default(false)
+  approvedBy String?
+  approvedAt DateTime?
+
+  // GL posting
+  glPosted   Boolean   @default(false)
+  glPostedAt DateTime?
+
+  // Recurrence
+  isRecurring       Boolean @default(false)
+  recurringSchedule String? // monthly, weekly, etc.
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, expenseNumber])
+  @@index([tenantId, expenseDate])
+  @@index([tenantId, categoryId])
+  @@map("expenses")
+}
+
+// ============================================================
+// SMALL BUSINESS SUITE - PHASE 2: Make Daily Operations Smooth
+// ============================================================
+
+// ─── Abandoned Cart Recovery ─────────────────────────────────
+
+model AbandonedCartEmail {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  cartId     String
+  email      String
+  customerId String?
+
+  // Email sequence (1st, 2nd, 3rd reminder)
+  sequence   Int      @default(1) // 1, 2, 3
+  sentAt     DateTime?
+  openedAt   DateTime?
+  clickedAt  DateTime?
+  recoveredAt DateTime? // Cart converted to order
+
+  // Recovery offer
+  couponCode    String?
+  discountValue Decimal? @db.Decimal(18, 2)
+
+  status String @default("pending") // pending, sent, opened, clicked, recovered, expired
+
+  scheduledFor DateTime
+  createdAt    DateTime @default(now())
+
+  @@index([tenantId, status])
+  @@index([tenantId, cartId])
+  @@index([scheduledFor])
+  @@map("abandoned_cart_emails")
+}
+
+// ─── Discount Rules ──────────────────────────────────────────
+
+enum DiscountType {
+  PERCENTAGE_OFF
+  FIXED_AMOUNT_OFF
+  BUY_X_GET_Y
+  FREE_SHIPPING
+  SPEND_X_GET_Y_OFF
+}
+
+model DiscountRule {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name        String
+  type        DiscountType
+  isActive    Boolean @default(true)
+  isAutomatic Boolean @default(true) // Auto-apply vs coupon-required
+
+  // Discount value
+  discountValue  Decimal  @db.Decimal(18, 2) // % or fixed amount
+  maxDiscount    Decimal? @db.Decimal(18, 2) // Cap for percentage discounts
+
+  // Conditions
+  minOrderAmount  Decimal? @db.Decimal(18, 2)
+  minItemQuantity Int?
+
+  // Buy X Get Y specifics
+  buyQuantity  Int? // Buy this many
+  getQuantity  Int? // Get this many free/discounted
+  getDiscount  Decimal? @db.Decimal(18, 2) // Discount on "get" items (100 = free)
+
+  // Spend X Get Y Off specifics
+  spendThreshold Decimal? @db.Decimal(18, 2)
+
+  // Applicability
+  appliesToAll        Boolean  @default(true)
+  applicableProducts  String[] // Product IDs
+  applicableCategories String[] // Category IDs
+
+  // Limits
+  usageLimit Int? // Total uses
+  timesUsed  Int  @default(0)
+
+  // Schedule
+  startsAt  DateTime?
+  expiresAt DateTime?
+
+  // Priority (higher = applied first)
+  priority Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, name])
+  @@index([tenantId, isActive])
+  @@map("discount_rules")
+}
+
+// ─── Returns & Exchanges ─────────────────────────────────────
+
+enum ReturnStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  ITEMS_RECEIVED
+  RESTOCKED
+  REFUNDED
+  CLOSED
+}
+
+model ReturnRequest {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  returnNumber String
+  status       ReturnStatus @default(REQUESTED)
+
+  // Order reference
+  orderId      String
+  orderNumber  String
+  customerId   String?
+  customerName String?
+  customerEmail String?
+
+  // Reason
+  reason    String // damaged, wrong_item, not_as_described, changed_mind, defective, other
+  notes     String?
+
+  // Resolution
+  resolution       String? // refund, exchange, store_credit
+  refundAmount     Decimal? @db.Decimal(18, 2)
+  refundMethod     String?  // original_payment, store_credit, bank_transfer
+
+  // Tracking
+  approvedAt     DateTime?
+  approvedBy     String?
+  rejectedAt     DateTime?
+  rejectionReason String?
+  itemsReceivedAt DateTime?
+  restockedAt    DateTime?
+  refundedAt     DateTime?
+
+  // GL posting
+  glPosted   Boolean   @default(false)
+  glPostedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items ReturnItem[]
+
+  @@unique([tenantId, returnNumber])
+  @@index([tenantId, status])
+  @@index([tenantId, orderId])
+  @@map("return_requests")
+}
+
+model ReturnItem {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  returnRequestId String
+  returnRequest   ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
+
+  orderItemId String?
+  productName String
+  sku         String?
+  quantity    Int
+  unitPrice   Decimal @db.Decimal(18, 2)
+  reason      String?
+
+  // Restock tracking
+  restocked   Boolean @default(false)
+  restockedAt DateTime?
+  warehouseId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([returnRequestId])
+  @@map("return_items")
+}
+
+// ─── Customer CRM (Notes & Tags) ────────────────────────────
+
+model CustomerNote {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Can be linked to StoreCustomer or B2B Customer
+  storeCustomerId String?
+  customerId      String?
+
+  content   String
+  createdBy String? // User ID
+  isPinned  Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, storeCustomerId])
+  @@index([tenantId, customerId])
+  @@map("customer_notes")
+}
+
+model CustomerTag {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name  String
+  color String @default("#6B7280") // Hex color for UI
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  links CustomerTagLink[]
+
+  @@unique([tenantId, name])
+  @@map("customer_tags")
+}
+
+model CustomerTagLink {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  tagId String
+  tag   CustomerTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  // Can be linked to StoreCustomer or B2B Customer
+  storeCustomerId String?
+  customerId      String?
+
+  createdAt DateTime @default(now())
+
+  @@unique([tagId, storeCustomerId])
+  @@unique([tagId, customerId])
+  @@index([tenantId, storeCustomerId])
+  @@index([tenantId, customerId])
+  @@map("customer_tag_links")
+}
+
+// ─── Activity Timeline ───────────────────────────────────────
+
+model ActivityEvent {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // What entity this event is about
+  entityType String // order, customer, invoice, purchase_order, return, product
+  entityId   String
+
+  // Secondary entity (for linking)
+  relatedEntityType String?
+  relatedEntityId   String?
+
+  // Event details
+  eventType   String  // created, updated, status_changed, email_sent, payment_received, note_added, etc.
+  title       String  // Human-readable title
+  description String? // Optional details
+  metadata    Json    @default("{}")
+
+  // Who triggered it
+  actorType String? // user, system, customer
+  actorId   String?
+  actorName String?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, entityType, entityId])
+  @@index([tenantId, createdAt])
+  @@map("activity_events")
+}
+
+// ============================================================
+// SMALL BUSINESS SUITE - PHASE 3: Make Them Love It
+// ============================================================
+
+// ─── Reorder Alerts ──────────────────────────────────────────
+
+model ReorderAlert {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  itemId      String
+  itemName    String
+  warehouseId String?
+
+  // Alert details
+  currentStock    Decimal @db.Decimal(18, 4)
+  reorderLevel    Decimal @db.Decimal(18, 4)
+  suggestedQty    Decimal @db.Decimal(18, 4)
+  daysUntilStockout Int?  // Based on sales velocity
+  dailySalesRate  Decimal? @db.Decimal(18, 4)
+
+  // Status
+  status    String @default("active") // active, acknowledged, ordered, dismissed
+  severity  String @default("warning") // info, warning, critical
+
+  // Action taken
+  acknowledgedAt DateTime?
+  acknowledgedBy String?
+  purchaseOrderId String? // PO created from this alert
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@index([tenantId, severity])
+  @@map("reorder_alerts")
+}
+
+// ─── Notification Channels (WhatsApp/SMS) ────────────────────
+
+model NotificationChannel {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  type     String // sms, whatsapp, email
+  provider String // twilio, messagebird, etc.
+
+  // Configuration (encrypted)
+  config Json @default("{}") // { accountSid, authToken, fromNumber, etc. }
+
+  isActive Boolean @default(true)
+  isVerified Boolean @default(false)
+
+  // Templates
+  orderConfirmationEnabled Boolean @default(true)
+  shippingUpdateEnabled    Boolean @default(true)
+  deliveryConfirmEnabled   Boolean @default(true)
+  abandonedCartEnabled     Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  logs NotificationLog[]
+
+  @@unique([tenantId, type])
+  @@map("notification_channels")
+}
+
+model NotificationLog {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  channelId String
+  channel   NotificationChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  recipient   String // Phone number or email
+  messageType String // order_confirmation, shipping_update, etc.
+  content     String
+  status      String @default("pending") // pending, sent, delivered, failed
+  externalId  String? // Twilio SID, etc.
+  errorMessage String?
+  cost         Decimal? @db.Decimal(10, 4)
+
+  sentAt      DateTime?
+  deliveredAt DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, channelId])
+  @@index([tenantId, createdAt])
+  @@map("notification_logs")
 }

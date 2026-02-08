@@ -121,7 +121,7 @@ export function ThemedButton({
     color: buttonStyle === 'solid' ? '#ffffff' : color,
     border: buttonStyle === 'outline' ? `2px solid ${color}` : 'none',
     padding: '0.5rem 1.5rem',
-    borderRadius: radiusMap[buttonRounding || 'md'],
+    borderRadius: radiusMap[(buttonRounding || 'md') as keyof typeof radiusMap],
     cursor: 'pointer',
     fontFamily: theme?.fontFamily,
     fontSize: theme?.fontSize === 'sm' ? '14px' : theme?.fontSize === 'lg' ? '18px' : '16px',

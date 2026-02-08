@@ -5,30 +5,51 @@ import Image from 'next/image';
 import { Badge, Card } from '@platform/ui';
 import { formatCurrency } from '../_lib/format';
 import { AddToCartButton } from './add-to-cart-button';
+import type { Product } from '@/lib/store-api';
+
+type ProductCardProduct = {
+  id: string;
+  name?: string;
+  displayName?: string;
+  slug: string;
+  category: string | { id: string; name: string; slug: string } | null;
+  price: number;
+  compareAt?: number;
+  compareAtPrice?: number | null;
+  rating?: number;
+  reviews?: number;
+  badge?: 'Best Seller' | 'New Arrival' | 'Limited';
+  description?: string | null;
+  shortDescription?: string | null;
+  stockStatus?: 'In Stock' | 'Low Stock' | 'Preorder' | 'in_stock' | 'low_stock' | 'out_of_stock' | 'preorder';
+  leadTime?: string;
+  tone?: string;
+  images?: string[];
+  tags?: string[];
+  trackInventory?: boolean;
+  quantity?: number;
+  stockQuantity?: number;
+  isFeatured?: boolean;
+};
 
 type ProductCardProps = {
-  product: {
-    id: string;
-    name: string;
-    slug: string;
-    category: string;
-    price: number;
-    compareAt?: number;
-    rating?: number;
-    reviews?: number;
-    badge?: 'Best Seller' | 'New Arrival' | 'Limited';
-    description: string;
-    stockStatus?: 'In Stock' | 'Low Stock' | 'Preorder';
-    leadTime?: string;
-    tone?: string;
-    images?: string[];
-  };
+  product: ProductCardProduct;
   compact?: boolean;
 };
 
 export const ProductCard = ({ product, compact }: ProductCardProps) => {
+  const name = product.name || product.displayName || 'Product';
+  const category = typeof product.category === 'string'
+    ? product.category
+    : product.category?.name || 'Uncategorized';
+  const description = product.description || product.shortDescription || '';
+  const compareAt = product.compareAt ?? product.compareAtPrice ?? undefined;
   const tone = product.tone || 'from-blue-50 via-slate-50 to-amber-50';
-  const stockStatus = product.stockStatus || 'In Stock';
+  const stockStatus = product.stockStatus === 'in_stock' ? 'In Stock'
+    : product.stockStatus === 'low_stock' ? 'Low Stock'
+    : product.stockStatus === 'out_of_stock' ? 'Low Stock'
+    : product.stockStatus === 'preorder' ? 'Preorder'
+    : product.stockStatus || 'In Stock';
   const hasImage = product.images && product.images.length > 0;
 
   return (
@@ -39,14 +60,14 @@ export const ProductCard = ({ product, compact }: ProductCardProps) => {
             {hasImage ? (
               <Image
                 src={product.images![0]}
-                alt={product.name}
+                alt={name}
                 width={300}
                 height={176}
                 className="h-full w-full object-cover transition-transform group-hover:scale-105"
               />
             ) : (
               <div className="h-16 w-16 rounded-2xl bg-white/80 shadow-sm ring-1 ring-white/60 flex items-center justify-center text-sm font-semibold text-slate-500">
-                {product.name.split(' ').map((word) => word[0]).join('').slice(0, 2)}
+                {name.split(' ').map((word) => word[0]).join('').slice(0, 2)}
               </div>
             )}
           </div>
@@ -60,7 +81,7 @@ export const ProductCard = ({ product, compact }: ProductCardProps) => {
       <div className="flex flex-1 flex-col gap-4 p-5">
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs text-slate-500">
-            <span>{product.category}</span>
+            <span>{category}</span>
             <span className={`rounded-full px-2 py-1 text-[11px] font-medium ${
               stockStatus === 'In Stock' 
                 ? 'bg-emerald-50 text-emerald-700'
@@ -73,16 +94,16 @@ export const ProductCard = ({ product, compact }: ProductCardProps) => {
           </div>
           <Link href={`/storefront/products/${product.slug}`}>
             <h3 className="text-base font-semibold text-slate-900 hover:text-blue-600 transition-colors">
-              {product.name}
+              {name}
             </h3>
           </Link>
-          {!compact && <p className="text-sm text-slate-500 line-clamp-2">{product.description}</p>}
+          {!compact && <p className="text-sm text-slate-500 line-clamp-2">{description}</p>}
         </div>
         <div className="flex items-center justify-between">
           <div>
             <p className="text-lg font-semibold text-slate-900">{formatCurrency(product.price)}</p>
-            {product.compareAt && (
-              <p className="text-xs text-slate-400 line-through">{formatCurrency(product.compareAt)}</p>
+            {compareAt && (
+              <p className="text-xs text-slate-400 line-through">{formatCurrency(compareAt)}</p>
             )}
           </div>
           {product.rating !== undefined && product.reviews !== undefined && (

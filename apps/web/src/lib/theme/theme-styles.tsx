@@ -8,10 +8,12 @@ import { useTheme, useThemeFont, useThemeLayout } from '@/lib/theme';
 
 export function ThemeStyles() {
   const { theme } = useTheme();
-  const { fontFamily, headingFont, fontSize } = useThemeFont();
+  const { body: fontFamily, heading: headingFont } = useThemeFont();
   const { spacing } = useThemeLayout();
 
   if (!theme) return null;
+
+  const fontSize = theme.fontSize;
 
   const spacingMap = {
     compact: '0.75rem',

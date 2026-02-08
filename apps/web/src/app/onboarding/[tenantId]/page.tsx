@@ -64,7 +64,6 @@ export default function OnboardingStatusPage() {
 
     try {
       const token = localStorage.getItem('access_token');
-      const token = localStorage.getItem('access_token');
       if (!token) {
         throw new Error('Please sign in again to continue payment setup.');
       }

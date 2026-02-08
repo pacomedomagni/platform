@@ -45,11 +45,12 @@ export function FormField({
       )}
       {React.Children.map(children, (child) => {
         if (React.isValidElement(child)) {
-          return React.cloneElement(child as React.ReactElement<any>, {
+          const elementChild = child as React.ReactElement<any>;
+          return React.cloneElement(elementChild, {
             id: htmlFor,
             'aria-invalid': error ? 'true' : 'false',
             'aria-describedby': [errorId, hintId].filter(Boolean).join(' ') || undefined,
-            className: `${child.props.className || ''} ${
+            className: `${elementChild.props.className || ''} ${
               error ? 'border-red-500 focus:ring-red-500 focus:border-red-500' : ''
             }`,
           });

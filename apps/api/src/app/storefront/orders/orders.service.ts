@@ -2,7 +2,7 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { EmailService } from '@platform/email';
-import { Prisma } from '@prisma/client';
+import { Prisma, OrderStatus } from '@prisma/client';
 import { ListOrdersDto } from './dto';
 
 type OrderWithItems = Prisma.OrderGetPayload<{
@@ -255,7 +255,7 @@ export class OrdersService {
       );
     }
 
-    const updateData: Prisma.OrderUpdateInput = { status };
+    const updateData: Prisma.OrderUpdateInput = { status: status as OrderStatus };
 
     if (status === 'SHIPPED') {
       updateData.shippedAt = new Date();

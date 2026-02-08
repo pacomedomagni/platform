@@ -9,22 +9,23 @@ import {
   AdminRespondDto,
 } from './dto';
 
-type ReviewWithRelations = Prisma.ProductReviewGetPayload<{
-  include: {
-    customer: {
-      select: {
-        firstName: true;
-        lastName: true;
-      };
-    };
-    productListing: {
-      select: {
-        displayName: true;
-        slug: true;
-      };
-    };
-  };
-}>;
+type ReviewWithRelations = {
+  id: string;
+  rating: number;
+  title: string | null;
+  content: string | null;
+  pros: string | null;
+  cons: string | null;
+  reviewerName: string | null;
+  isVerifiedPurchase: boolean;
+  images: string[];
+  helpfulCount: number;
+  notHelpfulCount: number;
+  adminResponse: string | null;
+  adminRespondedAt: Date | null;
+  createdAt: Date;
+  [key: string]: unknown;
+};
 
 @Injectable()
 export class ReviewsService {

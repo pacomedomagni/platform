@@ -10,7 +10,7 @@ const nextConfig = {
   // Use this to set Nx-specific options
   // See: https://nx.dev/recipes/next/next-config-setup
   nx: {},
-  // Exclude Nx packages from Turbopack bundling
+  // Exclude Nx packages from bundling
   serverExternalPackages: ['@nx/devkit', 'nx'],
   async rewrites() {
     return [

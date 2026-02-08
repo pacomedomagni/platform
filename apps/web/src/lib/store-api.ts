@@ -358,6 +358,7 @@ export interface Customer {
   lastName: string | null;
   phone: string | null;
   acceptsMarketing: boolean;
+  emailVerified?: boolean;
   createdAt: string;
   addresses?: CustomerAddress[];
 }

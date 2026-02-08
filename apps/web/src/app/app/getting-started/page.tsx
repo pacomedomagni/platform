@@ -163,6 +163,28 @@ export default function GettingStartedPage() {
     fetchSettings();
   }, []);
 
+  const loadEbayConnections = useCallback(async () => {
+    try {
+      const res = await fetch('/api/v1/marketplace/connections?platform=EBAY', {
+        headers: authHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setEbayConnections(
+          Array.isArray(data)
+            ? data.map((connection: { id: string; name: string; isConnected: boolean }) => ({
+                id: connection.id,
+                name: connection.name,
+                isConnected: Boolean(connection.isConnected),
+              }))
+            : [],
+        );
+      }
+    } catch {
+      // Ignore; user can still continue without eBay.
+    }
+  }, []);
+
   useEffect(() => {
     if (step === 4) {
       loadEbayConnections();
@@ -281,28 +303,6 @@ export default function GettingStartedPage() {
       setVerifyingDomain(false);
     }
   };
-
-  const loadEbayConnections = useCallback(async () => {
-    try {
-      const res = await fetch('/api/v1/marketplace/connections?platform=EBAY', {
-        headers: authHeaders(),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setEbayConnections(
-          Array.isArray(data)
-            ? data.map((connection) => ({
-                id: connection.id,
-                name: connection.name,
-                isConnected: Boolean(connection.isConnected),
-              }))
-            : [],
-        );
-      }
-    } catch {
-      // Ignore; user can still continue without eBay.
-    }
-  }, []);
 
   const handleCreateEbayConnection = async () => {
     if (!ebayName.trim()) {
