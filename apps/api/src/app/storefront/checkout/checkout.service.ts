@@ -78,11 +78,21 @@ export class CheckoutService {
           const orderTotal = Number(cart.grandTotal);
 
           if (creditLimit > 0) {
-            // Calculate current credit used (sum of unpaid orders)
+            // LOGIC-4: Find ALL StoreCustomers linked to this B2B customer,
+            // then sum unpaid orders across all of them
+            const allLinkedStoreCustomers = await tx.storeCustomer.findMany({
+              where: {
+                tenantId,
+                customerId: storeCustomer.customer.id,
+              },
+              select: { id: true },
+            });
+            const allCustomerIds = allLinkedStoreCustomers.map((sc) => sc.id);
+
             const unpaidOrders = await tx.order.findMany({
               where: {
                 tenantId,
-                customerId,
+                customerId: { in: allCustomerIds },
                 paymentStatus: { in: ['PENDING', 'AUTHORIZED'] },
               },
               select: { grandTotal: true },
@@ -565,18 +575,35 @@ export class CheckoutService {
         },
       });
 
-      // PAY-10: Release stock reservations for each order item
+      // PAY-10 + RACE-2: Release stock reservations per-warehouse (FIFO, matching reservation pattern)
       for (const item of order.items) {
         if (item.product?.item?.id) {
-          await tx.warehouseItemBalance.updateMany({
+          // Acquire advisory lock to prevent concurrent stock modifications
+          const itemKey = `${tenantId}:${item.product.item.id}`;
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${itemKey}))`;
+
+          const balances = await tx.warehouseItemBalance.findMany({
             where: {
               tenantId,
               itemId: item.product.item.id,
+              reservedQty: { gt: 0 },
             },
-            data: {
-              reservedQty: { decrement: item.quantity },
-            },
+            orderBy: { createdAt: 'asc' },
           });
+
+          let remainingToRelease = item.quantity;
+          for (const balance of balances) {
+            if (remainingToRelease <= 0) break;
+            const reserved = Number(balance.reservedQty);
+            const take = Math.min(remainingToRelease, reserved);
+            if (take > 0) {
+              await tx.warehouseItemBalance.update({
+                where: { id: balance.id },
+                data: { reservedQty: { decrement: take } },
+              });
+              remainingToRelease -= take;
+            }
+          }
         }
       }
 

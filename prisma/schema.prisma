@@ -28,6 +28,7 @@ model Tenant {
 
   // Storefront configuration
   nextOrderNumber        Int     @default(1)
+  nextReturnNumber       Int     @default(1)
   defaultTaxRate         Decimal @default(0.0825) @db.Decimal(8, 6)
   defaultShippingRate    Decimal @default(9.99) @db.Decimal(18, 2)
   freeShippingThreshold  Decimal @default(100.00) @db.Decimal(18, 2)
@@ -163,6 +164,7 @@ model Tenant {
   discountRules       DiscountRule[]
   returnRequests      ReturnRequest[]
   returnItems         ReturnItem[]
+  stockReservations   StockReservation[]
   customerNotes       CustomerNote[]
   customerTags        CustomerTag[]
   customerTagLinks    CustomerTagLink[]
@@ -350,6 +352,7 @@ model Warehouse {
   stockLedgerEntries    StockLedgerEntry[]
   serials               Serial[]
   marketplaceListings   MarketplaceListing[]
+  stockReservations     StockReservation[]
 
   @@unique([tenantId, code])
   @@unique([tenantId, name])
@@ -433,6 +436,7 @@ model Item {
   stockLedgerEntries    StockLedgerEntry[]
   productListing        ProductListing?
   productVariants       ProductVariant[]
+  stockReservations     StockReservation[]
 
   @@unique([tenantId, code])
   @@map("items")
@@ -3882,4 +3886,29 @@ model NotificationLog {
   @@index([tenantId, channelId])
   @@index([tenantId, createdAt])
   @@map("notification_logs")
+}
+
+// RACE-4: Persistent stock reservation tracking
+model StockReservation {
+  id             String    @id @default(uuid())
+  tenantId       String
+  itemId         String
+  warehouseId    String
+  quantity       Decimal   @db.Decimal(18, 6)
+  orderId        String?
+  reservationKey String
+  status         String    @default("active") // active, consumed, released, expired
+  expiresAt      DateTime
+  createdAt      DateTime  @default(now())
+  consumedAt     DateTime?
+  releasedAt     DateTime?
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  item      Item      @relation(fields: [itemId], references: [id])
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id])
+
+  @@index([tenantId, status])
+  @@index([tenantId, expiresAt])
+  @@index([tenantId, itemId, warehouseId])
+  @@map("stock_reservations")
 }

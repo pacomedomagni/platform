@@ -270,16 +270,22 @@ export class SuppliersService {
    * Get supplier groups and countries (for filters)
    */
   async getSupplierFilters(tenantId: string) {
-    const suppliers = await this.prisma.supplier.findMany({
-      where: { tenantId },
-      select: {
-        supplierGroup: true,
-        country: true,
-      },
-    });
+    // PERF-2: Use distinct queries instead of loading all suppliers
+    const [groupRecords, countryRecords] = await Promise.all([
+      this.prisma.supplier.findMany({
+        where: { tenantId, supplierGroup: { not: null } },
+        select: { supplierGroup: true },
+        distinct: ['supplierGroup'],
+      }),
+      this.prisma.supplier.findMany({
+        where: { tenantId, country: { not: null } },
+        select: { country: true },
+        distinct: ['country'],
+      }),
+    ]);
 
-    const groups = [...new Set(suppliers.map((s) => s.supplierGroup).filter(Boolean))];
-    const countries = [...new Set(suppliers.map((s) => s.country).filter(Boolean))];
+    const groups = groupRecords.map((s) => s.supplierGroup).filter(Boolean) as string[];
+    const countries = countryRecords.map((s) => s.country).filter(Boolean) as string[];
 
     return {
       groups: groups.sort(),

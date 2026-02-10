@@ -28,7 +28,7 @@ export class OrdersService {
   constructor(
     private readonly prisma: PrismaService,
     @Optional() @Inject(EmailService) private readonly emailService?: EmailService,
-    @Optional() private readonly activityService?: ActivityService,
+    @Optional() @Inject(ActivityService) private readonly activityService?: ActivityService,
   ) {}
 
   /**
@@ -279,8 +279,7 @@ export class OrdersService {
 
     // Log activity
     if (this.activityService) {
-      this.activityService.logActivity({
-        tenantId,
+      this.activityService.logActivity(tenantId, {
         entityType: 'order',
         entityId: orderId,
         eventType: 'status_changed',
@@ -365,8 +364,7 @@ export class OrdersService {
 
     // Log refund activity
     if (this.activityService) {
-      this.activityService.logActivity({
-        tenantId,
+      this.activityService.logActivity(tenantId, {
         entityType: 'order',
         entityId: orderId,
         eventType: 'payment_received',
@@ -403,8 +401,7 @@ export class OrdersService {
 
     // Log note update activity
     if (this.activityService) {
-      this.activityService.logActivity({
-        tenantId,
+      this.activityService.logActivity(tenantId, {
         entityType: 'order',
         entityId: orderId,
         eventType: 'note_added',
@@ -429,90 +426,97 @@ export class OrdersService {
       trackingInfo?: { carrier?: string; trackingNumber?: string; shipmentId?: string };
     },
   ) {
-    const order = await this.prisma.order.findFirst({
-      where: { id: orderId, tenantId },
-      include: { items: true },
-    });
+    // RACE-1: Wrap in transaction to prevent double-fulfillment
+    const { order, allItemsFulfilled } = await this.prisma.$transaction(async (tx) => {
+      const txOrder = await tx.order.findFirst({
+        where: { id: orderId, tenantId },
+        include: { items: true },
+      });
 
-    if (!order) {
-      throw new NotFoundException('Order not found');
-    }
-
-    // Validate order can be fulfilled
-    if (!['CONFIRMED', 'PROCESSING'].includes(order.status)) {
-      throw new BadRequestException(
-        `Order cannot be fulfilled in status: ${order.status}. Must be CONFIRMED or PROCESSING.`,
-      );
-    }
-
-    // Validate all items exist and quantities are valid
-    for (const fulfillmentItem of body.items) {
-      const orderItem = order.items.find((item) => item.id === fulfillmentItem.orderItemId);
-
-      if (!orderItem) {
-        throw new BadRequestException(`Order item ${fulfillmentItem.orderItemId} not found`);
+      if (!txOrder) {
+        throw new NotFoundException('Order not found');
       }
 
-      const currentFulfilled = orderItem.quantityFulfilled;
-      const totalOrdered = orderItem.quantity;
-      const newFulfilled = currentFulfilled + fulfillmentItem.quantityFulfilled;
-
-      if (newFulfilled > totalOrdered) {
+      // Validate order can be fulfilled
+      if (!['CONFIRMED', 'PROCESSING'].includes(txOrder.status)) {
         throw new BadRequestException(
-          `Cannot fulfill ${fulfillmentItem.quantityFulfilled} of item ${orderItem.name}. ` +
-          `Ordered: ${totalOrdered}, Already fulfilled: ${currentFulfilled}`,
+          `Order cannot be fulfilled in status: ${txOrder.status}. Must be CONFIRMED or PROCESSING.`,
         );
       }
 
-      if (fulfillmentItem.quantityFulfilled <= 0) {
-        throw new BadRequestException('Quantity fulfilled must be greater than 0');
-      }
-    }
+      // Validate all items exist and quantities are valid
+      for (const fulfillmentItem of body.items) {
+        const orderItem = txOrder.items.find((item) => item.id === fulfillmentItem.orderItemId);
 
-    // Update each item's quantityFulfilled
-    await Promise.all(
-      body.items.map((fulfillmentItem) =>
-        this.prisma.orderItem.update({
-          where: { id: fulfillmentItem.orderItemId },
-          data: {
-            quantityFulfilled: {
-              increment: fulfillmentItem.quantityFulfilled,
+        if (!orderItem) {
+          throw new BadRequestException(`Order item ${fulfillmentItem.orderItemId} not found`);
+        }
+
+        const currentFulfilled = orderItem.quantityFulfilled;
+        const totalOrdered = orderItem.quantity;
+        const newFulfilled = currentFulfilled + fulfillmentItem.quantityFulfilled;
+
+        if (newFulfilled > totalOrdered) {
+          throw new BadRequestException(
+            `Cannot fulfill ${fulfillmentItem.quantityFulfilled} of item ${orderItem.name}. ` +
+            `Ordered: ${totalOrdered}, Already fulfilled: ${currentFulfilled}`,
+          );
+        }
+
+        if (fulfillmentItem.quantityFulfilled <= 0) {
+          throw new BadRequestException('Quantity fulfilled must be greater than 0');
+        }
+      }
+
+      // Update each item's quantityFulfilled
+      await Promise.all(
+        body.items.map((fulfillmentItem) =>
+          tx.orderItem.update({
+            where: { id: fulfillmentItem.orderItemId },
+            data: {
+              quantityFulfilled: {
+                increment: fulfillmentItem.quantityFulfilled,
+              },
             },
-          },
-        }),
-      ),
-    );
+          }),
+        ),
+      );
 
-    // Check if order is now fully fulfilled
-    const updatedOrder = await this.prisma.order.findFirst({
-      where: { id: orderId },
-      include: { items: true },
-    });
-
-    const allItemsFulfilled = updatedOrder!.items.every(
-      (item) => item.quantityFulfilled >= item.quantity,
-    );
-
-    // If all items fulfilled, update order status to SHIPPED
-    if (allItemsFulfilled && updatedOrder!.status === 'PROCESSING') {
-      const updateData: Prisma.OrderUpdateInput = {
-        status: 'SHIPPED' as OrderStatus,
-        shippedAt: new Date(),
-      };
-
-      if (body.trackingInfo?.carrier) {
-        updateData.shippingCarrier = body.trackingInfo.carrier;
-      }
-      if (body.trackingInfo?.trackingNumber) {
-        updateData.trackingNumber = body.trackingInfo.trackingNumber;
-      }
-
-      await this.prisma.order.update({
+      // Check if order is now fully fulfilled
+      const updatedOrder = await tx.order.findFirst({
         where: { id: orderId },
-        data: updateData,
+        include: { items: true },
       });
 
-      // Send shipped email
+      const txAllItemsFulfilled = updatedOrder!.items.every(
+        (item) => item.quantityFulfilled >= item.quantity,
+      );
+
+      // LOGIC-1: If all items fulfilled, auto-ship from both CONFIRMED and PROCESSING
+      if (txAllItemsFulfilled && ['CONFIRMED', 'PROCESSING'].includes(updatedOrder!.status)) {
+        const updateData: Prisma.OrderUpdateInput = {
+          status: 'SHIPPED' as OrderStatus,
+          shippedAt: new Date(),
+        };
+
+        if (body.trackingInfo?.carrier) {
+          updateData.shippingCarrier = body.trackingInfo.carrier;
+        }
+        if (body.trackingInfo?.trackingNumber) {
+          updateData.trackingNumber = body.trackingInfo.trackingNumber;
+        }
+
+        await tx.order.update({
+          where: { id: orderId },
+          data: updateData,
+        });
+      }
+
+      return { order: txOrder, allItemsFulfilled: txAllItemsFulfilled };
+    });
+
+    // Fire-and-forget operations outside transaction
+    if (allItemsFulfilled) {
       this.sendOrderStatusEmailAsync(orderId, 'store-order-shipped').catch(err =>
         this.logger.error(`Shipped email failed for order ${orderId}: ${err.message}`),
       );
@@ -527,8 +531,7 @@ export class OrdersService {
         })
         .join(', ');
 
-      this.activityService.logActivity({
-        tenantId,
+      this.activityService.logActivity(tenantId, {
         entityType: 'order',
         entityId: orderId,
         eventType: 'fulfillment',

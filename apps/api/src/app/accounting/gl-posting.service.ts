@@ -56,31 +56,43 @@ export class GlPostingService {
         'Sales Revenue',
         'Revenue',
       );
-      const receivableAccount = await this.getOrCreateAccount(
+      // LOGIC-2: For PAID invoices, debit Cash (money received), not Receivable
+      const cashAccount = await this.getOrCreateAccount(
         tx,
         tenantId,
-        'RECEIVABLE',
-        'Accounts Receivable',
+        'CASH',
+        'Cash',
         'Asset',
       );
 
       const totalAmount = Number(invoice.grandTotal);
       const postingDate = invoice.paidDate || new Date();
 
+      // SCHEMA-2: Use invoice currency and compute exchange rate against tenant base currency
+      const tenant = await tx.tenant.findUnique({
+        where: { id: tenantId },
+        select: { baseCurrency: true },
+      });
+      const invoiceCurrency = invoice.currency || tenant?.baseCurrency || 'USD';
+      const exchangeRate = invoiceCurrency === (tenant?.baseCurrency || 'USD')
+        ? 1.0
+        : Number((invoice as any).exchangeRate || 1.0);
+      const amountBc = totalAmount * exchangeRate;
+
       // Create GL entries (double entry bookkeeping)
-      // Debit: Accounts Receivable (Asset increases)
+      // Debit: Cash (money received for PAID invoice)
       // Credit: Revenue (Revenue increases)
       const entries = await Promise.all([
-        // Debit Receivable
+        // Debit Cash
         tx.glEntry.create({
           data: {
             tenantId,
             postingDate,
             postingTs: new Date(),
-            accountId: receivableAccount.id,
-            currency: invoice.currency,
-            exchangeRate: 1.0,
-            debitBc: totalAmount,
+            accountId: cashAccount.id,
+            currency: invoiceCurrency,
+            exchangeRate,
+            debitBc: amountBc,
             creditBc: 0,
             debitFc: totalAmount,
             creditFc: 0,
@@ -96,10 +108,10 @@ export class GlPostingService {
             postingDate,
             postingTs: new Date(),
             accountId: revenueAccount.id,
-            currency: invoice.currency,
-            exchangeRate: 1.0,
+            currency: invoiceCurrency,
+            exchangeRate,
             debitBc: 0,
-            creditBc: totalAmount,
+            creditBc: amountBc,
             debitFc: 0,
             creditFc: totalAmount,
             voucherType: 'INVOICE',
@@ -150,6 +162,11 @@ export class GlPostingService {
         throw new BadRequestException('Expense already posted to GL');
       }
 
+      // LOGIC-3: Cannot post unapproved expenses
+      if (!expense.isApproved) {
+        throw new BadRequestException('Cannot post unapproved expense to GL');
+      }
+
       // Get accounts
       const expenseAccount = await this.getOrCreateAccount(
         tx,
@@ -169,6 +186,17 @@ export class GlPostingService {
       const totalAmount = Number(expense.amount);
       const postingDate = expense.expenseDate;
 
+      // SCHEMA-2: Use expense currency and compute exchange rate
+      const tenant = await tx.tenant.findUnique({
+        where: { id: tenantId },
+        select: { baseCurrency: true },
+      });
+      const expenseCurrency = expense.currency || tenant?.baseCurrency || 'USD';
+      const expExchangeRate = expenseCurrency === (tenant?.baseCurrency || 'USD')
+        ? 1.0
+        : Number((expense as any).exchangeRate || 1.0);
+      const expAmountBc = totalAmount * expExchangeRate;
+
       // Debit: Expense (Expense increases)
       // Credit: Cash (Asset decreases)
       const entries = await Promise.all([
@@ -179,9 +207,9 @@ export class GlPostingService {
             postingDate,
             postingTs: new Date(),
             accountId: expenseAccount.id,
-            currency: expense.currency || 'USD',
-            exchangeRate: 1.0,
-            debitBc: totalAmount,
+            currency: expenseCurrency,
+            exchangeRate: expExchangeRate,
+            debitBc: expAmountBc,
             creditBc: 0,
             debitFc: totalAmount,
             creditFc: 0,
@@ -197,10 +225,10 @@ export class GlPostingService {
             postingDate,
             postingTs: new Date(),
             accountId: cashAccount.id,
-            currency: expense.currency || 'USD',
-            exchangeRate: 1.0,
+            currency: expenseCurrency,
+            exchangeRate: expExchangeRate,
             debitBc: 0,
-            creditBc: totalAmount,
+            creditBc: expAmountBc,
             debitFc: 0,
             creditFc: totalAmount,
             voucherType: 'EXPENSE',
@@ -243,6 +271,8 @@ export class GlPostingService {
       voucherNo: string;
       lines: JournalEntryLine[];
       remarks?: string;
+      currency?: string;
+      exchangeRate?: number;
     },
   ) {
     return this.prisma.$transaction(async (tx) => {
@@ -272,18 +302,24 @@ export class GlPostingService {
           throw new NotFoundException(`Account not found: ${line.accountCode}`);
         }
 
+        // SCHEMA-2: Use provided currency/exchangeRate or fall back to tenant base currency
+        const jeCurrency = data.currency || 'USD';
+        const jeExchangeRate = data.exchangeRate || 1.0;
+        const debitFc = line.debit || 0;
+        const creditFc = line.credit || 0;
+
         const entry = await tx.glEntry.create({
           data: {
             tenantId,
             postingDate: new Date(data.postingDate),
             postingTs: new Date(),
             accountId: account.id,
-            currency: 'USD',
-            exchangeRate: 1.0,
-            debitBc: line.debit || 0,
-            creditBc: line.credit || 0,
-            debitFc: line.debit || 0,
-            creditFc: line.credit || 0,
+            currency: jeCurrency,
+            exchangeRate: jeExchangeRate,
+            debitBc: debitFc * jeExchangeRate,
+            creditBc: creditFc * jeExchangeRate,
+            debitFc,
+            creditFc,
             voucherType: data.voucherType,
             voucherNo: data.voucherNo,
             remarks: line.remarks || data.remarks,
@@ -346,41 +382,39 @@ export class GlPostingService {
       where.postingDate = { lte: new Date(asOfDate) };
     }
 
-    const entries = await this.prisma.glEntry.findMany({
+    // PERF-1: Use groupBy aggregation instead of loading all entries into memory
+    const aggregated = await this.prisma.glEntry.groupBy({
+      by: ['accountId'],
       where,
-      include: {
-        account: {
-          select: {
-            code: true,
-            name: true,
-            accountType: true,
-          },
-        },
+      _sum: {
+        debitBc: true,
+        creditBc: true,
       },
     });
 
-    // Group by account
-    const balances = entries.reduce((acc, entry) => {
-      const key = entry.accountId;
-      if (!acc[key]) {
-        acc[key] = {
-          accountCode: entry.account.code,
-          accountName: entry.account.name,
-          accountType: entry.account.accountType,
-          totalDebit: 0,
-          totalCredit: 0,
-          balance: 0,
-        };
-      }
-      acc[key].totalDebit += Number(entry.debitBc);
-      acc[key].totalCredit += Number(entry.creditBc);
-      acc[key].balance = acc[key].totalDebit - acc[key].totalCredit;
-      return acc;
-    }, {} as any);
+    // Fetch account details for the accounts that have entries
+    const accountIds = aggregated.map((a) => a.accountId);
+    const accounts = await this.prisma.account.findMany({
+      where: { id: { in: accountIds } },
+      select: { id: true, code: true, name: true, accountType: true },
+    });
+    const accountMap = new Map(accounts.map((a) => [a.id, a]));
 
-    return Object.values(balances).sort((a: any, b: any) =>
-      a.accountCode.localeCompare(b.accountCode),
-    );
+    const balances = aggregated.map((agg) => {
+      const account = accountMap.get(agg.accountId);
+      const totalDebit = Number(agg._sum.debitBc || 0);
+      const totalCredit = Number(agg._sum.creditBc || 0);
+      return {
+        accountCode: account?.code || '',
+        accountName: account?.name || '',
+        accountType: account?.accountType || '',
+        totalDebit,
+        totalCredit,
+        balance: totalDebit - totalCredit,
+      };
+    });
+
+    return balances.sort((a, b) => a.accountCode.localeCompare(b.accountCode));
   }
 
   /**
@@ -417,7 +451,7 @@ export class GlPostingService {
    * Auto-post all unposted paid invoices
    */
   async autoPostInvoices(tenantId: string) {
-    const unpPostedInvoices = await this.prisma.invoice.findMany({
+    const unpostedInvoices = await this.prisma.invoice.findMany({
       where: {
         tenantId,
         status: InvoiceStatus.PAID,

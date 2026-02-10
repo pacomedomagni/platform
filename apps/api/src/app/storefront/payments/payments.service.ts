@@ -183,8 +183,7 @@ export class PaymentsService {
     this.logger.log(`Payment succeeded for order: ${order.orderNumber}`);
 
     // Log activity
-    this.activityService?.logActivity({
-      tenantId: order.tenantId,
+    this.activityService?.logActivity(order.tenantId, {
       entityType: 'order',
       entityId: order.id,
       eventType: 'payment_success',
@@ -596,9 +595,13 @@ export class PaymentsService {
 
     this.logger.log(`Payment failed for order: ${order.orderNumber}`);
 
+    // FLOW-1: Release reserved stock on payment failure
+    this.releaseStockForFailedPayment(order).catch((err) =>
+      this.logger.error(`Failed to release stock for order ${order.orderNumber}:`, err),
+    );
+
     // Log activity
-    this.activityService?.logActivity({
-      tenantId: order.tenantId,
+    this.activityService?.logActivity(order.tenantId, {
       entityType: 'order',
       entityId: order.id,
       eventType: 'payment_failed',
@@ -613,6 +616,57 @@ export class PaymentsService {
       },
       actorType: 'system',
     }).catch(err => this.logger.error('Failed to log activity:', err));
+  }
+
+  /**
+   * FLOW-1: Release reserved stock when payment fails
+   */
+  private async releaseStockForFailedPayment(order: any) {
+    const fullOrder = await this.prisma.order.findUnique({
+      where: { id: order.id },
+      include: {
+        items: {
+          include: {
+            product: {
+              include: { item: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!fullOrder?.items?.length) return;
+
+    for (const orderItem of fullOrder.items) {
+      if (!orderItem.product?.item) continue;
+
+      const balances = await this.prisma.warehouseItemBalance.findMany({
+        where: {
+          tenantId: fullOrder.tenantId,
+          itemId: orderItem.product.item.id,
+          reservedQty: { gt: 0 },
+        },
+        include: { warehouse: true },
+      });
+
+      let remainingToRelease = orderItem.quantity;
+
+      for (const balance of balances) {
+        if (remainingToRelease <= 0) break;
+        const reserved = Number(balance.reservedQty);
+        const release = Math.min(remainingToRelease, reserved);
+
+        if (release > 0) {
+          await this.prisma.warehouseItemBalance.update({
+            where: { id: balance.id },
+            data: { reservedQty: { decrement: release } },
+          });
+          remainingToRelease -= release;
+        }
+      }
+    }
+
+    this.logger.log(`Stock reservations released for failed payment on order ${order.orderNumber}`);
   }
 
   /**
@@ -651,9 +705,12 @@ export class PaymentsService {
 
     this.logger.log(`Refund processed for order: ${order.orderNumber}, amount: ${refundAmount}`);
 
+    // FLOW-2: Refund does NOT auto-restock inventory. This is intentional —
+    // refunded items may be defective/damaged. Restocking is handled via the
+    // Returns flow (returns.service.ts → restockItems) when items are inspected.
+
     // Log activity
-    this.activityService?.logActivity({
-      tenantId: order.tenantId,
+    this.activityService?.logActivity(order.tenantId, {
       entityType: 'order',
       entityId: order.id,
       eventType: 'payment_refunded',
@@ -813,8 +870,28 @@ export class PaymentsService {
       data: {
         paymentStatus: 'CAPTURED',
         status: 'CONFIRMED',
+        confirmedAt: new Date(),
       },
     });
+
+    // FLOW-3: Process stock deduction and coupon tracking (same as Stripe flow)
+    const fullOrder = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        items: {
+          include: {
+            product: {
+              include: { item: true },
+            },
+          },
+        },
+        cart: true,
+      },
+    });
+
+    if (fullOrder) {
+      await this.processOrderFulfillment(fullOrder);
+    }
 
     return {
       success: true,

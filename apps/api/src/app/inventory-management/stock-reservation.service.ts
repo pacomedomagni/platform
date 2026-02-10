@@ -26,6 +26,11 @@ export class StockReservationService {
    * Reserve stock for an order or allocation
    */
   async reserveStock(tenantId: string, dto: ReserveStockDto) {
+    // VAL-4: Validate quantity is positive
+    if (!dto.quantity || dto.quantity <= 0) {
+      throw new BadRequestException('Quantity must be a positive number');
+    }
+
     return this.prisma.$transaction(async (tx) => {
       // Find item
       const item = await tx.item.findFirst({
@@ -65,6 +70,9 @@ export class StockReservationService {
         quantity: number;
       }> = [];
 
+      // RACE-4: Default expiry for reservations (30 minutes)
+      const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+
       for (const balance of balances) {
         if (remainingToReserve <= 0) break;
 
@@ -76,6 +84,19 @@ export class StockReservationService {
           await tx.warehouseItemBalance.update({
             where: { id: balance.id },
             data: { reservedQty: { increment: take } },
+          });
+
+          // RACE-4: Create persistent reservation record
+          await tx.stockReservation.create({
+            data: {
+              tenantId,
+              itemId: item.id,
+              warehouseId: balance.warehouseId,
+              quantity: take,
+              reservationKey: dto.reference || `RSV-${Date.now()}`,
+              status: 'active',
+              expiresAt,
+            },
           });
 
           reservations.push({
@@ -115,6 +136,11 @@ export class StockReservationService {
    * Release reserved stock (e.g., when order is cancelled)
    */
   async releaseStock(tenantId: string, dto: ReleaseStockDto) {
+    // VAL-4: Validate quantity is positive
+    if (!dto.quantity || dto.quantity <= 0) {
+      throw new BadRequestException('Quantity must be a positive number');
+    }
+
     return this.prisma.$transaction(async (tx) => {
       // Find item
       const item = await tx.item.findFirst({
@@ -180,6 +206,22 @@ export class StockReservationService {
 
           remainingToRelease -= take;
         }
+      }
+
+      // RACE-4: Mark matching persistent reservation records as released
+      if (dto.reference) {
+        await tx.stockReservation.updateMany({
+          where: {
+            tenantId,
+            itemId: item.id,
+            reservationKey: dto.reference,
+            status: 'active',
+          },
+          data: {
+            status: 'released',
+            releasedAt: new Date(),
+          },
+        });
       }
 
       if (remainingToRelease > 0) {

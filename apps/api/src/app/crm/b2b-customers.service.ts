@@ -146,17 +146,13 @@ export class B2BCustomersService {
       throw new NotFoundException('Customer not found');
     }
 
-    // Calculate credit usage from orders
+    // LOGIC-5: Calculate credit usage — Order.customerId → StoreCustomer.id
+    // Query orders where customerId is one of this B2B customer's StoreCustomer IDs
+    const storeCustomerIds = customer.storeCustomers.map((sc) => sc.id);
     const orders = await this.prisma.order.findMany({
       where: {
         tenantId,
-        customer: {
-          storeCustomers: {
-            some: {
-              id: { in: customer.storeCustomers.map((sc) => sc.id) },
-            },
-          },
-        },
+        customerId: { in: storeCustomerIds },
         paymentStatus: { in: ['PENDING', 'AUTHORIZED'] },
       },
       select: { grandTotal: true },
@@ -312,16 +308,22 @@ export class B2BCustomersService {
    * Get customer groups and territories (for filters)
    */
   async getCustomerFilters(tenantId: string) {
-    const customers = await this.prisma.customer.findMany({
-      where: { tenantId },
-      select: {
-        customerGroup: true,
-        territory: true,
-      },
-    });
+    // PERF-2: Use distinct queries instead of loading all customers
+    const [groupRecords, territoryRecords] = await Promise.all([
+      this.prisma.customer.findMany({
+        where: { tenantId, customerGroup: { not: null } },
+        select: { customerGroup: true },
+        distinct: ['customerGroup'],
+      }),
+      this.prisma.customer.findMany({
+        where: { tenantId, territory: { not: null } },
+        select: { territory: true },
+        distinct: ['territory'],
+      }),
+    ]);
 
-    const groups = [...new Set(customers.map((c) => c.customerGroup).filter(Boolean))];
-    const territories = [...new Set(customers.map((c) => c.territory).filter(Boolean))];
+    const groups = groupRecords.map((c) => c.customerGroup).filter(Boolean) as string[];
+    const territories = territoryRecords.map((c) => c.territory).filter(Boolean) as string[];
 
     return {
       groups: groups.sort(),

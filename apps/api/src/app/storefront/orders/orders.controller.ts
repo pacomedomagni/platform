@@ -42,6 +42,26 @@ export class OrdersController {
   }
 
   /**
+   * Get order by order number (guest lookup)
+   * GET /api/v1/store/orders/lookup/:orderNumber
+   * VAL-3: Must be defined BEFORE :id route to avoid NestJS treating "lookup" as an ID
+   */
+  @Get('lookup/:orderNumber')
+  async lookupOrder(
+    @Headers('x-tenant-id') tenantId: string,
+    @Param('orderNumber') orderNumber: string,
+    @Query('email') email: string
+  ) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID required');
+    }
+    if (!email) {
+      throw new BadRequestException('Email required for order lookup');
+    }
+    return this.ordersService.getOrderByNumber(tenantId, orderNumber, email);
+  }
+
+  /**
    * Get order detail (authenticated customer)
    * GET /api/v1/store/orders/:id
    */
@@ -57,25 +77,6 @@ export class OrdersController {
 
     const customerId = await this.getCustomerId(authHeader, tenantId);
     return this.ordersService.getOrder(tenantId, orderId, customerId);
-  }
-
-  /**
-   * Get order by order number (guest lookup)
-   * GET /api/v1/store/orders/lookup/:orderNumber
-   */
-  @Get('lookup/:orderNumber')
-  async lookupOrder(
-    @Headers('x-tenant-id') tenantId: string,
-    @Param('orderNumber') orderNumber: string,
-    @Query('email') email: string
-  ) {
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-    if (!email) {
-      throw new BadRequestException('Email required for order lookup');
-    }
-    return this.ordersService.getOrderByNumber(tenantId, orderNumber, email);
   }
 
   // ============ ADMIN ENDPOINTS ============

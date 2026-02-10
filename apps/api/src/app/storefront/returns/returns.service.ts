@@ -11,6 +11,8 @@ import { PrismaService } from '@platform/db';
 import { Prisma, ReturnStatus } from '@prisma/client';
 import { StripeService } from '../payments/stripe.service';
 import { ActivityService } from '../activity/activity.service';
+import { StockMovementService } from '../../inventory-management/stock-movement.service';
+import { MovementType } from '../../inventory-management/inventory-management.dto';
 
 @Injectable()
 export class ReturnsService {
@@ -20,6 +22,7 @@ export class ReturnsService {
     private readonly prisma: PrismaService,
     @Optional() @Inject(StripeService) private readonly stripeService?: StripeService,
     @Optional() @Inject(ActivityService) private readonly activityService?: ActivityService,
+    @Optional() @Inject(StockMovementService) private readonly stockMovementService?: StockMovementService,
   ) {}
 
   /**
@@ -137,22 +140,16 @@ export class ReturnsService {
       ? [order.customer.firstName, order.customer.lastName].filter(Boolean).join(' ')
       : undefined;
 
-    // Generate return number and create within a transaction to prevent race conditions
+    // RACE-3: Atomic return number generation using tenant counter (same pattern as order numbers)
     const returnRequest = await this.prisma.$transaction(async (tx) => {
-      const lastReturn = await tx.returnRequest.findFirst({
-        where: { tenantId },
-        orderBy: { createdAt: 'desc' },
-        select: { returnNumber: true },
-      });
-
-      let nextNumber = 1;
-      if (lastReturn?.returnNumber) {
-        const match = lastReturn.returnNumber.match(/RET-(\d+)/);
-        if (match) {
-          nextNumber = parseInt(match[1], 10) + 1;
-        }
-      }
-      const returnNumber = `RET-${String(nextNumber).padStart(5, '0')}`;
+      const result = await tx.$queryRaw<any[]>`
+        UPDATE tenants
+        SET "nextReturnNumber" = "nextReturnNumber" + 1
+        WHERE id = ${tenantId}
+        RETURNING "nextReturnNumber"
+      `;
+      const seq = result[0]?.nextReturnNumber || 1;
+      const returnNumber = `RET-${String(seq).padStart(5, '0')}`;
 
       return tx.returnRequest.create({
         data: {
@@ -221,8 +218,7 @@ export class ReturnsService {
     });
 
     // Log activity
-    this.activityService?.logActivity({
-      tenantId,
+    this.activityService?.logActivity(tenantId, {
       entityType: 'return',
       entityId: id,
       eventType: 'status_changed',
@@ -268,8 +264,7 @@ export class ReturnsService {
     });
 
     // Log activity
-    this.activityService?.logActivity({
-      tenantId,
+    this.activityService?.logActivity(tenantId, {
       entityType: 'return',
       entityId: id,
       eventType: 'status_changed',
@@ -314,8 +309,7 @@ export class ReturnsService {
     });
 
     // Log activity
-    this.activityService?.logActivity({
-      tenantId,
+    this.activityService?.logActivity(tenantId, {
       entityType: 'return',
       entityId: id,
       eventType: 'status_changed',
@@ -353,6 +347,54 @@ export class ReturnsService {
 
     const now = new Date();
 
+    // FLOW-5: Actually increment inventory via stock movements
+    if (this.stockMovementService) {
+      // Find default warehouse for restocking
+      const defaultWarehouse = await this.prisma.warehouse.findFirst({
+        where: { tenantId, isActive: true },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      if (defaultWarehouse) {
+        // Build stock receipt items from return items that have SKUs
+        const receiptItems = returnRequest.items
+          .filter((item) => item.sku)
+          .map((item) => ({
+            itemCode: item.sku!,
+            quantity: item.quantity,
+            rate: Number(item.unitPrice),
+          }));
+
+        if (receiptItems.length > 0) {
+          try {
+            await this.stockMovementService.createMovement(
+              { tenantId },
+              {
+                movementType: MovementType.RECEIPT,
+                postingDate: now.toISOString().split('T')[0],
+                warehouseCode: defaultWarehouse.code,
+                items: receiptItems,
+                reference: `Return ${returnRequest.returnNumber}`,
+                remarks: `Stock restocked from return ${returnRequest.returnNumber}`,
+              },
+            );
+            this.logger.log(
+              `Stock receipt created for return ${returnRequest.returnNumber}: ${receiptItems.length} items`,
+            );
+          } catch (err) {
+            this.logger.error(
+              `Failed to create stock receipt for return ${returnRequest.returnNumber}:`,
+              err,
+            );
+          }
+        }
+      } else {
+        this.logger.warn(
+          `No active warehouse found for restocking return ${returnRequest.returnNumber}`,
+        );
+      }
+    }
+
     // Mark all items as restocked
     await this.prisma.returnItem.updateMany({
       where: {
@@ -375,8 +417,7 @@ export class ReturnsService {
     });
 
     // Log activity
-    this.activityService?.logActivity({
-      tenantId,
+    this.activityService?.logActivity(tenantId, {
       entityType: 'return',
       entityId: id,
       eventType: 'status_changed',
@@ -461,8 +502,7 @@ export class ReturnsService {
     });
 
     // Log activity
-    this.activityService?.logActivity({
-      tenantId,
+    this.activityService?.logActivity(tenantId, {
       entityType: 'return',
       entityId: id,
       eventType: 'refund_processed',

@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { Prisma } from '@prisma/client';
 
 interface UpdateCustomerDto {
   firstName?: string;
@@ -35,7 +36,7 @@ export class CustomersService {
     limit = 50,
     offset = 0,
   ) {
-    const where: any = { tenantId };
+    const where: Prisma.StoreCustomerWhereInput = { tenantId };
 
     // Search filter
     if (search) {
@@ -46,15 +47,19 @@ export class CustomersService {
       ];
     }
 
-    // Get customers with order aggregations
+    // LOGIC-6: When segment filter is present, fetch all matching customers first,
+    // then filter by segment and paginate in-memory for correct results
+    const useInMemoryPagination = !!segment;
+
+    // PERF-5: Fetch customers without loading all order rows
     const customers = await this.prisma.storeCustomer.findMany({
       where,
       include: {
-        orders: {
-          where: { status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] } },
+        _count: {
           select: {
-            grandTotal: true,
-            createdAt: true,
+            orders: {
+              where: { status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] } },
+            },
           },
         },
         addresses: {
@@ -63,25 +68,41 @@ export class CustomersService {
         },
       },
       orderBy: { createdAt: 'desc' },
-      take: limit,
-      skip: offset,
+      ...(useInMemoryPagination ? {} : { take: limit, skip: offset }),
     });
+
+    // Fetch order aggregates (totalSpent, lastOrderDate) per customer in one query
+    const customerIds = customers.map((c) => c.id);
+    const orderAggregates = customerIds.length > 0
+      ? await this.prisma.order.groupBy({
+          by: ['customerId'],
+          where: {
+            customerId: { in: customerIds },
+            tenantId,
+            status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] },
+          },
+          _sum: { grandTotal: true },
+          _max: { createdAt: true },
+        })
+      : [];
+
+    const aggMap = new Map(
+      orderAggregates.map((a) => [
+        a.customerId,
+        {
+          totalSpent: Number(a._sum.grandTotal || 0),
+          lastOrderDate: a._max.createdAt || null,
+        },
+      ]),
+    );
 
     // Calculate segments for each customer
     const customersWithSegments: CustomerSegment[] = customers.map((customer) => {
-      const orderCount = customer.orders.length;
-      const totalSpent = customer.orders.reduce(
-        (sum, order) => sum + Number(order.grandTotal),
-        0,
-      );
-      const lastOrderDate =
-        customer.orders.length > 0
-          ? customer.orders.sort(
-              (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
-            )[0].createdAt
-          : null;
+      const orderCount = customer._count.orders;
+      const agg = aggMap.get(customer.id);
+      const totalSpent = agg?.totalSpent || 0;
+      const lastOrderDate = agg?.lastOrderDate || null;
 
-      // Calculate segment
       let customerSegment: CustomerSegment['segment'] = 'regular';
       const daysSinceSignup = Math.floor(
         (Date.now() - customer.createdAt.getTime()) / (1000 * 60 * 60 * 24),
@@ -115,16 +136,21 @@ export class CustomersService {
       };
     });
 
-    // Filter by segment if requested
+    // LOGIC-6: Filter by segment first, then paginate
     const filtered = segment
       ? customersWithSegments.filter((c) => c.segment === segment)
       : customersWithSegments;
 
-    // Get total count
-    const total = await this.prisma.storeCustomer.count({ where });
+    const total = useInMemoryPagination
+      ? filtered.length
+      : await this.prisma.storeCustomer.count({ where });
+
+    const paginatedResults = useInMemoryPagination
+      ? filtered.slice(offset, offset + limit)
+      : filtered;
 
     return {
-      customers: filtered,
+      customers: paginatedResults,
       total,
       limit,
       offset,

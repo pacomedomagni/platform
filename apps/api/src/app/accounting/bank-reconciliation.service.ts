@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import * as csv from 'csv-parser';
 import { Readable } from 'stream';
@@ -62,32 +62,44 @@ export class BankReconciliationService {
           }
         })
         .on('end', async () => {
-          let imported = 0;
-          let skipped = 0;
+          try {
+            // PERF-3: Batch approach — 2 queries instead of 2N
+            // 1. Fetch all existing transactions in one query for dedup
+            const existing = await this.prisma.bankTransaction.findMany({
+              where: {
+                tenantId,
+                bankAccount,
+              },
+              select: {
+                transactionDate: true,
+                amount: true,
+                referenceNumber: true,
+              },
+            });
 
-          for (const txn of transactions) {
-            try {
-              // Check if transaction already exists
-              const existing = await this.prisma.bankTransaction.findFirst({
-                where: {
+            // 2. Build a Set of composite keys for O(1) lookup
+            const existingKeys = new Set(
+              existing.map(
+                (e) =>
+                  `${e.transactionDate.toISOString()}|${e.amount}|${e.referenceNumber || ''}`,
+              ),
+            );
+
+            // 3. Filter out duplicates in-memory
+            const newTransactions = transactions.filter((txn) => {
+              const key = `${new Date(txn.date).toISOString()}|${txn.amount}|${txn.referenceNumber || ''}`;
+              return !existingKeys.has(key);
+            });
+
+            const skipped = transactions.length - newTransactions.length;
+
+            // 4. Single createMany for all new transactions
+            const now = Date.now();
+            if (newTransactions.length > 0) {
+              await this.prisma.bankTransaction.createMany({
+                data: newTransactions.map((txn, i) => ({
                   tenantId,
-                  bankAccount,
-                  transactionDate: new Date(txn.date),
-                  amount: txn.amount,
-                  referenceNumber: txn.referenceNumber,
-                },
-              });
-
-              if (existing) {
-                skipped++;
-                continue;
-              }
-
-              // Create transaction
-              await this.prisma.bankTransaction.create({
-                data: {
-                  tenantId,
-                  name: `BT-${Date.now()}-${imported}`,
+                  name: `BT-${now}-${i}`,
                   bankAccount,
                   transactionDate: new Date(txn.date),
                   amount: txn.amount,
@@ -95,17 +107,17 @@ export class BankReconciliationService {
                   description: txn.description,
                   referenceNumber: txn.referenceNumber,
                   status: 'Unreconciled',
-                },
+                })),
               });
-
-              imported++;
-            } catch (err) {
-              errors.push(`Import error: ${err.message}`);
             }
-          }
 
-          this.logger.log(`Imported ${imported} bank transactions, skipped ${skipped}`);
-          resolve({ imported, skipped, errors });
+            const imported = newTransactions.length;
+            this.logger.log(`Imported ${imported} bank transactions, skipped ${skipped}`);
+            resolve({ imported, skipped, errors });
+          } catch (err) {
+            errors.push(`Import error: ${err.message}`);
+            resolve({ imported: 0, skipped: 0, errors });
+          }
         })
         .on('error', (err) => reject(err));
     });
@@ -123,43 +135,77 @@ export class BankReconciliationService {
       },
     });
 
+    if (unreconciledTransactions.length === 0) {
+      return { matched: 0, totalUnreconciled: 0, matches: [] };
+    }
+
+    // PERF-4: Pre-fetch all candidate invoices in one query instead of N queries
+    const dates = unreconciledTransactions.map((t) => t.transactionDate.getTime());
+    const minDate = new Date(Math.min(...dates) - 7 * 24 * 60 * 60 * 1000);
+    const maxDate = new Date(Math.max(...dates) + 7 * 24 * 60 * 60 * 1000);
+
+    const candidateInvoices = await this.prisma.invoice.findMany({
+      where: {
+        tenantId,
+        paidDate: { gte: minDate, lte: maxDate },
+      },
+    });
+
+    // Build Map<amount_string, Invoice[]> for O(1) lookup by amount
+    const invoicesByAmount = new Map<string, typeof candidateInvoices>();
+    for (const inv of candidateInvoices) {
+      const key = String(inv.grandTotal);
+      if (!invoicesByAmount.has(key)) {
+        invoicesByAmount.set(key, []);
+      }
+      invoicesByAmount.get(key)!.push(inv);
+    }
+
     let matched = 0;
     const matches = [];
+    // RACE-5: Track matched invoice IDs to prevent double-matching
+    const matchedInvoiceIds = new Set<string>();
+    const txnUpdates: Array<{ id: string; invoice: string }> = [];
 
     for (const txn of unreconciledTransactions) {
-      // Try to match with invoices by amount and date
-      const matchingInvoices = await this.prisma.invoice.findMany({
-        where: {
-          tenantId,
-          grandTotal: txn.amount,
-          paidDate: {
-            gte: new Date(new Date(txn.transactionDate).getTime() - 7 * 24 * 60 * 60 * 1000),
-            lte: new Date(new Date(txn.transactionDate).getTime() + 7 * 24 * 60 * 60 * 1000),
-          },
-        },
-        take: 1,
-      });
+      const amountKey = String(txn.amount);
+      const candidates = invoicesByAmount.get(amountKey) || [];
+      const txnDate = txn.transactionDate.getTime();
+      const windowMs = 7 * 24 * 60 * 60 * 1000;
 
-      if (matchingInvoices.length > 0) {
-        const invoice = matchingInvoices[0];
+      // Find matching invoice within date window, not already matched
+      const availableInvoice = candidates.find(
+        (inv) =>
+          !matchedInvoiceIds.has(inv.id) &&
+          inv.paidDate &&
+          Math.abs(inv.paidDate.getTime() - txnDate) <= windowMs,
+      );
 
-        await this.prisma.bankTransaction.update({
-          where: { id: txn.id },
-          data: {
-            status: 'Reconciled',
-            invoice: invoice.invoiceNumber,
-          },
-        });
+      if (availableInvoice) {
+        matchedInvoiceIds.add(availableInvoice.id);
+        txnUpdates.push({ id: txn.id, invoice: availableInvoice.invoiceNumber });
 
         matched++;
         matches.push({
           transactionId: txn.id,
-          invoiceId: invoice.id,
-          invoiceNumber: invoice.invoiceNumber,
+          invoiceId: availableInvoice.id,
+          invoiceNumber: availableInvoice.invoiceNumber,
           amount: Number(txn.amount),
           matchType: 'auto',
         });
       }
+    }
+
+    // Batch update matched transactions
+    if (txnUpdates.length > 0) {
+      await this.prisma.$transaction(
+        txnUpdates.map((u) =>
+          this.prisma.bankTransaction.update({
+            where: { id: u.id },
+            data: { status: 'Reconciled', invoice: u.invoice },
+          }),
+        ),
+      );
     }
 
     this.logger.log(`Auto-matched ${matched} transactions`);
@@ -188,6 +234,11 @@ export class BankReconciliationService {
 
     if (!transaction) {
       throw new NotFoundException('Transaction not found');
+    }
+
+    // VAL-2: Check if transaction is already reconciled
+    if (transaction.status === 'Reconciled') {
+      throw new ConflictException('Transaction is already reconciled');
     }
 
     const updateData: any = {
@@ -262,17 +313,47 @@ export class BankReconciliationService {
     let closingBalance = openingBalance;
     const details = [];
 
+    // FLOW-4: Pre-fetch GL entries for matched invoices to link reconciliation details
+    const matchedInvoiceNumbers = transactions
+      .filter((t) => t.invoice)
+      .map((t) => t.invoice as string);
+
+    const glEntries =
+      matchedInvoiceNumbers.length > 0
+        ? await this.prisma.glEntry.findMany({
+            where: {
+              tenantId,
+              voucherType: 'INVOICE',
+              voucherNo: { in: matchedInvoiceNumbers },
+            },
+            select: { id: true, voucherNo: true },
+          })
+        : [];
+
+    // Map invoice number → first GL entry ID
+    const glEntryMap = new Map<string, string>();
+    for (const entry of glEntries) {
+      if (!glEntryMap.has(entry.voucherNo)) {
+        glEntryMap.set(entry.voucherNo, entry.id);
+      }
+    }
+
     for (const txn of transactions) {
       const amount = Number(txn.amount);
       closingBalance += txn.transactionType === 'Credit' ? amount : -amount;
 
+      const invoiceNo = txn.invoice || null;
+      const glEntryId = invoiceNo ? glEntryMap.get(invoiceNo) || null : null;
+
       details.push({
         tenantId,
-        transactionId: txn.id,
-        transactionDate: txn.transactionDate,
+        bankTransaction: txn.name || txn.id,
+        postingDate: txn.transactionDate,
         amount: txn.amount,
-        transactionType: txn.transactionType,
-        description: txn.description,
+        voucherType: invoiceNo ? 'INVOICE' : txn.transactionType,
+        voucherNo: txn.referenceNumber || invoiceNo || null,
+        isMatched: !!invoiceNo,
+        glEntryId,
       });
     }
 
@@ -290,7 +371,9 @@ export class BankReconciliationService {
         closingBalance,
         bankStatementBalance: data.bankStatementBalance,
         difference,
-        status: Math.abs(difference) < 0.01 ? 'Reconciled' : 'Unreconciled',
+        // SCHEMA-3: Use consistent status values aligned with docstatus convention
+        docstatus: Math.abs(difference) < 0.01 ? 1 : 0,
+        status: Math.abs(difference) < 0.01 ? 'Reconciled' : 'Draft',
         details: {
           create: details,
         },
