@@ -10,6 +10,7 @@ import {
 import { PrismaService } from '@platform/db';
 import { Prisma, ReturnStatus } from '@prisma/client';
 import { StripeService } from '../payments/stripe.service';
+import { ActivityService } from '../activity/activity.service';
 
 @Injectable()
 export class ReturnsService {
@@ -18,6 +19,7 @@ export class ReturnsService {
   constructor(
     private readonly prisma: PrismaService,
     @Optional() @Inject(StripeService) private readonly stripeService?: StripeService,
+    @Optional() @Inject(ActivityService) private readonly activityService?: ActivityService,
   ) {}
 
   /**
@@ -218,6 +220,18 @@ export class ReturnsService {
       include: { items: true },
     });
 
+    // Log activity
+    this.activityService?.logActivity({
+      tenantId,
+      entityType: 'return',
+      entityId: id,
+      eventType: 'status_changed',
+      title: 'Return approved',
+      description: `Return ${returnRequest.returnNumber} approved by ${approvedBy}`,
+      metadata: { previousStatus: 'REQUESTED', newStatus: 'APPROVED', approvedBy },
+      actorType: 'user',
+    }).catch(err => this.logger.error('Failed to log activity:', err));
+
     return this.mapReturnToResponse(updated);
   }
 
@@ -253,6 +267,18 @@ export class ReturnsService {
       include: { items: true },
     });
 
+    // Log activity
+    this.activityService?.logActivity({
+      tenantId,
+      entityType: 'return',
+      entityId: id,
+      eventType: 'status_changed',
+      title: 'Return rejected',
+      description: `Return ${returnRequest.returnNumber} rejected: ${reason}`,
+      metadata: { previousStatus: 'REQUESTED', newStatus: 'REJECTED', rejectionReason: reason },
+      actorType: 'user',
+    }).catch(err => this.logger.error('Failed to log activity:', err));
+
     return this.mapReturnToResponse(updated);
   }
 
@@ -286,6 +312,18 @@ export class ReturnsService {
       },
       include: { items: true },
     });
+
+    // Log activity
+    this.activityService?.logActivity({
+      tenantId,
+      entityType: 'return',
+      entityId: id,
+      eventType: 'status_changed',
+      title: 'Return items received',
+      description: `Items received for return ${returnRequest.returnNumber}`,
+      metadata: { previousStatus: 'APPROVED', newStatus: 'ITEMS_RECEIVED' },
+      actorType: 'user',
+    }).catch(err => this.logger.error('Failed to log activity:', err));
 
     return this.mapReturnToResponse(updated);
   }
@@ -335,6 +373,22 @@ export class ReturnsService {
       },
       include: { items: true },
     });
+
+    // Log activity
+    this.activityService?.logActivity({
+      tenantId,
+      entityType: 'return',
+      entityId: id,
+      eventType: 'status_changed',
+      title: 'Return items restocked',
+      description: `Items restocked for return ${returnRequest.returnNumber}`,
+      metadata: {
+        previousStatus: 'ITEMS_RECEIVED',
+        newStatus: 'RESTOCKED',
+        itemsCount: returnRequest.items.length
+      },
+      actorType: 'user',
+    }).catch(err => this.logger.error('Failed to log activity:', err));
 
     return this.mapReturnToResponse(updated);
   }
@@ -405,6 +459,24 @@ export class ReturnsService {
       },
       include: { items: true },
     });
+
+    // Log activity
+    this.activityService?.logActivity({
+      tenantId,
+      entityType: 'return',
+      entityId: id,
+      eventType: 'refund_processed',
+      title: 'Return refunded',
+      description: `Refund of $${data.refundAmount.toFixed(2)} processed for return ${returnRequest.returnNumber}`,
+      metadata: {
+        previousStatus: returnRequest.status,
+        newStatus: 'REFUNDED',
+        refundAmount: data.refundAmount,
+        refundMethod,
+        stripeRefundId
+      },
+      actorType: 'user',
+    }).catch(err => this.logger.error('Failed to log activity:', err));
 
     return this.mapReturnToResponse(updated);
   }

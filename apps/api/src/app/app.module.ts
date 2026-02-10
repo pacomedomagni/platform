@@ -30,6 +30,14 @@ import { WorkersModule } from './workers/workers.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
 import { DomainResolverModule } from './storefront/domain-resolver/domain-resolver.module';
+import { B2BCustomersService } from './crm/b2b-customers.service';
+import { B2BCustomersController } from './crm/b2b-customers.controller';
+import { SuppliersService } from './purchasing/suppliers.service';
+import { SuppliersController } from './purchasing/suppliers.controller';
+import { GlPostingService } from './accounting/gl-posting.service';
+import { GlPostingController } from './accounting/gl-posting.controller';
+import { BankReconciliationService } from './accounting/bank-reconciliation.service';
+import { BankReconciliationController } from './accounting/bank-reconciliation.controller';
 
 @Module({
   imports: [
@@ -75,9 +83,13 @@ import { DomainResolverModule } from './storefront/domain-resolver/domain-resolv
     MonitoringModule,
     OnboardingModule,
   ],
-  controllers: [AppController, InventoryController, ReportsController],
+  controllers: [AppController, InventoryController, ReportsController, B2BCustomersController, SuppliersController, GlPostingController, BankReconciliationController],
   providers: [
     AppService,
+    B2BCustomersService,
+    SuppliersService,
+    GlPostingService,
+    BankReconciliationService,
     EmailWorker,
     ProductImportWorker,
     // Global rate limiting guard

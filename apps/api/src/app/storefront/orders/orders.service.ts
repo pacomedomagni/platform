@@ -4,6 +4,7 @@ import { PrismaService } from '@platform/db';
 import { EmailService } from '@platform/email';
 import { Prisma, OrderStatus, PaymentStatus } from '@prisma/client';
 import { ListOrdersDto } from './dto';
+import { ActivityService } from '../activity/activity.service';
 
 type OrderWithItems = Prisma.OrderGetPayload<{
   include: { items: true };
@@ -27,6 +28,7 @@ export class OrdersService {
   constructor(
     private readonly prisma: PrismaService,
     @Optional() @Inject(EmailService) private readonly emailService?: EmailService,
+    @Optional() private readonly activityService?: ActivityService,
   ) {}
 
   /**
@@ -275,6 +277,24 @@ export class OrdersService {
       data: updateData,
     });
 
+    // Log activity
+    if (this.activityService) {
+      this.activityService.logActivity({
+        tenantId,
+        entityType: 'order',
+        entityId: orderId,
+        eventType: 'status_changed',
+        title: `Order status changed to ${status}`,
+        description: `Order ${order.orderNumber} status changed from ${order.status} to ${status}`,
+        metadata: {
+          previousStatus: order.status,
+          newStatus: status,
+          trackingInfo,
+        } as any,
+        actorType: 'user',
+      }).catch(err => this.logger.error(`Activity log failed: ${err.message}`));
+    }
+
     // Fire-and-forget transactional emails
     if (status === 'SHIPPED') {
       this.sendOrderStatusEmailAsync(orderId, 'store-order-shipped').catch(err =>
@@ -343,7 +363,233 @@ export class OrdersService {
       `Order ${order.orderNumber} refunded: type=${body.type}, amount=${refundAmount}, reason=${body.reason}`,
     );
 
+    // Log refund activity
+    if (this.activityService) {
+      this.activityService.logActivity({
+        tenantId,
+        entityType: 'order',
+        entityId: orderId,
+        eventType: 'payment_received',
+        title: `Order refunded - ${body.type}`,
+        description: `${body.type === 'full' ? 'Full' : 'Partial'} refund of $${refundAmount} processed. Reason: ${body.reason}`,
+        metadata: {
+          refundType: body.type,
+          refundAmount,
+          reason: body.reason,
+        } as any,
+        actorType: 'user',
+      }).catch(err => this.logger.error(`Activity log failed: ${err.message}`));
+    }
+
     return this.getOrder(tenantId, orderId);
+  }
+
+  /**
+   * Update internal notes for an order
+   */
+  async updateNotes(tenantId: string, orderId: string, internalNotes: string) {
+    const order = await this.prisma.order.findFirst({
+      where: { id: orderId, tenantId },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    const updated = await this.prisma.order.update({
+      where: { id: orderId },
+      data: { internalNotes },
+    });
+
+    // Log note update activity
+    if (this.activityService) {
+      this.activityService.logActivity({
+        tenantId,
+        entityType: 'order',
+        entityId: orderId,
+        eventType: 'note_added',
+        title: 'Internal notes updated',
+        description: `Internal notes updated for order ${order.orderNumber}`,
+        metadata: { notes: internalNotes } as any,
+        actorType: 'user',
+      }).catch(err => this.logger.error(`Activity log failed: ${err.message}`));
+    }
+
+    return updated;
+  }
+
+  /**
+   * Fulfill order items (track per-item fulfillment for partial shipments)
+   */
+  async fulfillOrderItems(
+    tenantId: string,
+    orderId: string,
+    body: {
+      items: Array<{ orderItemId: string; quantityFulfilled: number }>;
+      trackingInfo?: { carrier?: string; trackingNumber?: string; shipmentId?: string };
+    },
+  ) {
+    const order = await this.prisma.order.findFirst({
+      where: { id: orderId, tenantId },
+      include: { items: true },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    // Validate order can be fulfilled
+    if (!['CONFIRMED', 'PROCESSING'].includes(order.status)) {
+      throw new BadRequestException(
+        `Order cannot be fulfilled in status: ${order.status}. Must be CONFIRMED or PROCESSING.`,
+      );
+    }
+
+    // Validate all items exist and quantities are valid
+    for (const fulfillmentItem of body.items) {
+      const orderItem = order.items.find((item) => item.id === fulfillmentItem.orderItemId);
+
+      if (!orderItem) {
+        throw new BadRequestException(`Order item ${fulfillmentItem.orderItemId} not found`);
+      }
+
+      const currentFulfilled = orderItem.quantityFulfilled;
+      const totalOrdered = orderItem.quantity;
+      const newFulfilled = currentFulfilled + fulfillmentItem.quantityFulfilled;
+
+      if (newFulfilled > totalOrdered) {
+        throw new BadRequestException(
+          `Cannot fulfill ${fulfillmentItem.quantityFulfilled} of item ${orderItem.name}. ` +
+          `Ordered: ${totalOrdered}, Already fulfilled: ${currentFulfilled}`,
+        );
+      }
+
+      if (fulfillmentItem.quantityFulfilled <= 0) {
+        throw new BadRequestException('Quantity fulfilled must be greater than 0');
+      }
+    }
+
+    // Update each item's quantityFulfilled
+    await Promise.all(
+      body.items.map((fulfillmentItem) =>
+        this.prisma.orderItem.update({
+          where: { id: fulfillmentItem.orderItemId },
+          data: {
+            quantityFulfilled: {
+              increment: fulfillmentItem.quantityFulfilled,
+            },
+          },
+        }),
+      ),
+    );
+
+    // Check if order is now fully fulfilled
+    const updatedOrder = await this.prisma.order.findFirst({
+      where: { id: orderId },
+      include: { items: true },
+    });
+
+    const allItemsFulfilled = updatedOrder!.items.every(
+      (item) => item.quantityFulfilled >= item.quantity,
+    );
+
+    // If all items fulfilled, update order status to SHIPPED
+    if (allItemsFulfilled && updatedOrder!.status === 'PROCESSING') {
+      const updateData: Prisma.OrderUpdateInput = {
+        status: 'SHIPPED' as OrderStatus,
+        shippedAt: new Date(),
+      };
+
+      if (body.trackingInfo?.carrier) {
+        updateData.shippingCarrier = body.trackingInfo.carrier;
+      }
+      if (body.trackingInfo?.trackingNumber) {
+        updateData.trackingNumber = body.trackingInfo.trackingNumber;
+      }
+
+      await this.prisma.order.update({
+        where: { id: orderId },
+        data: updateData,
+      });
+
+      // Send shipped email
+      this.sendOrderStatusEmailAsync(orderId, 'store-order-shipped').catch(err =>
+        this.logger.error(`Shipped email failed for order ${orderId}: ${err.message}`),
+      );
+    }
+
+    // Log fulfillment activity
+    if (this.activityService) {
+      const fulfillmentSummary = body.items
+        .map((item) => {
+          const orderItem = order.items.find((i) => i.id === item.orderItemId);
+          return `${orderItem?.name}: ${item.quantityFulfilled} units`;
+        })
+        .join(', ');
+
+      this.activityService.logActivity({
+        tenantId,
+        entityType: 'order',
+        entityId: orderId,
+        eventType: 'fulfillment',
+        title: allItemsFulfilled ? 'Order fully fulfilled' : 'Partial fulfillment',
+        description: `Items fulfilled for order ${order.orderNumber}: ${fulfillmentSummary}`,
+        metadata: {
+          items: body.items,
+          trackingInfo: body.trackingInfo,
+          fullyFulfilled: allItemsFulfilled,
+        } as any,
+        actorType: 'user',
+      }).catch(err => this.logger.error(`Activity log failed: ${err.message}`));
+    }
+
+    this.logger.log(
+      `Order ${order.orderNumber} fulfillment processed: ${allItemsFulfilled ? 'fully fulfilled' : 'partial'}`,
+    );
+
+    return this.getOrder(tenantId, orderId);
+  }
+
+  /**
+   * Get fulfillment status for an order
+   */
+  async getFulfillmentStatus(tenantId: string, orderId: string) {
+    const order = await this.prisma.order.findFirst({
+      where: { id: orderId, tenantId },
+      include: { items: true },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    const items = order.items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      sku: item.sku,
+      quantity: item.quantity,
+      quantityFulfilled: item.quantityFulfilled,
+      quantityRemaining: item.quantity - item.quantityFulfilled,
+      fullyFulfilled: item.quantityFulfilled >= item.quantity,
+    }));
+
+    const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
+    const totalFulfilled = items.reduce((sum, item) => sum + item.quantityFulfilled, 0);
+    const fullyFulfilled = items.every((item) => item.fullyFulfilled);
+
+    return {
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      status: order.status,
+      items,
+      summary: {
+        totalItems,
+        totalFulfilled,
+        totalRemaining: totalItems - totalFulfilled,
+        fullyFulfilled,
+        fulfillmentPercentage: totalItems > 0 ? Math.round((totalFulfilled / totalItems) * 100) : 0,
+      },
+    };
   }
 
   // ============ EMAIL HELPERS ============
@@ -454,7 +700,10 @@ export class OrdersService {
       items: order.items.map((item) => ({
         id: item.id,
         name: item.name,
+        sku: item.sku,
         quantity: item.quantity,
+        quantityFulfilled: item.quantityFulfilled,
+        quantityRefunded: item.quantityRefunded,
         unitPrice: Number(item.unitPrice),
         totalPrice: Number(item.totalPrice),
         imageUrl: item.imageUrl,

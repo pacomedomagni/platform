@@ -147,6 +147,53 @@ export class OrdersController {
     return this.ordersService.processRefund(tenantId, id, body);
   }
 
+  /**
+   * Update internal notes for an order (admin)
+   * PUT /api/v1/store/admin/orders/:id/notes
+   */
+  @Put('admin/:id/notes')
+  @UseGuards(StoreAdminGuard)
+  async updateNotes(
+    @Headers('x-tenant-id') tenantId: string,
+    @Param('id') id: string,
+    @Body() body: { internalNotes: string },
+  ) {
+    if (!tenantId) throw new BadRequestException('Tenant ID required');
+    return this.ordersService.updateNotes(tenantId, id, body.internalNotes);
+  }
+
+  /**
+   * Fulfill order items (track per-item fulfillment)
+   * POST /api/v1/store/admin/orders/:id/fulfill
+   */
+  @Post('admin/:id/fulfill')
+  @UseGuards(StoreAdminGuard)
+  async fulfillOrderItems(
+    @Headers('x-tenant-id') tenantId: string,
+    @Param('id') orderId: string,
+    @Body() body: {
+      items: Array<{ orderItemId: string; quantityFulfilled: number }>;
+      trackingInfo?: { carrier?: string; trackingNumber?: string; shipmentId?: string };
+    },
+  ) {
+    if (!tenantId) throw new BadRequestException('Tenant ID required');
+    return this.ordersService.fulfillOrderItems(tenantId, orderId, body);
+  }
+
+  /**
+   * Get fulfillment status for an order
+   * GET /api/v1/store/admin/orders/:id/fulfillment
+   */
+  @Get('admin/:id/fulfillment')
+  @UseGuards(StoreAdminGuard)
+  async getFulfillmentStatus(
+    @Headers('x-tenant-id') tenantId: string,
+    @Param('id') orderId: string,
+  ) {
+    if (!tenantId) throw new BadRequestException('Tenant ID required');
+    return this.ordersService.getFulfillmentStatus(tenantId, orderId);
+  }
+
   // ============ HELPERS ============
 
   private async getCustomerId(authHeader: string, tenantId: string): Promise<string> {

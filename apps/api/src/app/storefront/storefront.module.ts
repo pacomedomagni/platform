@@ -33,8 +33,13 @@ import { StorePagesController } from './pages/store-pages.controller';
 import { StorePagesService } from './pages/store-pages.service';
 import { ProductImportController } from './products/product-import.controller';
 import { ProductImportService } from './products/product-import.service';
-import { ShippingAdminController, ShippingPublicController } from './shipping/shipping.controller';
+import {
+  ShippingAdminController,
+  ShippingPublicController,
+  ShippingEasyPostAdminController,
+} from './shipping/shipping.controller';
 import { ShippingService } from './shipping/shipping.service';
+import { EasyPostService } from './shipping/easypost.service';
 import { PageSectionsController } from './pages/sections.controller';
 import { PageSectionsService } from './pages/sections.service';
 import { DigitalDownloadController } from './digital/digital-download.controller';
@@ -67,6 +72,8 @@ import { CrmController } from './crm/crm.controller';
 import { CrmService } from './crm/crm.service';
 import { ActivityController } from './activity/activity.controller';
 import { ActivityService } from './activity/activity.service';
+import { CustomersController } from './customers/customers.controller';
+import { CustomersService } from './customers/customers.service';
 
 @Module({
   imports: [
@@ -110,6 +117,7 @@ import { ActivityService } from './activity/activity.service';
     ProductImportController,
     ShippingAdminController,
     ShippingPublicController,
+    ShippingEasyPostAdminController,
     PageSectionsController,
     DigitalDownloadController,
     ScheduledReportsController,
@@ -126,6 +134,7 @@ import { ActivityService } from './activity/activity.service';
     ReturnsController,
     CrmController,
     ActivityController,
+    CustomersController,
   ],
   providers: [
     ProductsService,
@@ -141,6 +150,7 @@ import { ActivityService } from './activity/activity.service';
     StorePagesService,
     ProductImportService,
     ShippingService,
+    EasyPostService,
     PageSectionsService,
     DigitalFulfillmentService,
     ScheduledReportsService,
@@ -157,6 +167,7 @@ import { ActivityService } from './activity/activity.service';
     ReturnsService,
     CrmService,
     ActivityService,
+    CustomersService,
   ],
   exports: [
     CustomerAuthModule,

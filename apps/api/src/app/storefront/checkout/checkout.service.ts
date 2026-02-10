@@ -66,6 +66,44 @@ export class CheckoutService {
         throw new BadRequestException('Cart is empty');
       }
 
+      // Check B2B credit limit if customer is linked to B2B account
+      if (customerId) {
+        const storeCustomer = await tx.storeCustomer.findFirst({
+          where: { id: customerId, tenantId },
+          include: { customer: true },
+        });
+
+        if (storeCustomer?.customer && storeCustomer.customer.creditLimit) {
+          const creditLimit = Number(storeCustomer.customer.creditLimit);
+          const orderTotal = Number(cart.grandTotal);
+
+          if (creditLimit > 0) {
+            // Calculate current credit used (sum of unpaid orders)
+            const unpaidOrders = await tx.order.findMany({
+              where: {
+                tenantId,
+                customerId,
+                paymentStatus: { in: ['PENDING', 'AUTHORIZED'] },
+              },
+              select: { grandTotal: true },
+            });
+
+            const creditUsed = unpaidOrders.reduce(
+              (sum, order) => sum + Number(order.grandTotal),
+              0,
+            );
+
+            const availableCredit = creditLimit - creditUsed;
+
+            if (orderTotal > availableCredit) {
+              throw new BadRequestException(
+                `Credit limit exceeded. Available credit: $${availableCredit.toFixed(2)}, Order total: $${orderTotal.toFixed(2)}`,
+              );
+            }
+          }
+        }
+      }
+
       // PAY-4: Acquire advisory locks per item to prevent concurrent stock modifications
       for (const item of cart.items) {
         const itemKey = `${tenantId}:${item.product.item.id}`;

@@ -7,6 +7,7 @@ import { StockMovementService } from '../../inventory-management/stock-movement.
 import { FailedOperationsService } from '../../workers/failed-operations.service';
 import { MovementType } from '../../inventory-management/inventory-management.dto';
 import { OperationType } from '@prisma/client';
+import { ActivityService } from '../activity/activity.service';
 import Stripe from 'stripe';
 
 @Injectable()
@@ -19,7 +20,8 @@ export class PaymentsService {
     private readonly squarePaymentService: SquarePaymentService,
     private readonly stockMovementService: StockMovementService,
     private readonly failedOperationsService: FailedOperationsService,
-    @Optional() @Inject(EmailService) private readonly emailService?: EmailService
+    @Optional() @Inject(EmailService) private readonly emailService?: EmailService,
+    @Optional() @Inject(ActivityService) private readonly activityService?: ActivityService,
   ) {}
 
   /**
@@ -179,6 +181,24 @@ export class PaymentsService {
     ]);
 
     this.logger.log(`Payment succeeded for order: ${order.orderNumber}`);
+
+    // Log activity
+    this.activityService?.logActivity({
+      tenantId: order.tenantId,
+      entityType: 'order',
+      entityId: order.id,
+      eventType: 'payment_success',
+      title: 'Payment successful',
+      description: `Payment of $${Number(order.grandTotal).toFixed(2)} successful for order ${order.orderNumber}`,
+      metadata: {
+        amount: Number(order.grandTotal),
+        currency: order.currency,
+        paymentIntentId: paymentIntent.id,
+        cardBrand,
+        cardLast4
+      },
+      actorType: 'system',
+    }).catch(err => this.logger.error('Failed to log activity:', err));
 
     // CRITICAL: Process stock deduction and coupon tracking
     await this.processOrderFulfillment(order);
@@ -575,6 +595,24 @@ export class PaymentsService {
     ]);
 
     this.logger.log(`Payment failed for order: ${order.orderNumber}`);
+
+    // Log activity
+    this.activityService?.logActivity({
+      tenantId: order.tenantId,
+      entityType: 'order',
+      entityId: order.id,
+      eventType: 'payment_failed',
+      title: 'Payment failed',
+      description: `Payment failed for order ${order.orderNumber}: ${lastError?.message || 'Unknown error'}`,
+      metadata: {
+        amount: Number(order.grandTotal),
+        currency: order.currency,
+        paymentIntentId: paymentIntent.id,
+        errorCode: lastError?.code,
+        errorMessage: lastError?.message
+      },
+      actorType: 'system',
+    }).catch(err => this.logger.error('Failed to log activity:', err));
   }
 
   /**
@@ -612,6 +650,23 @@ export class PaymentsService {
     });
 
     this.logger.log(`Refund processed for order: ${order.orderNumber}, amount: ${refundAmount}`);
+
+    // Log activity
+    this.activityService?.logActivity({
+      tenantId: order.tenantId,
+      entityType: 'order',
+      entityId: order.id,
+      eventType: 'payment_refunded',
+      title: isFullRefund ? 'Full refund processed' : 'Partial refund processed',
+      description: `${isFullRefund ? 'Full' : 'Partial'} refund of $${refundAmount.toFixed(2)} processed for order ${order.orderNumber}`,
+      metadata: {
+        refundAmount,
+        isFullRefund,
+        chargeId: charge.id,
+        paymentIntentId: paymentIntentId
+      },
+      actorType: 'system',
+    }).catch(err => this.logger.error('Failed to log activity:', err));
   }
 
   /**
