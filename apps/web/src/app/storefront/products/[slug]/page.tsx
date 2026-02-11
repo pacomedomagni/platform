@@ -5,9 +5,9 @@ import { Badge, Card } from '@platform/ui';
 import { Check, ShieldCheck, Truck } from 'lucide-react';
 import { formatCurrency } from '../../_lib/format';
 import { ProductCard } from '../../_components/product-card';
-import { ButtonLink } from '../../_components/button-link';
 import { ProductReviews } from './_components/product-reviews';
 import { VariantSelector } from './_components/variant-selector';
+import { AddToCartButton } from './_components/add-to-cart-button';
 import { productsApi } from '@/lib/store-api';
 import {
   generateProductSchema,
@@ -76,8 +76,8 @@ export default async function ProductPage({ params }: ProductPageProps) {
     notFound();
   }
 
-  const relatedRes = await productsApi.list({ categorySlug: product.category?.slug, limit: 4 }).catch(() => ({ items: [] }));
-  const related = relatedRes.items.filter((item) => item.id !== product.id).slice(0, 3);
+  const relatedRes = await productsApi.list({ categorySlug: product.category?.slug, limit: 4 }).catch(() => ({ data: [] }));
+  const related = relatedRes.data.filter((item) => item.id !== product.id).slice(0, 3);
 
   const categoryName = product.category?.name || 'Uncategorized';
   const displayImage = product.images?.[0]; // Fallback to gradient if null
@@ -160,7 +160,6 @@ export default async function ProductPage({ params }: ProductPageProps) {
               {product.compareAtPrice && (
                 <p className="text-sm text-muted-foreground line-through">{formatCurrency(product.compareAtPrice)}</p>
               )}
-              <span className="text-xs text-muted-foreground">5.0 · 0 reviews</span>
             </div>
           </div>
 
@@ -182,15 +181,15 @@ export default async function ProductPage({ params }: ProductPageProps) {
               <span className="font-semibold text-foreground">3-5 business days</span>
             </div>
             <div className="flex flex-wrap gap-3">
-              <ButtonLink
-                href="/storefront/cart"
-                className="flex-1 bg-gradient-to-r from-primary via-secondary to-accent text-primary-foreground shadow-md hover:shadow-lg"
-              >
-                Add to cart
-              </ButtonLink>
-              <ButtonLink href="/storefront/checkout" variant="outline" className="flex-1">
-                Buy now
-              </ButtonLink>
+              <AddToCartButton
+                productId={product.id}
+                productSlug={product.slug}
+              />
+              <AddToCartButton
+                productId={product.id}
+                productSlug={product.slug}
+                buyNow
+              />
             </div>
           </Card>
           <div className="grid gap-3 md:grid-cols-3">

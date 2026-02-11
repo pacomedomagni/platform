@@ -29,7 +29,7 @@ export class ListProductsDto {
 
   @IsOptional()
   @IsString()
-  sortBy?: 'price' | 'name' | 'createdAt' | 'sortOrder';
+  sortBy?: 'price' | 'name' | 'createdAt' | 'sortOrder' | 'sales';
 
   @IsOptional()
   @IsString()

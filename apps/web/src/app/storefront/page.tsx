@@ -22,7 +22,7 @@ export default async function StorefrontLanding() {
   const [featuredProducts, categories, bestSellersList] = await Promise.all([
     productsApi.getFeatured(2).catch(() => []),
     productsApi.getCategories().catch(() => []),
-    productsApi.list({ sortBy: 'sales', limit: 3 }).then(res => res.items).catch(() => []),
+    productsApi.list({ sortBy: 'sales', limit: 3 }).then(res => res.data).catch(() => []),
   ]);
 
   return (

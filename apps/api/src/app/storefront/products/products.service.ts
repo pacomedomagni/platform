@@ -78,6 +78,10 @@ export class ProductsService {
       case 'createdAt':
         orderBy.createdAt = sortOrder;
         break;
+      case 'sales':
+        // Sort by creation date as proxy for popularity when sales data isn't directly sortable
+        orderBy.createdAt = 'desc';
+        break;
       default:
         orderBy.sortOrder = sortOrder;
     }

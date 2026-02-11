@@ -8,7 +8,7 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Card } from '@platform/ui';
-import { User, Package, MapPin, LogOut, ChevronRight, Play } from 'lucide-react';
+import { User, Package, MapPin, Heart, LogOut, ChevronRight, Play } from 'lucide-react';
 import { useAuthStore } from '../../../lib/auth-store';
 import { EmailVerificationBanner } from './_components/email-verification-banner';
 import { OnboardingChecklist } from '../../../components/onboarding/onboarding-checklist';
@@ -58,6 +58,12 @@ export default function AccountPage() {
       label: 'Addresses',
       description: 'Manage shipping addresses',
       href: '/storefront/account/addresses',
+    },
+    {
+      icon: Heart,
+      label: 'Wishlist',
+      description: 'View your saved items',
+      href: '/storefront/wishlist',
     },
   ];
 

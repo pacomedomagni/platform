@@ -35,9 +35,9 @@ export class ReviewsService {
   async getProductReviews(
     tenantId: string,
     productListingId: string,
-    options: { page?: number; limit?: number; rating?: number } = {}
+    options: { page?: number; limit?: number; rating?: number; sortBy?: 'helpful' | 'newest' | 'highest' | 'lowest' } = {}
   ) {
-    const { page = 1, limit = 10, rating } = options;
+    const { page = 1, limit = 10, rating, sortBy = 'newest' } = options;
     const skip = (page - 1) * limit;
 
     const where: Prisma.ProductReviewWhereInput = {
@@ -48,6 +48,23 @@ export class ReviewsService {
 
     if (rating) {
       where.rating = rating;
+    }
+
+    // Determine sort order based on sortBy parameter
+    let orderBy: Prisma.ProductReviewOrderByWithRelationInput;
+    switch (sortBy) {
+      case 'helpful':
+        orderBy = { helpfulVotes: 'desc' };
+        break;
+      case 'highest':
+        orderBy = { rating: 'desc' };
+        break;
+      case 'lowest':
+        orderBy = { rating: 'asc' };
+        break;
+      case 'newest':
+      default:
+        orderBy = { createdAt: 'desc' };
     }
 
     const [reviews, total] = await Promise.all([
@@ -62,7 +79,7 @@ export class ReviewsService {
             },
           },
         },
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         skip,
         take: limit,
       }),

@@ -484,6 +484,8 @@ export default function CheckoutPage() {
               {stripePublicKey && stripeClientSecret ? (
                 <StripePayment
                   clientSecret={stripeClientSecret}
+                  orderId={orderId || undefined}
+                  orderNumber={orderNumber || undefined}
                   onSuccess={handlePaymentSuccess}
                   onError={handlePaymentError}
                 />

@@ -6,25 +6,33 @@ import { Badge, Button, Card, Input, NativeSelect, Spinner } from '@platform/ui'
 import { Filter, SlidersHorizontal, AlertCircle } from 'lucide-react';
 import { SectionHeader } from '../_components/section-header';
 import { ProductCard } from '../_components/product-card';
-import { productsApi, type StoreProduct } from '@/lib/store-api';
-
-const filters = [
-  { label: 'All', value: 'all' },
-  { label: 'Warehouse', value: 'warehouse' },
-  { label: 'Front of House', value: 'front' },
-  { label: 'Fulfillment Tech', value: 'tech' },
-  { label: 'Workspace', value: 'workspace' },
-];
+import { productsApi, type StoreProduct, type ProductCategory } from '@/lib/store-api';
 
 type SortOption = 'featured' | 'price-asc' | 'price-desc' | 'newest';
 
+// Map UI sort options to API sortBy/sortOrder
+const sortOptionsMap: Record<SortOption, { sortBy: string; sortOrder: 'asc' | 'desc' }> = {
+  featured: { sortBy: 'sortOrder', sortOrder: 'asc' },
+  'price-asc': { sortBy: 'price', sortOrder: 'asc' },
+  'price-desc': { sortBy: 'price', sortOrder: 'desc' },
+  newest: { sortBy: 'createdAt', sortOrder: 'desc' },
+};
+
 export default function ProductsPage() {
   const [products, setProducts] = useState<StoreProduct[]>([]);
+  const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [sortBy, setSortBy] = useState<SortOption>('featured');
+
+  // Load categories on mount
+  useEffect(() => {
+    productsApi.getCategories()
+      .then((cats) => setCategories(cats))
+      .catch((err) => console.error('Failed to load categories:', err));
+  }, []);
 
   useEffect(() => {
     const fetchProducts = async () => {
@@ -32,33 +40,16 @@ export default function ProductsPage() {
       setError(null);
 
       try {
+        const { sortBy: apiSortBy, sortOrder } = sortOptionsMap[sortBy];
         const data = await productsApi.list({
           search: searchQuery || undefined,
           categorySlug: selectedCategory !== 'all' ? selectedCategory : undefined,
+          sortBy: apiSortBy as 'price' | 'name' | 'createdAt' | 'sortOrder',
+          sortOrder,
           limit: 50,
         });
 
-        // Sort products locally
-        let sortedProducts = [...data.items];
-        switch (sortBy) {
-          case 'price-asc':
-            sortedProducts.sort((a, b) => a.price - b.price);
-            break;
-          case 'price-desc':
-            sortedProducts.sort((a, b) => b.price - a.price);
-            break;
-          case 'newest':
-            sortedProducts.sort((a, b) =>
-              new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-            );
-            break;
-          case 'featured':
-          default:
-            // Keep original order (featured first from API)
-            break;
-        }
-
-        setProducts(sortedProducts);
+        setProducts(data.data);
       } catch (err) {
         console.error('Failed to fetch products:', err);
         setError('Failed to load products. Please try again.');
@@ -125,28 +116,51 @@ export default function ProductsPage() {
               <Filter className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
               <span>Filters</span>
             </div>
-            {filters.map((filter) => (
+            {/* "All" filter */}
+            <Badge
+              variant="outline"
+              className={`cursor-pointer ${
+                selectedCategory === 'all'
+                  ? 'bg-primary/10 text-primary border-primary/20'
+                  : 'bg-card text-muted-foreground hover:bg-muted'
+              }`}
+              onClick={() => setSelectedCategory('all')}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setSelectedCategory('all');
+                }
+              }}
+              aria-pressed={selectedCategory === 'all'}
+              aria-label="Show all products"
+            >
+              All
+            </Badge>
+            {/* Dynamic categories from API */}
+            {categories.map((category) => (
               <Badge
-                key={filter.value}
+                key={category.slug}
                 variant="outline"
                 className={`cursor-pointer ${
-                  selectedCategory === filter.value
+                  selectedCategory === category.slug
                     ? 'bg-primary/10 text-primary border-primary/20'
                     : 'bg-card text-muted-foreground hover:bg-muted'
                 }`}
-                onClick={() => setSelectedCategory(filter.value)}
+                onClick={() => setSelectedCategory(category.slug)}
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    setSelectedCategory(filter.value);
+                    setSelectedCategory(category.slug);
                   }
                 }}
-                aria-pressed={selectedCategory === filter.value}
-                aria-label={`Filter by ${filter.label}`}
+                aria-pressed={selectedCategory === category.slug}
+                aria-label={`Filter by ${category.name}`}
               >
-                {filter.label}
+                {category.name}
               </Badge>
             ))}
           </div>

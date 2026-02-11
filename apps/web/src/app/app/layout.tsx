@@ -16,6 +16,11 @@ import {
   Hammer,
   FileText,
   Rocket,
+  Store,
+  Star,
+  Palette,
+  Globe,
+  Wrench,
 } from 'lucide-react';
 
 const PRIMARY_NAV = [
@@ -24,6 +29,12 @@ const PRIMARY_NAV = [
   { label: 'Products', icon: Package, href: '/app/products' },
   { label: 'Orders', icon: ShoppingCart, href: '/app/orders' },
   { label: 'Customers', icon: Users, href: '/app/customers' },
+  { label: 'Inventory', icon: Warehouse, href: '/app/inventory' },
+  { label: 'Marketplace', icon: Globe, href: '/app/marketplace/connections' },
+  { label: 'Reviews', icon: Star, href: '/app/reviews' },
+  { label: 'Operations', icon: Wrench, href: '/app/operations' },
+  { label: 'Reports', icon: BarChart3, href: '/app/reports/analytics' },
+  { label: 'Themes', icon: Palette, href: '/app/themes' },
   { label: 'Settings', icon: Settings, href: '/app/settings' },
 ];
 

@@ -29,11 +29,13 @@ async function getStripePromise() {
 
 interface PaymentFormProps {
   clientSecret: string;
+  orderId?: string;
+  orderNumber?: string;
   onSuccess: () => void;
   onError: (message: string) => void;
 }
 
-function PaymentForm({ clientSecret, onSuccess, onError }: PaymentFormProps) {
+function PaymentForm({ clientSecret, orderId, orderNumber, onSuccess, onError }: PaymentFormProps) {
   const stripe = useStripe();
   const elements = useElements();
   const [isProcessing, setIsProcessing] = useState(false);
@@ -53,7 +55,7 @@ function PaymentForm({ clientSecret, onSuccess, onError }: PaymentFormProps) {
       const { error, paymentIntent } = await stripe.confirmPayment({
         elements,
         confirmParams: {
-          return_url: `${window.location.origin}/storefront/order-confirmation`,
+          return_url: `${window.location.origin}/storefront/order-confirmation?order=${orderNumber || orderId || ''}`,
         },
         redirect: 'if_required',
       });
@@ -68,7 +70,7 @@ function PaymentForm({ clientSecret, onSuccess, onError }: PaymentFormProps) {
         const { error: confirmError } = await stripe.confirmPayment({
           elements,
           confirmParams: {
-            return_url: `${window.location.origin}/storefront/order-confirmation`,
+            return_url: `${window.location.origin}/storefront/order-confirmation?order=${orderNumber || orderId || ''}`,
           },
         });
         
@@ -135,11 +137,13 @@ function PaymentForm({ clientSecret, onSuccess, onError }: PaymentFormProps) {
 
 interface StripePaymentProps {
   clientSecret: string;
+  orderId?: string;
+  orderNumber?: string;
   onSuccess: () => void;
   onError: (message: string) => void;
 }
 
-export function StripePayment({ clientSecret, onSuccess, onError }: StripePaymentProps) {
+export function StripePayment({ clientSecret, orderId, orderNumber, onSuccess, onError }: StripePaymentProps) {
   const [stripe, setStripe] = useState<Stripe | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -187,6 +191,8 @@ export function StripePayment({ clientSecret, onSuccess, onError }: StripePaymen
     >
       <PaymentForm
         clientSecret={clientSecret}
+        orderId={orderId}
+        orderNumber={orderNumber}
         onSuccess={onSuccess}
         onError={onError}
       />

@@ -1,28 +1,19 @@
 /**
  * Product Variants API Client
  */
+import { resolveTenantId } from './store-api';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
-
-// Get tenant ID from subdomain or default
-function getTenantId(): string {
-  if (typeof window === 'undefined') return 'default';
-  const hostname = window.location.hostname;
-  const parts = hostname.split('.');
-  if (parts.length > 2) {
-    return parts[0];
-  }
-  return process.env.NEXT_PUBLIC_TENANT_ID || 'default';
-}
 
 // Base fetch with tenant header
 async function apiFetch<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
+  const tenantId = await resolveTenantId();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'x-tenant-id': getTenantId(),
+    'x-tenant-id': tenantId,
     ...Object.fromEntries(
       options.headers instanceof Headers
         ? options.headers.entries()
@@ -72,14 +63,14 @@ export interface AttributeValue {
 
 export const attributeTypesApi = {
   list: (): Promise<AttributeType[]> => {
-    return apiFetch('/v1/admin/attribute-types');
+    return apiFetch('/v1/store/admin/attribute-types');
   },
 
   create: (data: {
     displayName: string;
     sortOrder?: number;
   }): Promise<AttributeType> => {
-    return apiFetch('/v1/admin/attribute-types', {
+    return apiFetch('/v1/store/admin/attribute-types', {
       method: 'POST',
       body: JSON.stringify(data),
     });
@@ -92,14 +83,14 @@ export const attributeTypesApi = {
       sortOrder?: number;
     }
   ): Promise<AttributeType> => {
-    return apiFetch(`/v1/admin/attribute-types/${id}`, {
+    return apiFetch(`/v1/store/admin/attribute-types/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
   },
 
   delete: (id: string): Promise<{ success: boolean }> => {
-    return apiFetch(`/v1/admin/attribute-types/${id}`, {
+    return apiFetch(`/v1/store/admin/attribute-types/${id}`, {
       method: 'DELETE',
     });
   },
@@ -112,7 +103,7 @@ export const attributeValuesApi = {
     colorHex?: string;
     sortOrder?: number;
   }): Promise<AttributeValue> => {
-    return apiFetch('/v1/admin/attribute-values', {
+    return apiFetch('/v1/store/admin/attribute-values', {
       method: 'POST',
       body: JSON.stringify(data),
     });
@@ -126,14 +117,14 @@ export const attributeValuesApi = {
       sortOrder?: number;
     }
   ): Promise<AttributeValue> => {
-    return apiFetch(`/v1/admin/attribute-values/${id}`, {
+    return apiFetch(`/v1/store/admin/attribute-values/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
   },
 
   delete: (id: string): Promise<{ success: boolean }> => {
-    return apiFetch(`/v1/admin/attribute-values/${id}`, {
+    return apiFetch(`/v1/store/admin/attribute-values/${id}`, {
       method: 'DELETE',
     });
   },
@@ -196,29 +187,29 @@ export interface UpdateVariantDto {
 
 export const variantsApi = {
   list: (productListingId: string): Promise<ProductVariant[]> => {
-    return apiFetch(`/v1/admin/products/${productListingId}/variants`);
+    return apiFetch(`/v1/store/admin/products/${productListingId}/variants`);
   },
 
   get: (id: string): Promise<ProductVariant> => {
-    return apiFetch(`/v1/admin/variants/${id}`);
+    return apiFetch(`/v1/store/admin/variants/${id}`);
   },
 
   create: (data: CreateVariantDto): Promise<ProductVariant> => {
-    return apiFetch('/v1/admin/variants', {
+    return apiFetch('/v1/store/admin/variants', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   },
 
   update: (id: string, data: UpdateVariantDto): Promise<ProductVariant> => {
-    return apiFetch(`/v1/admin/variants/${id}`, {
+    return apiFetch(`/v1/store/admin/variants/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
   },
 
   delete: (id: string): Promise<{ success: boolean }> => {
-    return apiFetch(`/v1/admin/variants/${id}`, {
+    return apiFetch(`/v1/store/admin/variants/${id}`, {
       method: 'DELETE',
     });
   },
@@ -227,21 +218,21 @@ export const variantsApi = {
     productListingId: string,
     variants: CreateVariantDto[]
   ): Promise<ProductVariant[]> => {
-    return apiFetch(`/v1/admin/products/${productListingId}/variants/bulk`, {
+    return apiFetch(`/v1/store/admin/products/${productListingId}/variants/bulk`, {
       method: 'POST',
       body: JSON.stringify({ variants }),
     });
   },
 
   updateStock: (id: string, quantity: number): Promise<ProductVariant> => {
-    return apiFetch(`/v1/admin/variants/${id}/stock`, {
+    return apiFetch(`/v1/store/admin/variants/${id}/stock`, {
       method: 'PUT',
       body: JSON.stringify({ quantity }),
     });
   },
 
   adjustStock: (id: string, adjustment: number): Promise<ProductVariant> => {
-    return apiFetch(`/v1/admin/variants/${id}/stock/adjust`, {
+    return apiFetch(`/v1/store/admin/variants/${id}/stock/adjust`, {
       method: 'POST',
       body: JSON.stringify({ adjustment }),
     });

@@ -17,10 +17,20 @@ interface ApiResponse<T> {
  * Build headers for API requests
  */
 function buildHeaders(tenantId: string): HeadersInit {
-  return {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'x-tenant-id': tenantId,
   };
+
+  // Add auth token for admin operations
+  if (typeof window !== 'undefined') {
+    const token = localStorage.getItem('admin_token') || localStorage.getItem('access_token');
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+  }
+
+  return headers;
 }
 
 /**
@@ -90,7 +100,7 @@ async function getPreset(type: string): Promise<ThemePreset> {
  * Create a new theme
  */
 async function createTheme(tenantId: string, data: CreateThemeDto): Promise<Theme> {
-  const response = await fetch(`${BASE_URL}/themes`, {
+  const response = await fetch(`${BASE_URL}/admin/themes`, {
     method: 'POST',
     headers: buildHeaders(tenantId),
     body: JSON.stringify(data),
@@ -107,7 +117,7 @@ async function createFromPreset(
   presetType: string,
   name?: string
 ): Promise<Theme> {
-  const response = await fetch(`${BASE_URL}/themes/from-preset/${presetType}`, {
+  const response = await fetch(`${BASE_URL}/admin/themes/from-preset/${presetType}`, {
     method: 'POST',
     headers: buildHeaders(tenantId),
     body: JSON.stringify({ name }),
@@ -124,8 +134,8 @@ async function updateTheme(
   tenantId: string,
   data: UpdateThemeDto
 ): Promise<Theme> {
-  const response = await fetch(`${BASE_URL}/themes/${id}`, {
-    method: 'PATCH',
+  const response = await fetch(`${BASE_URL}/admin/themes/${id}`, {
+    method: 'PUT',
     headers: buildHeaders(tenantId),
     body: JSON.stringify(data),
   });
@@ -137,7 +147,7 @@ async function updateTheme(
  * Delete theme
  */
 async function deleteTheme(id: string, tenantId: string): Promise<void> {
-  const response = await fetch(`${BASE_URL}/themes/${id}`, {
+  const response = await fetch(`${BASE_URL}/admin/themes/${id}`, {
     method: 'DELETE',
     headers: buildHeaders(tenantId),
   });
@@ -152,7 +162,7 @@ async function deleteTheme(id: string, tenantId: string): Promise<void> {
  * Activate theme
  */
 async function activateTheme(id: string, tenantId: string): Promise<Theme> {
-  const response = await fetch(`${BASE_URL}/themes/${id}/activate`, {
+  const response = await fetch(`${BASE_URL}/admin/themes/${id}/activate`, {
     method: 'POST',
     headers: buildHeaders(tenantId),
   });
@@ -168,7 +178,7 @@ async function duplicateTheme(
   tenantId: string,
   newName: string
 ): Promise<Theme> {
-  const response = await fetch(`${BASE_URL}/themes/${id}/duplicate`, {
+  const response = await fetch(`${BASE_URL}/admin/themes/${id}/duplicate`, {
     method: 'POST',
     headers: buildHeaders(tenantId),
     body: JSON.stringify({ name: newName }),
@@ -181,7 +191,7 @@ async function duplicateTheme(
  * Reset theme to preset defaults
  */
 async function resetToPreset(id: string, tenantId: string): Promise<Theme> {
-  const response = await fetch(`${BASE_URL}/themes/${id}/reset`, {
+  const response = await fetch(`${BASE_URL}/admin/themes/${id}/reset`, {
     method: 'POST',
     headers: buildHeaders(tenantId),
   });
@@ -193,7 +203,7 @@ async function resetToPreset(id: string, tenantId: string): Promise<Theme> {
  * Validate theme data
  */
 async function validateTheme(tenantId: string, data: CreateThemeDto): Promise<{ valid: boolean; errors?: string[] }> {
-  const response = await fetch(`${BASE_URL}/themes/validate`, {
+  const response = await fetch(`${BASE_URL}/admin/themes/validate`, {
     method: 'POST',
     headers: buildHeaders(tenantId),
     body: JSON.stringify(data),

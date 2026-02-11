@@ -156,13 +156,15 @@ export class EcommerceController {
     @Param('productId') productId: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
-    @Query('rating') rating?: string
+    @Query('rating') rating?: string,
+    @Query('sortBy') sortBy?: string
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
     return this.reviewsService.getProductReviews(tenantId, productId, {
       page: page ? parseInt(page, 10) : 1,
       limit: limit ? parseInt(limit, 10) : 10,
       rating: rating ? parseInt(rating, 10) : undefined,
+      sortBy: sortBy as 'helpful' | 'newest' | 'highest' | 'lowest' | undefined,
     });
   }
 
@@ -221,6 +223,31 @@ export class EcommerceController {
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
     return this.reviewsService.moderateReview(tenantId, reviewId, dto, 'admin');
+  }
+
+  @Post('admin/reviews/bulk-moderate')
+  @UseGuards(StoreAdminGuard)
+  async bulkModerateReviews(
+    @Headers('x-tenant-id') tenantId: string,
+    @Body() body: { reviewIds: string[]; status: 'approved' | 'rejected' }
+  ) {
+    if (!tenantId) throw new BadRequestException('Tenant ID required');
+    if (!body.reviewIds?.length) throw new BadRequestException('Review IDs required');
+    let count = 0;
+    for (const reviewId of body.reviewIds) {
+      try {
+        await this.reviewsService.moderateReview(
+          tenantId,
+          reviewId,
+          { status: body.status } as ModerateReviewDto,
+          'admin',
+        );
+        count++;
+      } catch {
+        // Skip reviews that fail moderation
+      }
+    }
+    return { success: true, count };
   }
 
   @Post('admin/reviews/:reviewId/respond')

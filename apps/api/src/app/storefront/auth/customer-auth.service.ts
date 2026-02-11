@@ -95,11 +95,11 @@ export class CustomerAuthService implements OnModuleInit {
     this.sendWelcomeEmailAsync(customer.id, tenantId);
 
     // Generate token
-    const accessToken = this.generateToken(customer.id, tenantId);
+    const token = this.generateToken(customer.id, tenantId);
 
     return {
       customer: this.mapCustomerToResponse(customer),
-      accessToken,
+      token,
     };
   }
 
@@ -131,11 +131,11 @@ export class CustomerAuthService implements OnModuleInit {
     });
 
     // Generate token
-    const accessToken = this.generateToken(customer.id, tenantId, customer.tokenVersion ?? 0);
+    const token = this.generateToken(customer.id, tenantId, customer.tokenVersion ?? 0);
 
     return {
       customer: this.mapCustomerToResponse(customer),
-      accessToken,
+      token,
     };
   }
 

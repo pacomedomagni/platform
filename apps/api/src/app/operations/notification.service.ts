@@ -44,29 +44,29 @@ export interface NotificationQuery {
   limit?: number;
 }
 
-// Using in-memory store for notifications (can be replaced with DB table later)
-interface NotificationRecord {
+// Notification record type returned from Prisma
+type NotificationRecord = {
   id: string;
   tenantId: string;
   userId: string;
   type: string;
   title: string;
   message: string;
-  data?: Record<string, unknown>;
-  link?: string;
+  data: Prisma.JsonValue | null;
+  link: string | null;
   priority: string;
   isRead: boolean;
-  readAt?: Date;
-  expiresAt?: Date;
+  readAt: Date | null;
+  expiresAt: Date | null;
   createdAt: Date;
-}
+  updatedAt: Date;
+};
 
 @Injectable()
 export class NotificationService {
   private readonly logger = new Logger(NotificationService.name);
   
-  // In-memory store - in production, use a database table
-  private notifications: NotificationRecord[] = [];
+  // Real-time subscriptions (kept in-memory since these are ephemeral WebSocket callbacks)
   private notificationSubscriptions: Map<string, Array<(notification: NotificationRecord) => void>> = new Map();
 
   constructor(private readonly prisma: PrismaService) {}
@@ -79,22 +79,20 @@ export class NotificationService {
    * Create a notification for a user
    */
   async create(ctx: TenantContext, dto: CreateNotificationInput): Promise<NotificationRecord> {
-    const notification: NotificationRecord = {
-      id: this.generateId(),
-      tenantId: ctx.tenantId,
-      userId: dto.userId,
-      type: dto.type,
-      title: dto.title,
-      message: dto.message,
-      data: dto.data,
-      link: dto.link,
-      priority: dto.priority || 'normal',
-      isRead: false,
-      expiresAt: dto.expiresAt,
-      createdAt: new Date(),
-    };
-
-    this.notifications.push(notification);
+    const notification = await this.prisma.notification.create({
+      data: {
+        tenantId: ctx.tenantId,
+        userId: dto.userId,
+        type: dto.type,
+        title: dto.title,
+        message: dto.message,
+        data: dto.data ? (dto.data as Prisma.InputJsonValue) : Prisma.JsonNull,
+        link: dto.link,
+        priority: dto.priority || 'normal',
+        isRead: false,
+        expiresAt: dto.expiresAt,
+      },
+    });
 
     // Notify subscribers (real-time)
     this.notifySubscribers(notification);
@@ -157,22 +155,30 @@ export class NotificationService {
     const limit = query.limit || 20;
     const offset = (page - 1) * limit;
 
-    let filtered = this.notifications.filter(n => {
-      if (n.tenantId !== ctx.tenantId) return false;
-      if (query.userId && n.userId !== query.userId) return false;
-      if (query.types && query.types.length > 0 && !query.types.includes(n.type)) return false;
-      if (query.isRead !== undefined && n.isRead !== query.isRead) return false;
-      if (query.priority && n.priority !== query.priority) return false;
-      if (n.expiresAt && n.expiresAt < new Date()) return false;
-      return true;
-    });
+    const where: Prisma.NotificationWhereInput = {
+      tenantId: ctx.tenantId,
+      ...(query.userId && { userId: query.userId }),
+      ...(query.types && query.types.length > 0 && { type: { in: query.types } }),
+      ...(query.isRead !== undefined && { isRead: query.isRead }),
+      ...(query.priority && { priority: query.priority }),
+      OR: [
+        { expiresAt: null },
+        { expiresAt: { gt: new Date() } },
+      ],
+    };
 
-    // Sort by createdAt descending
-    filtered.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-
-    const total = filtered.length;
-    const unreadCount = filtered.filter(n => !n.isRead).length;
-    const data = filtered.slice(offset, offset + limit);
+    const [data, total, unreadCount] = await Promise.all([
+      this.prisma.notification.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: offset,
+        take: limit,
+      }),
+      this.prisma.notification.count({ where }),
+      this.prisma.notification.count({
+        where: { ...where, isRead: false },
+      }),
+    ]);
 
     return { data, total, unreadCount };
   }
@@ -181,9 +187,9 @@ export class NotificationService {
    * Get a single notification
    */
   async findOne(ctx: TenantContext, id: string): Promise<NotificationRecord> {
-    const notification = this.notifications.find(
-      n => n.id === id && n.tenantId === ctx.tenantId
-    );
+    const notification = await this.prisma.notification.findFirst({
+      where: { id, tenantId: ctx.tenantId },
+    });
 
     if (!notification) {
       throw new NotFoundException('Notification not found');
@@ -196,14 +202,17 @@ export class NotificationService {
    * Get unread count for a user
    */
   async getUnreadCount(ctx: TenantContext, userId: string): Promise<number> {
-    const now = new Date();
-    return this.notifications.filter(
-      n =>
-        n.tenantId === ctx.tenantId &&
-        n.userId === userId &&
-        !n.isRead &&
-        (!n.expiresAt || n.expiresAt > now)
-    ).length;
+    return this.prisma.notification.count({
+      where: {
+        tenantId: ctx.tenantId,
+        userId,
+        isRead: false,
+        OR: [
+          { expiresAt: null },
+          { expiresAt: { gt: new Date() } },
+        ],
+      },
+    });
   }
 
   // ==========================================
@@ -214,54 +223,45 @@ export class NotificationService {
    * Mark a notification as read
    */
   async markAsRead(ctx: TenantContext, id: string): Promise<NotificationRecord> {
-    const notification = await this.findOne(ctx, id);
-    notification.isRead = true;
-    notification.readAt = new Date();
-    return notification;
+    // Verify ownership
+    await this.findOne(ctx, id);
+
+    return this.prisma.notification.update({
+      where: { id },
+      data: { isRead: true, readAt: new Date() },
+    });
   }
 
   /**
    * Mark multiple notifications as read
    */
   async markManyAsRead(ctx: TenantContext, ids: string[]): Promise<number> {
-    let count = 0;
-    const now = new Date();
+    const result = await this.prisma.notification.updateMany({
+      where: {
+        id: { in: ids },
+        tenantId: ctx.tenantId,
+        isRead: false,
+      },
+      data: { isRead: true, readAt: new Date() },
+    });
 
-    for (const notification of this.notifications) {
-      if (
-        notification.tenantId === ctx.tenantId &&
-        ids.includes(notification.id) &&
-        !notification.isRead
-      ) {
-        notification.isRead = true;
-        notification.readAt = now;
-        count++;
-      }
-    }
-
-    return count;
+    return result.count;
   }
 
   /**
    * Mark all notifications as read for a user
    */
   async markAllAsRead(ctx: TenantContext, userId: string): Promise<number> {
-    let count = 0;
-    const now = new Date();
+    const result = await this.prisma.notification.updateMany({
+      where: {
+        tenantId: ctx.tenantId,
+        userId,
+        isRead: false,
+      },
+      data: { isRead: true, readAt: new Date() },
+    });
 
-    for (const notification of this.notifications) {
-      if (
-        notification.tenantId === ctx.tenantId &&
-        notification.userId === userId &&
-        !notification.isRead
-      ) {
-        notification.isRead = true;
-        notification.readAt = now;
-        count++;
-      }
-    }
-
-    return count;
+    return result.count;
   }
 
   // ==========================================
@@ -272,38 +272,38 @@ export class NotificationService {
    * Delete a notification
    */
   async delete(ctx: TenantContext, id: string): Promise<void> {
-    const index = this.notifications.findIndex(
-      n => n.id === id && n.tenantId === ctx.tenantId
-    );
+    // Verify ownership
+    await this.findOne(ctx, id);
 
-    if (index === -1) {
-      throw new NotFoundException('Notification not found');
-    }
-
-    this.notifications.splice(index, 1);
+    await this.prisma.notification.delete({ where: { id } });
   }
 
   /**
    * Delete all read notifications for a user
    */
   async deleteRead(ctx: TenantContext, userId: string): Promise<number> {
-    const initialLength = this.notifications.length;
-    this.notifications = this.notifications.filter(
-      n => !(n.tenantId === ctx.tenantId && n.userId === userId && n.isRead)
-    );
-    return initialLength - this.notifications.length;
+    const result = await this.prisma.notification.deleteMany({
+      where: {
+        tenantId: ctx.tenantId,
+        userId,
+        isRead: true,
+      },
+    });
+
+    return result.count;
   }
 
   /**
    * Delete expired notifications
    */
   async deleteExpired(): Promise<number> {
-    const now = new Date();
-    const initialLength = this.notifications.length;
-    this.notifications = this.notifications.filter(
-      n => !n.expiresAt || n.expiresAt > now
-    );
-    return initialLength - this.notifications.length;
+    const result = await this.prisma.notification.deleteMany({
+      where: {
+        expiresAt: { lt: new Date() },
+      },
+    });
+
+    return result.count;
   }
 
   // ==========================================
@@ -434,13 +434,5 @@ export class NotificationService {
       priority: hasErrors ? 'high' : 'normal',
       data: result,
     });
-  }
-
-  // ==========================================
-  // Utility Functions
-  // ==========================================
-
-  private generateId(): string {
-    return `notif_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 }

@@ -128,11 +128,13 @@ export interface Product {
 export type StoreProduct = Product;
 
 export interface ProductListResponse {
-  items: Product[];
-  total: number;
-  page: number;
-  limit: number;
-  hasMore: boolean;
+  data: Product[];
+  pagination: {
+    total: number;
+    limit: number;
+    offset: number;
+    hasMore: boolean;
+  };
 }
 
 export interface Category {
@@ -144,6 +146,9 @@ export interface Category {
   productCount: number;
   children?: Category[];
 }
+
+// Alias for clarity
+export type ProductCategory = Category;
 
 export const productsApi = {
   list: (params?: {
@@ -519,7 +524,7 @@ export const ordersApi = {
     status?: string;
     limit?: number;
     offset?: number;
-  }): Promise<{ orders: OrderSummary[]; total: number }> => {
+  }): Promise<{ data: OrderSummary[]; pagination: { total: number; limit: number; offset: number; hasMore: boolean } }> => {
     const query = new URLSearchParams();
     if (params) {
       Object.entries(params).forEach(([key, value]) => {

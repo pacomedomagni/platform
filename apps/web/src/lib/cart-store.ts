@@ -8,11 +8,21 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { cartApi, Cart, CartItem } from './store-api';
 
+/** Cart item with display-friendly properties */
+export interface CartItemDisplay extends CartItem {
+  productId: string;
+  slug: string;
+  name: string;
+  price: number;
+  image: string;
+  variant?: string;
+}
+
 interface CartState {
   // State
   cartId: string | null;
   sessionToken: string | null;
-  items: CartItem[];
+  items: CartItemDisplay[];
   itemCount: number;
   subtotal: number;
   shippingTotal: number;
@@ -75,10 +85,11 @@ export const useCartStore = create<CartState>()(
 
       // Set cart from API response
       setCartFromApi: (cart: Cart) => {
-        // Map items with convenience aliases
+        // Map items with convenience aliases including slug for product links
         const mappedItems = cart.items.map(item => ({
           ...item,
           productId: item.product.id,
+          slug: item.product.slug,
           name: item.product.displayName,
           price: item.product.price,
           image: item.product.images[0] || '',

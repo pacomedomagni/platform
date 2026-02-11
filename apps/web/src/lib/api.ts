@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: '/api/v1', // Proxy will handle this or absolute URL. Next.js rewrites can also be used.
+  baseURL: '/api', // All API paths already include /v1/ prefix
   headers: {
     'Content-Type': 'application/json',
   },
@@ -27,8 +27,9 @@ api.interceptors.response.use(
     if (error.response?.status === 401) {
       if (typeof window !== 'undefined') {
         localStorage.removeItem('access_token');
-        if (!window.location.pathname.startsWith('/login')) {
-             window.location.href = '/login';
+        // Redirect to admin login if not already there
+        if (!window.location.pathname.startsWith('/app/login')) {
+             window.location.href = '/app/login';
         }
       }
     }

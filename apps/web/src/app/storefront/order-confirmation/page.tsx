@@ -9,12 +9,12 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Card, Badge, Spinner } from '@platform/ui';
 import { CheckCircle, Package, Truck, Mail, ArrowRight } from 'lucide-react';
-import { ordersApi, OrderDetail } from '../../../lib/store-api';
+import { ordersApi, checkoutApi, OrderDetail } from '../../../lib/store-api';
 import { formatCurrency } from '../_lib/format';
 
 function OrderConfirmationContent() {
   const searchParams = useSearchParams();
-  const orderId = searchParams.get('order_id');
+  const orderId = searchParams.get('order_id') || searchParams.get('order');
   // const paymentIntent = searchParams.get('payment_intent');
   
   const [order, setOrder] = useState<OrderDetail | null>(null);
@@ -30,7 +30,15 @@ function OrderConfirmationContent() {
       }
 
       try {
-        const orderData = await ordersApi.get(orderId);
+        // orderId could be UUID or orderNumber — try direct get first, then lookup by order number
+        let orderData: OrderDetail;
+        try {
+          orderData = await ordersApi.get(orderId);
+        } catch {
+          // If direct lookup fails, try as checkout order number
+          const checkout = await checkoutApi.getByOrderNumber(orderId);
+          orderData = await ordersApi.get(checkout.id);
+        }
         setOrder(orderData);
       } catch {
         setError('Failed to load order details');

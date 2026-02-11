@@ -693,6 +693,28 @@ export class PaymentsService {
       },
     });
 
+    // CRITICAL: Process stock deduction and coupon tracking (same as Stripe flow)
+    const fullOrder = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        items: {
+          include: {
+            product: {
+              include: {
+                item: true,
+              },
+            },
+          },
+        },
+        cart: true,
+      },
+    });
+
+    if (fullOrder) {
+      await this.processOrderFulfillment(fullOrder);
+      this.sendOrderConfirmationEmailAsync(fullOrder.id);
+    }
+
     return {
       success: true,
       paymentId: payment?.id,

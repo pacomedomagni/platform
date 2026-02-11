@@ -71,7 +71,14 @@ export default function AnalyticsDashboardPage() {
       ]);
 
       setDashboard({
-        ...dashboardRes.data,
+        totalRevenue: dashboardRes.data?.summary?.totalRevenue || dashboardRes.data?.totalRevenue || 0,
+        revenueGrowth: dashboardRes.data?.summary?.revenueGrowth || dashboardRes.data?.revenueGrowth || 0,
+        orderCount: dashboardRes.data?.summary?.totalOrders || dashboardRes.data?.orderCount || 0,
+        orderGrowth: dashboardRes.data?.summary?.orderGrowth || dashboardRes.data?.orderGrowth || 0,
+        averageOrderValue: dashboardRes.data?.summary?.averageOrderValue || dashboardRes.data?.averageOrderValue || 0,
+        aovGrowth: dashboardRes.data?.summary?.aovGrowth || dashboardRes.data?.aovGrowth || 0,
+        customerCount: dashboardRes.data?.summary?.totalCustomers || dashboardRes.data?.customerCount || 0,
+        customerGrowth: dashboardRes.data?.summary?.customerGrowth || dashboardRes.data?.customerGrowth || 0,
         topProducts: topProductsRes.data || [],
         revenueByCategory: categoryRes.data || [],
         revenueByPaymentMethod: paymentRes.data || [],

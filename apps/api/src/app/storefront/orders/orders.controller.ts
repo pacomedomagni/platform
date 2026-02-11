@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Put,
   Param,
   Query,
@@ -75,6 +76,26 @@ export class OrdersController {
       throw new BadRequestException('Email required for order lookup');
     }
     return this.ordersService.getOrderByNumber(tenantId, orderNumber, email);
+  }
+
+  /**
+   * Cancel an order (authenticated customer)
+   * POST /api/v1/store/orders/:id/cancel
+   */
+  @Post(':id/cancel')
+  async cancelOrder(
+    @Headers('x-tenant-id') tenantId: string,
+    @Headers('authorization') authHeader: string,
+    @Param('id') orderId: string
+  ) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID required');
+    }
+
+    const customerId = await this.getCustomerId(authHeader, tenantId);
+    // Verify ownership
+    await this.ordersService.getOrder(tenantId, orderId, customerId);
+    return this.ordersService.updateOrderStatus(tenantId, orderId, 'CANCELLED');
   }
 
   // ============ ADMIN ENDPOINTS ============

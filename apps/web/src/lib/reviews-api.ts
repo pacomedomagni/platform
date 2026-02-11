@@ -114,13 +114,14 @@ export const reviewsApi = {
     query.set('page', String(options?.page || 1));
     query.set('limit', String(options?.limit || 10));
     if (options?.rating) query.set('rating', String(options.rating));
+    if (options?.sortBy) query.set('sortBy', options.sortBy);
 
     return apiFetch(`/v1/store/products/${productListingId}/reviews?${query}`);
   },
 
   // Create a review
   createReview: (data: CreateReviewDto): Promise<Review> => {
-    return apiFetch('/v1/store/reviews', {
+    return apiFetch(`/v1/store/products/${data.productListingId}/reviews`, {
       method: 'POST',
       body: JSON.stringify(data),
     });
@@ -136,14 +137,25 @@ export const reviewsApi = {
 
   // Upload review images
   uploadImages: async (files: File[]): Promise<string[]> => {
+    const tenantId = await resolveTenantId();
     const formData = new FormData();
     files.forEach((file) => formData.append('images', file));
 
+    const headers: Record<string, string> = {
+      'x-tenant-id': tenantId,
+    };
+
+    // Add auth token if available
+    if (typeof window !== 'undefined') {
+      const token = localStorage.getItem('customer_token');
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+    }
+
     const response = await fetch(`${API_BASE}/v1/store/reviews/upload-images`, {
       method: 'POST',
-      headers: {
-        'x-tenant-id': getTenantId(),
-      },
+      headers,
       body: formData,
     });
 
@@ -200,7 +212,7 @@ export const adminReviewsApi = {
     if (options?.status) query.set('status', options.status);
     if (options?.productId) query.set('productId', options.productId);
 
-    return apiFetch(`/v1/admin/reviews?${query}`);
+    return apiFetch(`/v1/store/admin/reviews?${query}`);
   },
 
   // Moderate review (approve/reject)
@@ -211,8 +223,8 @@ export const adminReviewsApi = {
       notes?: string;
     }
   ): Promise<AdminReview> => {
-    return apiFetch(`/v1/admin/reviews/${reviewId}/moderate`, {
-      method: 'POST',
+    return apiFetch(`/v1/store/admin/reviews/${reviewId}/moderate`, {
+      method: 'PUT',
       body: JSON.stringify(data),
     });
   },
@@ -222,7 +234,7 @@ export const adminReviewsApi = {
     reviewIds: string[],
     status: 'approved' | 'rejected'
   ): Promise<{ success: boolean; count: number }> => {
-    return apiFetch('/v1/admin/reviews/bulk-moderate', {
+    return apiFetch('/v1/store/admin/reviews/bulk-moderate', {
       method: 'POST',
       body: JSON.stringify({ reviewIds, status }),
     });
@@ -233,7 +245,7 @@ export const adminReviewsApi = {
     reviewId: string,
     response: string
   ): Promise<AdminReview> => {
-    return apiFetch(`/v1/admin/reviews/${reviewId}/respond`, {
+    return apiFetch(`/v1/store/admin/reviews/${reviewId}/respond`, {
       method: 'POST',
       body: JSON.stringify({ response }),
     });
@@ -241,7 +253,7 @@ export const adminReviewsApi = {
 
   // Delete review
   deleteReview: (reviewId: string): Promise<{ success: boolean }> => {
-    return apiFetch(`/v1/admin/reviews/${reviewId}`, {
+    return apiFetch(`/v1/store/admin/reviews/${reviewId}`, {
       method: 'DELETE',
     });
   },

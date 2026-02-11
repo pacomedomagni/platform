@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { resolveTenantId } from '@/lib/store-api';
 
 interface EmailPreferences {
   marketing: boolean;
@@ -9,6 +10,17 @@ interface EmailPreferences {
   promotions: boolean;
   newsletter: boolean;
   unsubscribedAt: string | null;
+}
+
+/** Get common headers for email preferences API calls */
+async function getEmailApiHeaders(): Promise<HeadersInit> {
+  const tenantId = await resolveTenantId();
+  const token = typeof window !== 'undefined' ? localStorage.getItem('customer_token') : null;
+  return {
+    'Content-Type': 'application/json',
+    'x-tenant-id': tenantId,
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
 }
 
 export default function EmailPreferencesPage() {
@@ -30,7 +42,9 @@ export default function EmailPreferencesPage() {
 
   const fetchPreferences = async () => {
     try {
+      const headers = await getEmailApiHeaders();
       const response = await fetch('/api/v1/storefront/email-preferences', {
+        headers,
         credentials: 'include',
       });
 
@@ -61,11 +75,10 @@ export default function EmailPreferencesPage() {
     setMessage(null);
 
     try {
+      const headers = await getEmailApiHeaders();
       const response = await fetch('/api/v1/storefront/email-preferences', {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         credentials: 'include',
         body: JSON.stringify({
           marketing: preferences.marketing,
@@ -97,8 +110,10 @@ export default function EmailPreferencesPage() {
     setMessage(null);
 
     try {
+      const headers = await getEmailApiHeaders();
       const response = await fetch('/api/v1/storefront/email-preferences/unsubscribe/all', {
         method: 'POST',
+        headers,
         credentials: 'include',
       });
 
