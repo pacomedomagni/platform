@@ -4,6 +4,7 @@ import {
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
+import { PinoLogger, InjectPinoLogger } from 'nestjs-pino';
 import { PrismaService } from '@platform/db';
 import { StripeService } from '../payments/stripe.service';
 import { StripeConnectService } from '../../onboarding/stripe-connect.service';
@@ -12,6 +13,8 @@ import { CreateCheckoutDto, UpdateCheckoutDto } from './dto';
 @Injectable()
 export class CheckoutService {
   constructor(
+    @InjectPinoLogger(CheckoutService.name)
+    private readonly logger: PinoLogger,
     private readonly prisma: PrismaService,
     private readonly stripeService: StripeService,
     private readonly stripeConnectService: StripeConnectService,
@@ -252,7 +255,7 @@ export class CheckoutService {
       }
     } catch (error) {
       // Log error but don't fail checkout — payment can be retried via getCheckout or retryPaymentIntent
-      console.error('Failed to create payment intent:', error);
+      this.logger.error({ err: error, orderId: result.id }, 'Failed to create payment intent');
     }
 
     return this.mapOrderToCheckoutResponse(result, stripeClientSecret, paymentProvider);
@@ -373,7 +376,7 @@ export class CheckoutService {
           );
           clientSecret = paymentIntent.client_secret;
         } catch (error) {
-          console.error('Failed to get Stripe payment intent:', error);
+          this.logger.error({ err: error, paymentIntentId: order.stripePaymentIntentId }, 'Failed to get Stripe payment intent');
         }
       } else {
         // Payment intent missing (Stripe call failed during checkout) — auto-retry
@@ -381,7 +384,7 @@ export class CheckoutService {
           const retryResult = await this.retryPaymentIntent(tenantId, orderId);
           clientSecret = retryResult.clientSecret;
         } catch (error) {
-          console.error('Auto-retry payment intent failed:', error);
+          this.logger.error({ err: error, orderId }, 'Auto-retry payment intent failed');
         }
       }
     }
@@ -499,7 +502,7 @@ export class CheckoutService {
         try {
           await this.stripeService.cancelPaymentIntent(order.stripePaymentIntentId);
         } catch (error) {
-          console.error('Failed to cancel Stripe payment intent:', error);
+          this.logger.error({ err: error, paymentIntentId: order.stripePaymentIntentId, orderId }, 'Failed to cancel Stripe payment intent');
         }
       }
 

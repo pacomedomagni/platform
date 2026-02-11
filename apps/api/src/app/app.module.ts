@@ -20,7 +20,7 @@ import { OperationsModule } from './operations/operations.module';
 import { InventoryManagementModule } from './inventory-management/inventory-management.module';
 import { CurrencyModule } from './currency/currency.module';
 import { MarketplaceIntegrationsModule } from './marketplace-integrations/marketplace-integrations.module';
-import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { LoggerModule } from './common/logger';
 import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
 import { SentryInterceptor } from './sentry/sentry.interceptor';
 import { EmailWorker } from './workers/email.worker';
@@ -32,6 +32,8 @@ import { DomainResolverModule } from './storefront/domain-resolver/domain-resolv
 
 @Module({
   imports: [
+    // Structured logging with Pino (must be first for early logging)
+    LoggerModule,
     // Domain resolver — must load before StorefrontModule (used by TenantMiddleware)
     DomainResolverModule,
     // Rate limiting - 100 requests per minute per IP
@@ -82,11 +84,6 @@ import { DomainResolverModule } from './storefront/domain-resolver/domain-resolv
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
-    },
-    // Global request logging
-    {
-      provide: APP_INTERCEPTOR,
-      useClass: LoggingInterceptor,
     },
     // Tenant context propagation
     {

@@ -9,6 +9,7 @@ initSentry();
 import 'dotenv/config';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { Logger as PinoLogger } from 'nestjs-pino';
 import { AppModule } from './app/app.module';
 import { SentryExceptionFilter } from './app/sentry/sentry.filter';
 
@@ -45,10 +46,16 @@ function validateEnvironment(): void {
 async function bootstrap() {
   // Validate environment variables before starting the application
   validateEnvironment();
+  
   const app = await NestFactory.create(AppModule, {
     // Enable raw body for webhooks (Stripe)
     rawBody: true,
+    // Buffer logs until Pino logger is ready
+    bufferLogs: true,
   });
+  
+  // Use Pino logger for all NestJS logging
+  app.useLogger(app.get(PinoLogger));
   
   const globalPrefix = 'api/v1';
   app.setGlobalPrefix(globalPrefix);
