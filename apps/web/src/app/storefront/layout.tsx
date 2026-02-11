@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { Metadata, Viewport } from 'next';
-import { Button, Input } from '@platform/ui';
+import { Button } from '@platform/ui';
 import { Search, User } from 'lucide-react';
 import { StoreProviders } from './_components/store-providers';
 import { CartIcon } from './_components/cart-icon';
@@ -8,6 +8,7 @@ import { CurrencySwitcher } from './_components/currency-switcher';
 import { generateOrganizationSchema, serializeJsonLd } from '@/lib/seo/schema';
 import { WelcomeWizard } from '../../components/onboarding/welcome-wizard';
 import { ProductTour } from '../../components/onboarding/product-tour';
+import { StorefrontSearchInput } from './_components/storefront-search-input';
 
 export const metadata: Metadata = {
   title: {
@@ -128,12 +129,7 @@ export default function StorefrontLayout({ children }: { children: React.ReactNo
                 <label htmlFor="header-search" className="sr-only">
                   Search products
                 </label>
-                <Input
-                  id="header-search"
-                  className="h-6 w-40 border-0 bg-transparent p-0 text-sm focus-visible:ring-0"
-                  placeholder="Search products"
-                  type="search"
-                />
+                <StorefrontSearchInput />
               </div>
               <CurrencySwitcher />
               <Link

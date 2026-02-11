@@ -34,7 +34,8 @@
       "@platform/queue": ["../../libs/queue/src/index.ts"],
       "@platform/storage": ["../../libs/storage/src/index.ts"],
       "@platform/print": ["../../libs/print/src/index.ts"],
-      "@platform/email": ["../../libs/email/src/index.ts"]
+      "@platform/email": ["../../libs/email/src/index.ts"],
+      "@platform/validation": ["../../libs/validation/src/index.ts"]
     }
   },
   "include": [

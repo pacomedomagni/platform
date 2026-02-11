@@ -54,7 +54,13 @@ interface CartState {
 
 // Generate session token for anonymous carts
 function generateSessionToken(): string {
-  return 'sess_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return 'sess_' + crypto.randomUUID();
+  }
+  // Fallback for older environments
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return 'sess_' + Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
 export const useCartStore = create<CartState>()(
@@ -92,7 +98,7 @@ export const useCartStore = create<CartState>()(
           slug: item.product.slug,
           name: item.product.displayName,
           price: item.product.price,
-          image: item.product.images[0] || '',
+          image: item.product.images?.[0] || '',
           variant: undefined,
         }));
 

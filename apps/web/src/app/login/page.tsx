@@ -1,15 +1,18 @@
 'use client';
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button, Input, Card, Label } from '@platform/ui';
-import { Loader2, Command, ShieldCheck } from 'lucide-react';
+import { Loader2, ShieldCheck, Eye, EyeOff } from 'lucide-react';
 import api from '../../lib/api';
 
-export default function LoginPage() {
+function LoginForm() {
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const redirectTo = searchParams.get('redirect');
     const [loading, setLoading] = useState(false);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState('');
 
     const handleLogin = async (e: React.FormEvent) => {
@@ -19,14 +22,14 @@ export default function LoginPage() {
         try {
             const res = await api.post('/auth/login', { email, password });
             const { access_token, user } = res.data;
-            
+
             localStorage.setItem('access_token', access_token);
             localStorage.setItem('user', JSON.stringify(user));
             if (user?.tenantId) {
                 localStorage.setItem('tenantId', user.tenantId);
             }
-            
-            router.push('/app');
+
+            router.push(redirectTo || '/app');
         } catch (err: any) {
             console.error(err);
             setError(err.response?.data?.message || 'Login failed. Please check your credentials.');
@@ -38,7 +41,7 @@ export default function LoginPage() {
     return (
         <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
             <div className="w-full max-w-md space-y-8 relative">
-                
+
                 {/* Logo / Brand */}
                 <div className="flex flex-col items-center justify-center text-center space-y-2">
                     <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-indigo-600 via-blue-500 to-amber-400 flex items-center justify-center text-white shadow-lg shadow-indigo-600/20">
@@ -63,11 +66,11 @@ export default function LoginPage() {
                         )}
                         <div className="space-y-2">
                             <Label htmlFor="email">Email address</Label>
-                            <Input 
-                                id="email" 
-                                type="email" 
-                                placeholder="name@company.com" 
-                                required 
+                            <Input
+                                id="email"
+                                type="email"
+                                placeholder="name@company.com"
+                                required
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
                                 className="h-11"
@@ -80,14 +83,24 @@ export default function LoginPage() {
                                     Forgot password?
                                 </a>
                             </div>
-                            <Input 
-                                id="password" 
-                                type="password" 
-                                required 
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                className="h-11"
-                            />
+                            <div className="relative">
+                                <Input
+                                    id="password"
+                                    type={showPassword ? 'text' : 'password'}
+                                    required
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    className="h-11 pr-10"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => setShowPassword(!showPassword)}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                                >
+                                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </button>
+                            </div>
                         </div>
 
                         <Button type="submit" className="w-full h-11 text-base bg-gradient-to-r from-indigo-600 via-blue-600 to-amber-400 text-white shadow-lg shadow-indigo-600/20 hover:shadow-indigo-600/30" disabled={loading}>
@@ -114,5 +127,13 @@ export default function LoginPage() {
                 </p>
             </div>
         </div>
+    );
+}
+
+export default function LoginPage() {
+    return (
+        <Suspense>
+            <LoginForm />
+        </Suspense>
     );
 }

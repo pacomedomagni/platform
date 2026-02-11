@@ -3,12 +3,15 @@
  */
 'use client';
 
-import { useThemeLayout } from '@/lib/theme';
-import { Button, ButtonProps } from '@platform/ui';
+import { useTheme } from '@/lib/theme';
+import { Button } from '@platform/ui';
 import { cn } from '@platform/ui';
 
+type ButtonProps = React.ComponentPropsWithoutRef<typeof Button>;
+
 export function ThemedButton({ className, ...props }: ButtonProps) {
-  const { buttonStyle } = useThemeLayout();
+  const { theme } = useTheme();
+  const buttonStyle = theme?.components?.buttonStyle as string | undefined;
 
   const buttonClass = cn(
     buttonStyle === 'pill' && 'rounded-full',

@@ -317,7 +317,7 @@ export default function ThemeCustomizerPage() {
                 <Label>Base Font Size</Label>
                 <Select
                   value={currentTheme.typography.baseFontSize}
-                  onValueChange={(value) =>
+                  onValueChange={(value: any) =>
                     updateTypography({ baseFontSize: value })
                   }
                 >

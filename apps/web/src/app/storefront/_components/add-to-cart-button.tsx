@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import { ShoppingCart, Check, Loader2 } from 'lucide-react';
 import { useCartStore } from '../../../lib/cart-store';
+import { toast } from '@platform/ui';
 
 interface AddToCartButtonProps {
   productId: string;
@@ -34,7 +35,7 @@ export function AddToCartButton({
       setAdded(true);
       setTimeout(() => setAdded(false), 2000);
     } catch (err) {
-      console.error('Failed to add to cart:', err);
+      toast({ title: 'Failed to add to cart', description: err instanceof Error ? err.message : 'Please try again', variant: 'destructive' });
     } finally {
       setIsAdding(false);
     }

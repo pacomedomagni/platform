@@ -7,6 +7,7 @@ import { TableField } from './table-field';
 import { Button, Badge, Card, Skeleton } from './atoms';
 import { cn } from './utils';
 import { Save, ChevronLeft, MoreHorizontal, CheckCircle, Ban } from 'lucide-react';
+import { toast } from './toast';
 
 interface FormViewProps {
     docType: DocTypeDefinition;
@@ -40,9 +41,10 @@ export const FormView = ({ docType, initialData, onSave, onSubmitDoc, onCancelDo
         try {
             await onSave(data);
             setIsDirty(false);
+            toast({ title: 'Saved successfully', variant: 'default' });
         } catch (e) {
             console.error(e);
-            alert('Failed to save');
+            toast({ title: 'Failed to save', description: e instanceof Error ? e.message : 'An error occurred', variant: 'destructive' });
         } finally {
             setLoading(false);
         }
@@ -53,9 +55,10 @@ export const FormView = ({ docType, initialData, onSave, onSubmitDoc, onCancelDo
         setActionLoading(true);
         try {
             await onSubmitDoc();
+            toast({ title: 'Submitted successfully', variant: 'default' });
         } catch (e) {
             console.error(e);
-            alert('Failed to submit');
+            toast({ title: 'Failed to submit', description: e instanceof Error ? e.message : 'An error occurred', variant: 'destructive' });
         } finally {
             setActionLoading(false);
         }
@@ -66,9 +69,10 @@ export const FormView = ({ docType, initialData, onSave, onSubmitDoc, onCancelDo
         setActionLoading(true);
         try {
             await onCancelDoc();
+            toast({ title: 'Cancelled successfully', variant: 'default' });
         } catch (e) {
             console.error(e);
-            alert('Failed to cancel');
+            toast({ title: 'Failed to cancel', description: e instanceof Error ? e.message : 'An error occurred', variant: 'destructive' });
         } finally {
             setActionLoading(false);
         }
@@ -123,8 +127,8 @@ export const FormView = ({ docType, initialData, onSave, onSubmitDoc, onCancelDo
             <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4 sticky top-0 z-10 bg-white/70 dark:bg-slate-950/70 backdrop-blur py-3 border-b border-border/60 sm:border-b-0 rounded-2xl px-3 sm:px-4">
                 <div className="flex items-center gap-2">
                     {onNavigateBack && (
-                        <Button variant="ghost" size="icon" onClick={onNavigateBack} className="-ml-2">
-                            <ChevronLeft className="h-5 w-5 text-slate-500" />
+                        <Button variant="ghost" size="icon" onClick={onNavigateBack} className="-ml-2" aria-label="Go back">
+                            <ChevronLeft className="h-5 w-5 text-slate-500" aria-hidden="true" />
                         </Button>
                     )}
                     <div>
@@ -163,8 +167,8 @@ export const FormView = ({ docType, initialData, onSave, onSubmitDoc, onCancelDo
                         )}
                     </Button>
 
-                     <Button variant="ghost" size="icon">
-                         <MoreHorizontal className="h-4 w-4" />
+                     <Button variant="ghost" size="icon" aria-label="More options">
+                         <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
                      </Button>
                 </div>
             </header>

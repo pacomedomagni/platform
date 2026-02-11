@@ -8,8 +8,12 @@ import { useTheme, useThemeFont, useThemeLayout } from '@/lib/theme';
 
 export function ThemeStyles() {
   const { theme } = useTheme();
-  const { fontFamily, headingFont, fontSize } = useThemeFont();
-  const { spacing } = useThemeLayout();
+  const fonts = useThemeFont();
+  const layoutConfig = useThemeLayout();
+  const fontFamily = fonts.body;
+  const headingFont = fonts.heading;
+  const fontSize = theme?.fontSize || 'base';
+  const spacing = layoutConfig.spacing;
 
   if (!theme) return null;
 

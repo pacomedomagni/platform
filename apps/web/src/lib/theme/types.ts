@@ -18,6 +18,8 @@ export interface ThemeColors {
   border: string;
   input: string;
   ring: string;
+  destructive: string;
+  destructiveForeground: string;
   success: string;
   warning: string;
   error: string;
@@ -57,13 +59,49 @@ export interface ComponentStyles {
   navStyle?: 'pills' | 'underline' | 'filled';
 }
 
+export interface ThemeTypography {
+  bodyFont: string;
+  bodyWeight: string;
+  headingFont: string;
+  headingWeight: string;
+  baseFontSize: 'sm' | 'base' | 'lg';
+}
+
+export interface ThemeLayout {
+  layoutStyle: 'standard' | 'wide' | 'boxed';
+  headerStyle: string;
+  footerStyle: string;
+  spacing: 'compact' | 'normal' | 'relaxed';
+  containerMaxWidth: number;
+}
+
+export interface ThemeComponents {
+  buttonStyle: 'solid' | 'outline' | 'ghost' | 'gradient';
+  buttonSize: string;
+  cardStyle: 'flat' | 'elevated' | 'outlined';
+  cardRadius: number;
+  inputStyle: 'outlined' | 'filled' | 'underlined';
+}
+
+export interface ThemeProductDisplay {
+  gridColumns: number;
+  imageRatio: string;
+  showQuickView: boolean;
+  showWishlist: boolean;
+}
+
 export interface Theme {
   id: string;
   name: string;
+  description?: string;
   slug: string;
   tenantId: string;
   isActive: boolean;
   colors: ThemeColors;
+  typography: ThemeTypography;
+  layout: ThemeLayout;
+  components: ThemeComponents;
+  productDisplay: ThemeProductDisplay;
   fontFamily: string;
   headingFont?: string;
   fontSize: 'sm' | 'base' | 'lg';
@@ -85,18 +123,24 @@ export interface Theme {
 
 export interface CreateThemeDto {
   name: string;
+  description?: string;
   slug?: string;
+  tenantId?: string;
   colors?: Partial<ThemeColors>;
+  typography?: Partial<ThemeTypography>;
+  layout?: Partial<ThemeLayout>;
+  components?: Partial<ThemeComponents>;
+  productDisplay?: Partial<ThemeProductDisplay>;
   fontFamily?: string;
   headingFont?: string;
   fontSize?: 'sm' | 'base' | 'lg';
   layoutStyle?: 'standard' | 'wide' | 'boxed';
   spacing?: 'compact' | 'normal' | 'relaxed';
   borderRadius?: 'none' | 'sm' | 'md' | 'lg' | 'xl';
-  buttonStyle?: 'solid' | 'outline' | 'ghost' | 'gradient';
+  buttonStyle?: string;
   buttonRounding?: 'none' | 'sm' | 'md' | 'lg' | 'full';
-  inputStyle?: 'outlined' | 'filled' | 'underlined';
-  cardStyle?: 'flat' | 'elevated' | 'outlined';
+  inputStyle?: string;
+  cardStyle?: string;
   cardShadow?: 'none' | 'sm' | 'md' | 'lg' | 'xl';
   navStyle?: 'pills' | 'underline' | 'filled';
   customCSS?: string;

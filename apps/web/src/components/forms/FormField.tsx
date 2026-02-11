@@ -49,7 +49,7 @@ export function FormField({
             id: htmlFor,
             'aria-invalid': error ? 'true' : 'false',
             'aria-describedby': [errorId, hintId].filter(Boolean).join(' ') || undefined,
-            className: `${child.props.className || ''} ${
+            className: `${(child.props as any).className || ''} ${
               error ? 'border-red-500 focus:ring-red-500 focus:border-red-500' : ''
             }`,
           });

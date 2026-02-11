@@ -139,13 +139,14 @@ export const AppShell = ({
                         </div>
                      </div>
 
-                    <Button 
-                        variant="ghost" 
+                    <Button
+                        variant="ghost"
                         size={collapsed ? "icon" : "sm"}
                         onClick={() => setCollapsed(!collapsed)}
                         className={cn("w-full", collapsed ? "" : "flex justify-center")}
+                        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
                     >
-                        {collapsed ? <ChevronLeft className="h-4 w-4 rotate-180" /> : <ChevronLeft className="h-4 w-4 mr-2" />}
+                        {collapsed ? <ChevronLeft className="h-4 w-4 rotate-180" aria-hidden="true" /> : <ChevronLeft className="h-4 w-4 mr-2" aria-hidden="true" />}
                         {!collapsed && "Collapse Sidebar"}
                     </Button>
                 </div>
@@ -157,9 +158,9 @@ export const AppShell = ({
                 <header className="h-16 border-b bg-white/80 dark:bg-slate-950/80 backdrop-blur flex items-center justify-between px-6 shrink-0 z-10 sticky top-0">
                     {/* Search / Global Command */}
                     <div className="flex items-center w-full max-w-md">
-                        <div className="relative w-full" onClick={() => setSearchOpen(true)}>
-                            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                            <div 
+                        <div className="relative w-full" onClick={() => setSearchOpen(true)} role="button" tabIndex={0} aria-label="Open search (Ctrl+K)" onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setSearchOpen(true); }}>
+                            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" aria-hidden="true" />
+                            <div
                                 className="w-full pl-9 pr-4 py-2 h-10 rounded-lg border border-slate-200/80 bg-slate-50/70 text-sm text-slate-500 cursor-text flex items-center dark:bg-slate-900/60 dark:border-slate-800 dark:text-slate-400"
                             >
                                 Search everything (Ctrl+K)...
@@ -169,9 +170,9 @@ export const AppShell = ({
 
                     {/* Right Actions */}
                     <div className="flex items-center gap-3">
-                        <Button variant="ghost" size="icon" className="relative text-slate-500 hover:text-slate-700">
-                             <Bell className="h-5 w-5" />
-                             <span className="absolute top-2 right-2 h-2 w-2 bg-amber-400 rounded-full border border-white dark:border-slate-900"></span>
+                        <Button variant="ghost" size="icon" className="relative text-slate-500 hover:text-slate-700" aria-label="Notifications">
+                             <Bell className="h-5 w-5" aria-hidden="true" />
+                             <span className="absolute top-2 right-2 h-2 w-2 bg-amber-400 rounded-full border border-white dark:border-slate-900" aria-hidden="true"></span>
                         </Button>
                     </div>
                 </header>

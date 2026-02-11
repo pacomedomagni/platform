@@ -108,7 +108,7 @@ export interface Product {
   id: string;
   slug: string;
   displayName: string;
-  name?: string;  // Alias for displayName
+  name: string;  // Alias for displayName
   shortDescription: string | null;
   description: string | null;
   price: number;
@@ -363,6 +363,7 @@ export interface Customer {
   lastName: string | null;
   phone: string | null;
   acceptsMarketing: boolean;
+  emailVerified: boolean;
   createdAt: string;
   addresses?: CustomerAddress[];
 }

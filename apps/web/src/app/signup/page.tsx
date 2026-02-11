@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { Eye, EyeOff } from 'lucide-react';
 
 const signupSchema = z.object({
   businessName: z.string().min(2, 'Business name must be at least 2 characters').max(100),
@@ -37,6 +38,7 @@ export default function SignupPage() {
   const router = useRouter();
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const form = useForm<SignupFormData>({
@@ -170,12 +172,47 @@ export default function SignupPage() {
 
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">Password</label>
-                <input
-                  type="password"
-                  {...form.register('password')}
-                  className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                  placeholder="8+ chars, uppercase, lowercase, number"
-                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    {...form.register('password')}
+                    className="w-full rounded-lg border border-slate-300 px-4 py-2.5 pr-10 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    placeholder="8+ chars, uppercase, lowercase, number"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+                {/* Password strength indicator */}
+                {(() => {
+                  const pwd = form.watch('password');
+                  if (!pwd) return null;
+                  let score = 0;
+                  if (pwd.length >= 8) score++;
+                  if (/[a-z]/.test(pwd)) score++;
+                  if (/[A-Z]/.test(pwd)) score++;
+                  if (/\d/.test(pwd)) score++;
+                  if (/[^a-zA-Z0-9]/.test(pwd)) score++;
+                  const labels = ['', 'Weak', 'Weak', 'Fair', 'Good', 'Strong'];
+                  const colors = ['', 'bg-red-500', 'bg-red-500', 'bg-yellow-500', 'bg-blue-500', 'bg-green-500'];
+                  return (
+                    <div className="mt-2">
+                      <div className="flex gap-1">
+                        {[1, 2, 3, 4, 5].map((i) => (
+                          <div key={i} className={`h-1 flex-1 rounded-full ${i <= score ? colors[score] : 'bg-slate-200'}`} />
+                        ))}
+                      </div>
+                      <p className={`mt-1 text-xs ${score <= 2 ? 'text-red-600' : score <= 3 ? 'text-yellow-600' : 'text-green-600'}`}>
+                        {labels[score]}
+                      </p>
+                    </div>
+                  );
+                })()}
                 {form.formState.errors.password && (
                   <p className="mt-1 text-xs text-red-600">{form.formState.errors.password.message}</p>
                 )}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { AppShell } from '@platform/ui';
 import {
   LayoutDashboard,
@@ -66,7 +66,28 @@ export default function AppLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('sidebar_advanced') === 'true';
+    }
+    return false;
+  });
+
+  const user = useMemo(() => {
+    if (typeof window === 'undefined') return undefined;
+    try {
+      const stored = localStorage.getItem('user');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        return { name: parsed.name || parsed.email || 'User', email: parsed.email || '' };
+      }
+    } catch { /* ignore */ }
+    return undefined;
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('sidebar_advanced', String(showAdvanced));
+  }, [showAdvanced]);
 
   const navItems = [
     ...PRIMARY_NAV,
@@ -78,6 +99,7 @@ export default function AppLayout({
       navItems={navItems}
       title="NoSlag"
       description="Store Admin"
+      user={user}
       navFooter={
         <button
           onClick={() => setShowAdvanced(!showAdvanced)}

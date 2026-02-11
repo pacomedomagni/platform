@@ -157,6 +157,8 @@ export function getDefaultColors(): ThemeColors {
     border: '#e4e4e7',
     input: '#e4e4e7',
     ring: '#0070f3',
+    destructive: '#ef4444',
+    destructiveForeground: '#ffffff',
     success: '#22c55e',
     warning: '#f59e0b',
     error: '#ef4444',

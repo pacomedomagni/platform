@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 
-export default function OnboardingCompletePage() {
+function OnboardingCompleteContent() {
   const { tenantId } = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -95,5 +95,14 @@ export default function OnboardingCompletePage() {
         )}
       </div>
     </div>
+  );
+}
+
+
+export default function OnboardingCompletePage() {
+  return (
+    <Suspense>
+      <OnboardingCompleteContent />
+    </Suspense>
   );
 }

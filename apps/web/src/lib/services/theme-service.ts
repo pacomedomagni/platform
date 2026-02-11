@@ -137,10 +137,10 @@ export function generateThemeCSS(theme: Theme): string {
 
       /* Layout */
       --container-max-width: ${layout.containerMaxWidth}px;
-      --spacing: ${layout.spacing === 'compact' ? '0.5rem' : layout.spacing === 'spacious' ? '1.5rem' : '1rem'};
+      --spacing: ${layout.spacing === 'compact' ? '0.5rem' : (layout.spacing as string) === 'spacious' ? '1.5rem' : '1rem'};
 
       /* Components */
-      --button-radius: ${components.buttonStyle === 'pill' ? '9999px' : components.buttonStyle === 'square' ? '0px' : '0.375rem'};
+      --button-radius: ${(components.buttonStyle as string) === 'pill' ? '9999px' : (components.buttonStyle as string) === 'square' ? '0px' : '0.375rem'};
       --card-radius: ${components.cardRadius}px;
     }
   `;
@@ -170,8 +170,8 @@ export function generateThemeCSS(theme: Theme): string {
 
     .card {
       border-radius: var(--card-radius);
-      ${components.cardStyle === 'shadow' ? 'box-shadow: 0 1px 3px rgba(0,0,0,0.1);' : ''}
-      ${components.cardStyle === 'border' ? 'border: 1px solid var(--border);' : ''}
+      ${(components.cardStyle as string) === 'shadow' ? 'box-shadow: 0 1px 3px rgba(0,0,0,0.1);' : ''}
+      ${(components.cardStyle as string) === 'border' ? 'border: 1px solid var(--border);' : ''}
     }
   `;
 
