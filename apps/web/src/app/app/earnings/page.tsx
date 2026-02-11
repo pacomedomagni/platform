@@ -49,21 +49,33 @@ function formatCurrency(amount: number, currency = 'usd'): string {
 }
 
 function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return 'N/A';
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  } catch {
+    return 'N/A';
+  }
 }
 
 function formatDateTime(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return 'N/A';
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+  } catch {
+    return 'N/A';
+  }
 }
 
 function PayoutStatusBadge({ status }: { status: string }) {
@@ -92,9 +104,15 @@ export default function EarningsPage() {
 
   const fetchEarnings = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
+    setError(null);
     try {
       const token = localStorage.getItem('access_token');
       const tenantId = localStorage.getItem('tenantId');
+
+      if (!token || !tenantId) {
+        window.location.href = '/login';
+        return;
+      }
 
       const res = await fetch('/api/v1/store/admin/dashboard/earnings', {
         headers: {
@@ -103,6 +121,11 @@ export default function EarningsPage() {
         },
       });
 
+      if (res.status === 401) {
+        localStorage.removeItem('access_token');
+        window.location.href = '/login';
+        return;
+      }
       if (!res.ok) throw new Error('Failed to load earnings');
       const json = await res.json();
       setData(json);
@@ -229,8 +252,15 @@ export default function EarningsPage() {
       </div>
 
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+        <div className="flex items-center justify-between rounded-lg border border-red-200 bg-red-50 p-4">
           <p className="text-sm text-red-600">{error}</p>
+          <button
+            onClick={() => setError(null)}
+            className="text-red-600 hover:text-red-800"
+            aria-label="Dismiss error"
+          >
+            ×
+          </button>
         </div>
       )}
 

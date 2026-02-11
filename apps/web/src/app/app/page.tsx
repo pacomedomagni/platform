@@ -108,15 +108,15 @@ export default function Dashboard() {
         if (!res.ok) throw new Error('Failed to load dashboard');
         const json = await res.json();
         setData(json);
-      } catch (err: any) {
-        setError(err.message);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'An error occurred');
       } finally {
         setLoading(false);
       }
     };
 
     fetchDashboard();
-  }, []);
+  }, [router]);
 
   if (loading) {
     return (
