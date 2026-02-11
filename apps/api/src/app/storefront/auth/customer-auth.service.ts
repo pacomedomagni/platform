@@ -88,6 +88,16 @@ export class CustomerAuthService implements OnModuleInit {
       },
     });
 
+    // Link any guest orders placed with the same email to this new account
+    await this.prisma.order.updateMany({
+      where: {
+        tenantId,
+        email: dto.email.toLowerCase(),
+        customerId: null,
+      },
+      data: { customerId: customer.id },
+    });
+
     // Send verification email (synchronous - critical)
     await this.sendVerificationEmail(customer.id, tenantId);
 

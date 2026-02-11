@@ -16,7 +16,7 @@ const VALID_ORDER_TRANSITIONS: Record<string, string[]> = {
   PENDING: ['CONFIRMED', 'CANCELLED'],
   CONFIRMED: ['PROCESSING', 'SHIPPED', 'CANCELLED'],
   PROCESSING: ['SHIPPED', 'CANCELLED'],
-  SHIPPED: ['DELIVERED'],
+  SHIPPED: ['DELIVERED', 'PROCESSING', 'CANCELLED'], // Allow reverting or cancelling if shipment issue
   DELIVERED: ['REFUNDED'],
   CANCELLED: [],
   REFUNDED: [],
@@ -70,6 +70,8 @@ export class OrdersService {
         paymentStatus: order.paymentStatus,
         grandTotal: Number(order.grandTotal),
         itemCount: order._count.items,
+        trackingNumber: order.trackingNumber,
+        shippingCarrier: order.shippingCarrier,
         createdAt: order.createdAt,
       })),
       pagination: {
@@ -106,7 +108,13 @@ export class OrdersService {
       throw new NotFoundException('Order not found');
     }
 
-    return this.mapOrderToDetail(order);
+    // Fetch payment info for enriched response
+    const payments = await this.prisma.payment.findMany({
+      where: { orderId, tenantId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return this.mapOrderToDetail(order, payments);
   }
 
   /**
@@ -128,7 +136,12 @@ export class OrdersService {
       throw new NotFoundException('Order not found');
     }
 
-    return this.mapOrderToDetail(order);
+    const payments = await this.prisma.payment.findMany({
+      where: { orderId: order.id, tenantId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return this.mapOrderToDetail(order, payments);
   }
 
   /**
@@ -166,7 +179,7 @@ export class OrdersService {
    * List all orders (admin)
    */
   async listAllOrders(tenantId: string, dto: ListOrdersDto & { search?: string }) {
-    const { status, search, limit = 20, offset = 0 } = dto;
+    const { status, search, dateFrom, dateTo, limit = 20, offset = 0 } = dto;
 
     const where: Prisma.OrderWhereInput = {
       tenantId,
@@ -174,6 +187,12 @@ export class OrdersService {
 
     if (status) {
       where.status = status as any;
+    }
+
+    if (dateFrom || dateTo) {
+      where.createdAt = {};
+      if (dateFrom) where.createdAt.gte = new Date(dateFrom);
+      if (dateTo) where.createdAt.lte = new Date(dateTo);
     }
 
     if (search) {
@@ -257,7 +276,7 @@ export class OrdersService {
       );
     }
 
-    const updateData: Prisma.OrderUpdateInput = { status };
+    const updateData: Prisma.OrderUpdateInput = { status: status as any };
 
     if (status === 'SHIPPED') {
       updateData.shippedAt = new Date();
@@ -425,7 +444,20 @@ export class OrdersService {
 
   // ============ HELPERS ============
 
-  private mapOrderToDetail(order: OrderWithItems) {
+  private mapOrderToDetail(order: OrderWithItems, payments?: any[]) {
+    // Build tracking URL if carrier and tracking number available
+    const trackingUrl = order.trackingNumber && order.shippingCarrier
+      ? this.buildTrackingUrl(order.shippingCarrier, order.trackingNumber)
+      : null;
+
+    // Extract payment method from captured payment
+    const capturedPayment = payments?.find(p => p.status === 'CAPTURED');
+    const failedPayment = payments?.find(p => p.status === 'FAILED');
+
+    // Calculate total refunded
+    const refundedPayments = payments?.filter(p => ['REFUNDED', 'PARTIALLY_REFUNDED'].includes(p.status)) || [];
+    const totalRefunded = refundedPayments.reduce((sum: number, p: any) => sum + Number(p.amount), 0);
+
     return {
       id: order.id,
       orderNumber: order.orderNumber,
@@ -462,6 +494,7 @@ export class OrdersService {
       items: order.items.map((item) => ({
         id: item.id,
         name: item.name,
+        sku: item.sku,
         quantity: item.quantity,
         unitPrice: Number(item.unitPrice),
         totalPrice: Number(item.totalPrice),
@@ -475,11 +508,39 @@ export class OrdersService {
       shippingMethod: order.shippingMethod,
       shippingCarrier: order.shippingCarrier,
       trackingNumber: order.trackingNumber,
+      trackingUrl,
       customerNotes: order.customerNotes,
+      // Payment details
+      paymentMethod: capturedPayment?.cardBrand && capturedPayment?.cardLast4
+        ? `${capturedPayment.cardBrand.charAt(0).toUpperCase() + capturedPayment.cardBrand.slice(1)} •••• ${capturedPayment.cardLast4}`
+        : null,
+      paymentFailureReason: failedPayment?.errorMessage || null,
+      // Refund info
+      totalRefunded: totalRefunded > 0 ? totalRefunded : null,
+      refundedAt: order.refundedAt,
+      // Timestamps
       createdAt: order.createdAt,
       confirmedAt: order.confirmedAt,
       shippedAt: order.shippedAt,
       deliveredAt: order.deliveredAt,
+      cancelledAt: order.cancelledAt,
     };
+  }
+
+  private buildTrackingUrl(carrier: string, trackingNumber: string): string | null {
+    const carrierLower = carrier.toLowerCase();
+    if (carrierLower.includes('ups')) {
+      return `https://www.ups.com/track?tracknum=${trackingNumber}`;
+    }
+    if (carrierLower.includes('fedex')) {
+      return `https://www.fedex.com/fedextrack/?trknbr=${trackingNumber}`;
+    }
+    if (carrierLower.includes('usps')) {
+      return `https://tools.usps.com/go/TrackConfirmAction?tLabels=${trackingNumber}`;
+    }
+    if (carrierLower.includes('dhl')) {
+      return `https://www.dhl.com/en/express/tracking.html?AWB=${trackingNumber}`;
+    }
+    return null;
   }
 }

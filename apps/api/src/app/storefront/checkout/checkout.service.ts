@@ -31,6 +31,28 @@ export class CheckoutService {
    * PAY-5: Order number generated atomically
    */
   async createCheckout(tenantId: string, dto: CreateCheckoutDto, customerId?: string) {
+    // Double-click protection: check if an order already exists for this cart
+    const existingOrder = await this.prisma.order.findFirst({
+      where: {
+        cartId: dto.cartId,
+        tenantId,
+        status: { not: 'CANCELLED' },
+      },
+      include: { items: true },
+    });
+
+    if (existingOrder) {
+      // Return existing order instead of creating duplicate
+      let clientSecret: string | null = null;
+      if (existingOrder.stripePaymentIntentId && existingOrder.paymentStatus === 'PENDING') {
+        try {
+          const pi = await this.stripeService.getPaymentIntent(existingOrder.stripePaymentIntentId);
+          clientSecret = pi.client_secret;
+        } catch { /* ignore */ }
+      }
+      return this.mapOrderToCheckoutResponse(existingOrder, clientSecret);
+    }
+
     // Run database operations inside a transaction; Stripe call stays outside
     const result = await this.prisma.$transaction(async (tx) => {
       // PAY-3: Lock cart row to prevent TOCTOU race
@@ -41,7 +63,7 @@ export class CheckoutService {
       `;
 
       if (!lockedCarts || lockedCarts.length === 0) {
-        throw new NotFoundException('Cart not found');
+        throw new NotFoundException('Cart not found or already checked out');
       }
 
       // Fix #11: Extend cart expiry to prevent cleanup job race during checkout
@@ -89,15 +111,36 @@ export class CheckoutService {
           || (coupon.usageLimit && coupon.timesUsed >= coupon.usageLimit);
 
         if (invalid) {
+          const removedCoupon = cart.couponCode;
           await tx.cart.update({
             where: { id: cart.id },
             data: { couponCode: null, discountAmount: 0 },
           });
           (cart as any).discountAmount = new Prisma.Decimal(0);
           (cart as any).couponCode = null;
+          (cart as any).couponRemoved = removedCoupon;
+          (cart as any).couponRemoveReason = !coupon || !coupon.isActive
+            ? 'Coupon is no longer active'
+            : (coupon.expiresAt && new Date(coupon.expiresAt) < now)
+              ? 'Coupon has expired'
+              : 'Coupon usage limit has been reached';
           // Recalculate grandTotal without discount
           (cart as any).grandTotal = new Prisma.Decimal(
             Number(cart.subtotal) + Number(cart.shippingTotal) + Number(cart.taxTotal)
+          );
+        }
+      }
+
+      // Validate all products still exist and are published
+      for (const item of cart.items) {
+        if (!item.product || !item.product.isPublished) {
+          throw new BadRequestException(
+            `"${item.product?.displayName || 'A product'}" is no longer available. Please remove it from your cart and try again.`
+          );
+        }
+        if (!item.product.item) {
+          throw new BadRequestException(
+            `"${item.product.displayName}" cannot be purchased at this time. Please remove it from your cart.`
           );
         }
       }
@@ -288,7 +331,17 @@ export class CheckoutService {
       this.logger.error({ err: error, orderId: result.id }, 'Failed to create payment intent');
     }
 
-    return this.mapOrderToCheckoutResponse(result, stripeClientSecret, paymentProvider);
+    const response = this.mapOrderToCheckoutResponse(result, stripeClientSecret, paymentProvider);
+
+    // Include coupon removal notice if coupon was invalidated during checkout
+    if ((result as any).couponRemoved) {
+      (response as any).couponRemoved = {
+        code: (result as any).couponRemoved,
+        reason: (result as any).couponRemoveReason,
+      };
+    }
+
+    return response;
   }
 
   /**

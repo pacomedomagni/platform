@@ -11,6 +11,7 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { OrdersService } from './orders.service';
 import { CustomerAuthService } from '../auth/customer-auth.service';
 import { ListOrdersDto } from './dto';
@@ -63,6 +64,7 @@ export class OrdersController {
    * Get order by order number (guest lookup)
    * GET /api/v1/store/orders/lookup/:orderNumber
    */
+  @Throttle({ medium: { limit: 5, ttl: 60000 } }) // 5 lookups per minute to prevent enumeration
   @Get('lookup/:orderNumber')
   async lookupOrder(
     @Headers('x-tenant-id') tenantId: string,

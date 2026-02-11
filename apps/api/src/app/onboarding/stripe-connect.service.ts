@@ -173,6 +173,43 @@ export class StripeConnectService {
   }
 
   /**
+   * Get the merchant balance from their connected Stripe account
+   */
+  async getAccountBalance(accountId: string) {
+    const stripe = this.ensureStripe();
+    const balance = await stripe.balance.retrieve({ stripeAccount: accountId });
+    return {
+      available: balance.available.map(b => ({
+        amount: b.amount / 100,
+        currency: b.currency,
+      })),
+      pending: balance.pending.map(b => ({
+        amount: b.amount / 100,
+        currency: b.currency,
+      })),
+    };
+  }
+
+  /**
+   * Get recent payouts for a connected account
+   */
+  async getPayouts(accountId: string, limit = 10) {
+    const stripe = this.ensureStripe();
+    const payouts = await stripe.payouts.list(
+      { limit },
+      { stripeAccount: accountId },
+    );
+    return payouts.data.map(p => ({
+      id: p.id,
+      amount: p.amount / 100,
+      currency: p.currency,
+      status: p.status,
+      arrivalDate: new Date(p.arrival_date * 1000),
+      createdAt: new Date(p.created * 1000),
+    }));
+  }
+
+  /**
    * Get the Stripe publishable key
    */
   getPublicKey(): string | null {

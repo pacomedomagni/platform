@@ -45,4 +45,20 @@ export class DashboardController {
     }
     return this.dashboardService.unpublishStore(tenantId);
   }
+
+  @Get('earnings')
+  async getEarnings(@Headers('x-tenant-id') tenantId: string) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID required');
+    }
+    return this.dashboardService.getEarnings(tenantId);
+  }
+
+  @Get('inventory-alerts')
+  async getInventoryAlerts(@Headers('x-tenant-id') tenantId: string) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID required');
+    }
+    return this.dashboardService.getInventoryAlerts(tenantId);
+  }
 }

@@ -1,9 +1,15 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { StripeConnectService } from '../../onboarding/stripe-connect.service';
 
 @Injectable()
 export class DashboardService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(DashboardService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly stripeConnectService: StripeConnectService,
+  ) {}
 
   async getDashboardStats(tenantId: string) {
     const now = new Date();
@@ -173,5 +179,92 @@ export class DashboardService {
     });
 
     return { success: true, storePublished: false };
+  }
+
+  /**
+   * Get merchant earnings: Stripe balance + recent payouts
+   */
+  async getEarnings(tenantId: string) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: {
+        stripeConnectAccountId: true,
+        paymentProvider: true,
+        paymentProviderStatus: true,
+        platformFeePercent: true,
+      },
+    });
+
+    if (!tenant?.stripeConnectAccountId || tenant.paymentProviderStatus !== 'active') {
+      return {
+        balance: null,
+        payouts: [],
+        platformFeePercent: Number(tenant?.platformFeePercent ?? 0),
+        message: 'Payment provider not connected or not active',
+      };
+    }
+
+    try {
+      const [balance, payouts] = await Promise.all([
+        this.stripeConnectService.getAccountBalance(tenant.stripeConnectAccountId),
+        this.stripeConnectService.getPayouts(tenant.stripeConnectAccountId, 10),
+      ]);
+
+      return {
+        balance,
+        payouts,
+        platformFeePercent: Number(tenant.platformFeePercent),
+      };
+    } catch (error) {
+      this.logger.error(`Failed to fetch earnings for tenant ${tenantId}:`, error);
+      return {
+        balance: null,
+        payouts: [],
+        platformFeePercent: Number(tenant.platformFeePercent),
+        message: 'Unable to retrieve earnings data. Please try again later.',
+      };
+    }
+  }
+
+  /**
+   * Get inventory alerts for dashboard
+   */
+  async getInventoryAlerts(tenantId: string) {
+    // Find products with low stock (available < 5)
+    const lowStockProducts = await this.prisma.$queryRaw<
+      Array<{ productId: string; displayName: string; availableQty: number }>
+    >`
+      SELECT
+        pl.id as "productId",
+        pl."displayName",
+        COALESCE(SUM(wib."actualQty" - wib."reservedQty"), 0)::int as "availableQty"
+      FROM product_listings pl
+      JOIN items i ON pl."itemId" = i.id
+      LEFT JOIN warehouse_item_balances wib ON wib."itemId" = i.id AND wib."tenantId" = ${tenantId}
+      WHERE pl."tenantId" = ${tenantId}
+        AND pl."isPublished" = true
+      GROUP BY pl.id, pl."displayName"
+      HAVING COALESCE(SUM(wib."actualQty" - wib."reservedQty"), 0) <= 5
+      ORDER BY COALESCE(SUM(wib."actualQty" - wib."reservedQty"), 0) ASC
+      LIMIT 20
+    `;
+
+    const outOfStock = lowStockProducts.filter(p => p.availableQty <= 0);
+    const lowStock = lowStockProducts.filter(p => p.availableQty > 0);
+
+    return {
+      outOfStockCount: outOfStock.length,
+      lowStockCount: lowStock.length,
+      outOfStock: outOfStock.map(p => ({
+        productId: p.productId,
+        name: p.displayName,
+        available: p.availableQty,
+      })),
+      lowStock: lowStock.map(p => ({
+        productId: p.productId,
+        name: p.displayName,
+        available: p.availableQty,
+      })),
+    };
   }
 }

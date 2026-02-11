@@ -8,6 +8,14 @@ export class ListOrdersDto {
   status?: string;
 
   @IsOptional()
+  @IsString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsString()
+  dateTo?: string;
+
+  @IsOptional()
   @IsNumber()
   @Type(() => Number)
   @Min(1)

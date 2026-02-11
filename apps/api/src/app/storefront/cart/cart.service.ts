@@ -203,7 +203,7 @@ export class CartService {
 
       if (finalQuantity > availableQty) {
         throw new BadRequestException(
-          `Only ${availableQty} items available in stock`
+          `Only ${availableQty} units of "${product.displayName}" available in stock`
         );
       }
 
@@ -321,7 +321,7 @@ export class CartService {
 
         if (dto.quantity > trueAvailable) {
           throw new BadRequestException(
-            `Only ${trueAvailable} items available in stock`
+            `Only ${trueAvailable} units of "${cartItem.product.displayName}" available in stock`
           );
         }
 
@@ -606,6 +606,8 @@ export class CartService {
       } else {
         // Merge items from anonymous cart using atomic upsert
         // Validate stock and refresh prices during merge
+        const mergeNotices: Array<{ productName: string; reason: string }> = [];
+
         for (const item of anonymousCart.items) {
           // Refresh current price from product listing
           const product = await tx.productListing.findFirst({
@@ -618,11 +620,24 @@ export class CartService {
           });
 
           if (!product || !product.isPublished) {
-            // Skip items that are no longer available
+            mergeNotices.push({
+              productName: product?.displayName || 'Unknown product',
+              reason: 'Product is no longer available',
+            });
             continue;
           }
 
           const currentPrice = product.price;
+          const oldPrice = Number(item.price);
+          const newPrice = Number(currentPrice);
+          if (Math.abs(oldPrice - newPrice) >= 0.01) {
+            mergeNotices.push({
+              productName: product.displayName,
+              reason: newPrice > oldPrice
+                ? `Price increased from $${oldPrice.toFixed(2)} to $${newPrice.toFixed(2)}`
+                : `Price decreased from $${oldPrice.toFixed(2)} to $${newPrice.toFixed(2)}`,
+            });
+          }
 
           // Check stock availability for merged quantity
           const existingCartItem = await tx.cartItem.findUnique({
@@ -643,7 +658,20 @@ export class CartService {
 
           // Cap quantity at available stock
           const cappedQty = Math.min(totalQty, Math.max(availableStock, 0));
-          if (cappedQty <= 0) continue;
+          if (cappedQty <= 0) {
+            mergeNotices.push({
+              productName: product.displayName,
+              reason: 'Out of stock',
+            });
+            continue;
+          }
+
+          if (cappedQty < totalQty) {
+            mergeNotices.push({
+              productName: product.displayName,
+              reason: `Quantity reduced to ${cappedQty} (limited stock)`,
+            });
+          }
 
           await tx.cartItem.upsert({
             where: {
@@ -672,8 +700,33 @@ export class CartService {
           where: { id: anonymousCart.id },
         });
 
+        // Revalidate coupon on merged cart (may have expired since added)
+        const mergedCart = await tx.cart.findUnique({ where: { id: customerCart.id } });
+        if (mergedCart?.couponCode) {
+          const coupon = await tx.coupon.findFirst({
+            where: { tenantId, code: mergedCart.couponCode },
+          });
+          const now = new Date();
+          const couponInvalid = !coupon || !coupon.isActive
+            || (coupon.expiresAt && new Date(coupon.expiresAt) < now)
+            || (coupon.usageLimit && coupon.timesUsed >= coupon.usageLimit);
+          if (couponInvalid) {
+            mergeNotices.push({
+              productName: '',
+              reason: `Coupon "${mergedCart.couponCode}" is no longer valid and was removed`,
+            });
+            await tx.cart.update({
+              where: { id: customerCart.id },
+              data: { couponCode: null, discountAmount: 0 },
+            });
+          }
+        }
+
         // Recalculate customer cart
         await this.recalculateCartInTx(tx, customerCart.id);
+
+        // Store merge notices for response
+        (customerCart as any)._mergeNotices = mergeNotices;
       }
 
       // Return updated cart
@@ -686,7 +739,11 @@ export class CartService {
         throw new NotFoundException('Cart not found');
       }
 
-      return this.mapCartToResponse(finalCart);
+      const response = this.mapCartToResponse(finalCart);
+      if ((customerCart as any)._mergeNotices?.length > 0) {
+        (response as any).mergeNotices = (customerCart as any)._mergeNotices;
+      }
+      return response;
     });
   }
 
@@ -1049,6 +1106,7 @@ export class CartService {
   };
 
   private mapCartToResponse(cart: CartWithRelations) {
+    const subtotal = Number(cart.subtotal);
     return {
       id: cart.id,
       customerId: cart.customerId,
@@ -1058,6 +1116,9 @@ export class CartService {
           (sum: number, b: WarehouseItemBalance) => sum + Number(b.actualQty) - Number(b.reservedQty),
           0
         );
+        const currentPrice = Number(item.product.price);
+        const cartPrice = Number(item.price);
+        const priceChanged = Math.abs(currentPrice - cartPrice) >= 0.01;
 
         return {
           id: item.id,
@@ -1065,7 +1126,7 @@ export class CartService {
             id: item.product.id,
             slug: item.product.slug,
             displayName: item.product.displayName,
-            price: Number(item.product.price),
+            price: currentPrice,
             compareAtPrice: item.product.compareAtPrice
               ? Number(item.product.compareAtPrice)
               : null,
@@ -1076,19 +1137,29 @@ export class CartService {
                 : availableQty <= 5
                 ? 'low_stock'
                 : 'in_stock',
+            availableQuantity: availableQty > 0 ? availableQty : 0,
           },
           quantity: item.quantity,
-          unitPrice: Number(item.price),
-          totalPrice: Number(item.price) * item.quantity,
+          unitPrice: cartPrice,
+          totalPrice: cartPrice * item.quantity,
+          ...(priceChanged && {
+            priceChanged: true,
+            currentUnitPrice: currentPrice,
+          }),
         };
       }),
       itemCount: cart.items.reduce((sum: number, item) => sum + item.quantity, 0),
-      subtotal: Number(cart.subtotal),
+      subtotal,
       shippingTotal: Number(cart.shippingTotal),
       taxTotal: Number(cart.taxTotal),
       discountAmount: Number(cart.discountAmount),
       grandTotal: Number(cart.grandTotal),
       couponCode: cart.couponCode,
+      // Help frontend show "Add $X more for free shipping!"
+      freeShippingThreshold: Number(cart.shippingTotal) > 0 ? FREE_SHIPPING_THRESHOLD : null,
+      freeShippingRemaining: Number(cart.shippingTotal) > 0
+        ? Math.max(0, FREE_SHIPPING_THRESHOLD - subtotal)
+        : null,
     };
   }
 }

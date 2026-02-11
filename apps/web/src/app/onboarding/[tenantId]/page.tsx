@@ -50,7 +50,7 @@ export default function OnboardingStatusPage() {
       }
 
       // Stop polling once provisioning is complete (user needs to click to continue)
-      if (data.provisioningStatus === 'READY') {
+      if (data.provisioningStatus === 'READY' || data.provisioningStatus === 'FAILED') {
         clearInterval(interval);
       }
     }, 2000);
@@ -63,7 +63,6 @@ export default function OnboardingStatusPage() {
     setError(null);
 
     try {
-      const token = localStorage.getItem('access_token');
       const token = localStorage.getItem('access_token');
       if (!token) {
         throw new Error('Please sign in again to continue payment setup.');
@@ -160,8 +159,23 @@ export default function OnboardingStatusPage() {
               </div>
               <h2 className="text-xl font-semibold">Setup Failed</h2>
               <p className="mt-2 text-sm text-slate-500">
-                Something went wrong during setup. Please try again or contact support.
+                {status.currentStep || 'Something went wrong while creating your store.'}
               </p>
+              <p className="mt-1 text-xs text-slate-400">
+                This is usually a temporary issue. Please try again.
+              </p>
+              <button
+                onClick={() => window.location.reload()}
+                className="mt-5 w-full rounded-lg bg-blue-600 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+              >
+                Retry Setup
+              </button>
+              <a
+                href="mailto:support@noslag.com"
+                className="mt-3 block text-sm text-slate-500 transition hover:text-slate-700"
+              >
+                Still having trouble? Contact support
+              </a>
             </div>
           )}
 
@@ -218,6 +232,9 @@ export default function OnboardingStatusPage() {
               >
                 Skip for now, I'll set this up later
               </button>
+              <p className="mt-1 text-xs text-slate-400">
+                Your store won't be able to accept payments until a payment provider is connected.
+              </p>
             </div>
           )}
         </div>

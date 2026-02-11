@@ -204,7 +204,19 @@ export default function Dashboard() {
     {
       label: 'Verify your email',
       done: data.checklist.emailVerified,
-      href: '#',
+      href: '/app/settings/account',
+      action: !data.checklist.emailVerified ? async () => {
+        try {
+          const token = localStorage.getItem('access_token');
+          await fetch('/api/v1/onboarding/resend-verification', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          alert('Verification email sent! Check your inbox.');
+        } catch {
+          alert('Failed to send verification email. Please try again.');
+        }
+      } : undefined,
     },
     {
       label: 'Connect payments',

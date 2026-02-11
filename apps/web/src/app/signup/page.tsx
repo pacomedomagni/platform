@@ -10,7 +10,13 @@ import Link from 'next/link';
 const signupSchema = z.object({
   businessName: z.string().min(2, 'Business name must be at least 2 characters').max(100),
   email: z.string().email('Invalid email address'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
+  password: z
+    .string()
+    .min(8, 'Password must be at least 8 characters')
+    .regex(
+      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/,
+      'Must contain at least one uppercase letter, one lowercase letter, and one number'
+    ),
   subdomain: z
     .string()
     .min(3, 'Subdomain must be at least 3 characters')
@@ -82,7 +88,7 @@ export default function SignupPage() {
   const canProceed = () => {
     if (currentStep === 0) {
       const { businessName, email, password, subdomain } = form.getValues();
-      return businessName.length >= 2 && email.includes('@') && password.length >= 8 && subdomain.length >= 3;
+      return businessName.length >= 2 && email.includes('@') && password.length >= 8 && /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(password) && subdomain.length >= 3;
     }
     return true;
   };
@@ -168,7 +174,7 @@ export default function SignupPage() {
                   type="password"
                   {...form.register('password')}
                   className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                  placeholder="8+ characters"
+                  placeholder="8+ chars, uppercase, lowercase, number"
                 />
                 {form.formState.errors.password && (
                   <p className="mt-1 text-xs text-red-600">{form.formState.errors.password.message}</p>
@@ -306,6 +312,14 @@ export default function SignupPage() {
               {error && (
                 <div className="rounded-lg border border-red-200 bg-red-50 p-4">
                   <p className="text-sm text-red-600">{error}</p>
+                  {(error.toLowerCase().includes('already registered') || error.toLowerCase().includes('already exists')) && (
+                    <p className="mt-2 text-sm text-red-600">
+                      Already have an account?{' '}
+                      <Link href="/login" className="font-medium underline">Sign in instead</Link>
+                      {' or '}
+                      <Link href="/forgot-password" className="font-medium underline">reset your password</Link>
+                    </p>
+                  )}
                 </div>
               )}
 

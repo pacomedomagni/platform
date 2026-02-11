@@ -143,6 +143,17 @@ export class ProductsService {
             },
           },
         },
+        variants: {
+          include: {
+            attributes: {
+              include: {
+                attributeType: true,
+                attributeValue: true,
+              },
+            },
+          },
+          orderBy: { createdAt: 'asc' },
+        },
       },
     });
 
@@ -175,6 +186,17 @@ export class ProductsService {
               select: { actualQty: true, reservedQty: true },
             },
           },
+        },
+        variants: {
+          include: {
+            attributes: {
+              include: {
+                attributeType: true,
+                attributeValue: true,
+              },
+            },
+          },
+          orderBy: { createdAt: 'asc' },
         },
       },
     });
@@ -704,6 +726,22 @@ export class ProductsService {
         stockUomCode: product.item.stockUomCode,
       },
       availableQuantity: totalQty,
+      averageRating: product.averageRating ? Number(product.averageRating) : null,
+      reviewCount: product.reviewCount,
+      variants: product.variants?.map((v: any) => ({
+        id: v.id,
+        sku: v.sku,
+        price: v.price ? Number(v.price) : null,
+        compareAtPrice: v.compareAtPrice ? Number(v.compareAtPrice) : null,
+        imageUrl: v.imageUrl,
+        stockQty: v.stockQty,
+        trackInventory: v.trackInventory,
+        allowBackorder: v.allowBackorder,
+        attributes: v.attributes?.map((a: any) => ({
+          type: a.attributeType?.displayName || a.attributeType?.name,
+          value: a.attributeValue?.displayValue || a.attributeValue?.value,
+        })),
+      })) || [],
     };
   }
 

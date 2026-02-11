@@ -232,6 +232,7 @@ export class CustomerAuthController {
    * POST /api/v1/store/auth/addresses
    */
   @Post('addresses')
+  @Throttle({ medium: { limit: 10, ttl: 60000 } })
   async addAddress(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('authorization') authHeader: string,
@@ -256,6 +257,7 @@ export class CustomerAuthController {
    * PUT /api/v1/store/auth/addresses/:id
    */
   @Put('addresses/:id')
+  @Throttle({ medium: { limit: 10, ttl: 60000 } })
   async updateAddress(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('authorization') authHeader: string,
@@ -286,6 +288,7 @@ export class CustomerAuthController {
    * DELETE /api/v1/store/auth/addresses/:id
    */
   @Delete('addresses/:id')
+  @Throttle({ medium: { limit: 10, ttl: 60000 } })
   async deleteAddress(
     @Headers('x-tenant-id') tenantId: string,
     @Headers('authorization') authHeader: string,

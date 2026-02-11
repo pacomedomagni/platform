@@ -5,6 +5,7 @@ import { SquarePaymentService } from '../../onboarding/square-payment.service';
 import { EmailService } from '@platform/email';
 import { StockMovementService } from '../../inventory-management/stock-movement.service';
 import { FailedOperationsService } from '../../workers/failed-operations.service';
+import { NotificationService, NotificationType } from '../../operations/notification.service';
 import { MovementType } from '../../inventory-management/inventory-management.dto';
 import { OperationType } from '@prisma/client';
 import Stripe from 'stripe';
@@ -19,6 +20,7 @@ export class PaymentsService {
     private readonly squarePaymentService: SquarePaymentService,
     private readonly stockMovementService: StockMovementService,
     private readonly failedOperationsService: FailedOperationsService,
+    private readonly notificationService: NotificationService,
     @Optional() @Inject(EmailService) private readonly emailService?: EmailService
   ) {}
 
@@ -182,6 +184,13 @@ export class PaymentsService {
 
     this.logger.log(`Payment succeeded for order: ${order.orderNumber}`);
 
+    // Notify merchant admins about new order
+    this.notificationService.notifyNewOrder(
+      { tenantId: order.tenantId },
+      order.orderNumber,
+      Number(order.grandTotal),
+    ).catch(err => this.logger.error(`Failed to notify merchant of new order ${order.orderNumber}: ${err.message}`));
+
     // CRITICAL: Process stock deduction and coupon tracking
     await this.processOrderFulfillment(order);
 
@@ -220,6 +229,19 @@ export class PaymentsService {
         errorMessage: error instanceof Error ? error.message : String(error),
         errorStack: error instanceof Error ? error.stack : undefined,
       });
+
+      // Notify merchant about stock deduction failure
+      this.notificationService.createForRole(
+        { tenantId: order.tenantId },
+        'admin',
+        {
+          type: NotificationType.SYSTEM_ALERT,
+          title: 'Stock Deduction Failed',
+          message: `Stock deduction failed for order #${order.orderNumber}. Automatic retry queued.`,
+          link: `/orders/${order.orderNumber}`,
+          priority: 'urgent',
+        },
+      ).catch(err => this.logger.error(`Failed to notify stock deduction failure: ${err.message}`));
 
       this.logger.warn(`Stock deduction queued for retry: order ${order.orderNumber}`);
     }
@@ -559,6 +581,19 @@ export class PaymentsService {
       this.logger.error(`Failed to release stock for failed payment on order ${order.orderNumber}:`, error);
     }
 
+    // Notify merchant admins about failed payment
+    this.notificationService.createForRole(
+      { tenantId: order.tenantId },
+      'admin',
+      {
+        type: NotificationType.PAYMENT_FAILED,
+        title: 'Payment Failed',
+        message: `Payment failed for order #${order.orderNumber}: ${lastError?.message || 'Unknown error'}`,
+        link: `/orders/${order.orderNumber}`,
+        priority: 'high',
+      },
+    ).catch(err => this.logger.error(`Failed to notify merchant of payment failure: ${err.message}`));
+
     this.logger.log(`Payment failed for order: ${order.orderNumber}`);
   }
 
@@ -787,6 +822,13 @@ export class PaymentsService {
     });
 
     if (fullOrder) {
+      // Notify merchant admins about new order (Square path)
+      this.notificationService.notifyNewOrder(
+        { tenantId },
+        fullOrder.orderNumber,
+        Number(fullOrder.grandTotal),
+      ).catch(err => this.logger.error(`Failed to notify merchant of new order: ${err.message}`));
+
       await this.processOrderFulfillment(fullOrder);
       this.sendOrderConfirmationEmailAsync(fullOrder.id);
     }

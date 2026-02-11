@@ -24,6 +24,7 @@ import { ThemesModule } from './themes/themes.module';
 import { InventoryManagementModule } from '../inventory-management/inventory-management.module';
 import { WorkersModule } from '../workers/workers.module';
 import { OnboardingModule } from '../onboarding/onboarding.module';
+import { OperationsModule } from '../operations/operations.module';
 import { UploadController } from './uploads/upload.controller';
 import { StoreSettingsController } from './settings/store-settings.controller';
 import { StoreSettingsService } from './settings/store-settings.service';
@@ -46,6 +47,7 @@ import { ShippingService } from './shipping/shipping.service';
     InventoryManagementModule,
     WorkersModule,
     OnboardingModule,
+    OperationsModule,
     EmailModule.forRoot({
       smtp: {
         host: process.env['SMTP_HOST'] || 'localhost',

@@ -602,6 +602,15 @@ export class ShippingService {
         where: { id: shipmentId },
         data: statusUpdate,
       });
+
+      // Auto-sync order status for key shipment transitions
+      if (dto.status.toLowerCase() === 'in_transit') {
+        await this.syncOrderStatusFromShipment(tenantId, shipment.orderId, 'SHIPPED', {
+          trackingNumber: shipment.trackingNumber,
+        });
+      } else if (dto.status.toLowerCase() === 'delivered') {
+        await this.syncOrderStatusFromShipment(tenantId, shipment.orderId, 'DELIVERED');
+      }
     }
 
     return event;
@@ -616,7 +625,7 @@ export class ShippingService {
       throw new NotFoundException('Shipment not found');
     }
 
-    return this.prisma.shipment.update({
+    const updatedShipment = await this.prisma.shipment.update({
       where: { id: shipmentId },
       data: {
         status: 'in_transit',
@@ -627,6 +636,14 @@ export class ShippingService {
         carrier: true,
       },
     });
+
+    // Auto-update order status to SHIPPED if not already
+    await this.syncOrderStatusFromShipment(tenantId, shipment.orderId, 'SHIPPED', {
+      carrier: updatedShipment.carrier?.name || updatedShipment.carrierName,
+      trackingNumber: updatedShipment.trackingNumber,
+    });
+
+    return updatedShipment;
   }
 
   async markAsDelivered(tenantId: string, shipmentId: string) {
@@ -638,12 +655,60 @@ export class ShippingService {
       throw new NotFoundException('Shipment not found');
     }
 
-    return this.prisma.shipment.update({
+    const updatedShipment = await this.prisma.shipment.update({
       where: { id: shipmentId },
       data: {
         status: 'delivered',
         actualDelivery: new Date(),
       },
     });
+
+    // Auto-update order status to DELIVERED if currently SHIPPED
+    await this.syncOrderStatusFromShipment(tenantId, shipment.orderId, 'DELIVERED');
+
+    return updatedShipment;
+  }
+
+  /**
+   * Sync order status when shipment status changes.
+   * Only transitions to a "forward" status (never backwards).
+   */
+  private async syncOrderStatusFromShipment(
+    tenantId: string,
+    orderId: string,
+    targetStatus: string,
+    trackingInfo?: { carrier?: string | null; trackingNumber?: string | null },
+  ) {
+    try {
+      const order = await this.prisma.order.findFirst({
+        where: { id: orderId, tenantId },
+      });
+      if (!order) return;
+
+      const statusOrder = ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'];
+      const currentIdx = statusOrder.indexOf(order.status);
+      const targetIdx = statusOrder.indexOf(targetStatus);
+
+      // Only advance forward, never backwards
+      if (targetIdx <= currentIdx) return;
+
+      const updateData: Record<string, any> = { status: targetStatus };
+      if (targetStatus === 'SHIPPED') {
+        updateData.shippedAt = new Date();
+        if (trackingInfo?.carrier) updateData.shippingCarrier = trackingInfo.carrier;
+        if (trackingInfo?.trackingNumber) updateData.trackingNumber = trackingInfo.trackingNumber;
+      } else if (targetStatus === 'DELIVERED') {
+        updateData.deliveredAt = new Date();
+      }
+
+      await this.prisma.order.update({
+        where: { id: orderId },
+        data: updateData,
+      });
+
+      this.logger.log(`Order ${order.orderNumber} auto-updated to ${targetStatus} from shipment`);
+    } catch (error) {
+      this.logger.error(`Failed to sync order status from shipment: ${error}`);
+    }
   }
 }
