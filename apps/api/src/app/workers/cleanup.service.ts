@@ -69,16 +69,15 @@ export class CleanupService {
 
             if (warehouse) {
               for (const item of cart.items) {
-                await tx.warehouseItemBalance.updateMany({
-                  where: {
-                    tenantId: cart.tenantId,
-                    itemId: item.product.item.id,
-                    warehouseId: warehouse.id,
-                  },
-                  data: {
-                    reservedQty: { decrement: item.quantity },
-                  },
-                });
+                // Safe decrement: only release if reservedQty >= quantity to prevent negative values
+                await tx.$executeRaw`
+                  UPDATE warehouse_item_balances
+                  SET "reservedQty" = "reservedQty" - ${item.quantity}
+                  WHERE "tenantId" = ${cart.tenantId}
+                    AND "itemId" = ${item.product.item.id}
+                    AND "warehouseId" = ${warehouse.id}
+                    AND "reservedQty" >= ${item.quantity}
+                `;
               }
             }
 

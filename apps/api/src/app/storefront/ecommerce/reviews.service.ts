@@ -54,7 +54,7 @@ export class ReviewsService {
     let orderBy: Prisma.ProductReviewOrderByWithRelationInput;
     switch (sortBy) {
       case 'helpful':
-        orderBy = { helpfulVotes: 'desc' };
+        orderBy = { helpfulCount: 'desc' };
         break;
       case 'highest':
         orderBy = { rating: 'desc' };

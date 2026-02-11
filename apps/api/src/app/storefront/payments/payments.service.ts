@@ -51,18 +51,20 @@ export class PaymentsService {
       throw new BadRequestException('Webhook signature verification failed');
     }
 
-    // PAY-8: Check for duplicate webhook event
-    const existingEvent = await this.prisma.processedWebhookEvent.findUnique({
-      where: { eventId: event.id },
-    });
-    if (existingEvent) {
+    // PAY-8: Atomic webhook deduplication using upsert to prevent race conditions
+    // If two webhook deliveries arrive simultaneously, only one will process
+    const dedupeResult = await this.prisma.$queryRaw<[{ already_processed: boolean }]>`
+      INSERT INTO processed_webhook_events (id, "eventId", "eventType", "processedAt")
+      VALUES (gen_random_uuid(), ${event.id}, ${event.type}, NOW())
+      ON CONFLICT ("eventId") DO NOTHING
+      RETURNING FALSE as already_processed
+    `;
+    
+    // If no rows returned, the event was already processed (conflict occurred)
+    if (!dedupeResult || dedupeResult.length === 0) {
       this.logger.log(`Duplicate webhook event skipped: ${event.id}`);
       return { received: true, duplicate: true };
     }
-    // Record event as processed before handling
-    await this.prisma.processedWebhookEvent.create({
-      data: { eventId: event.id, eventType: event.type },
-    });
 
     this.logger.log(`Processing webhook event: ${event.type}`);
 
@@ -357,7 +359,7 @@ export class PaymentsService {
       return;
     }
 
-    // Atomically increment usage and create tracking record
+    // Atomically increment usage, create tracking record, and audit log
     await this.prisma.$transaction([
       // Increment coupon usage counter
       this.prisma.coupon.update({
@@ -372,6 +374,22 @@ export class PaymentsService {
           customerId: order.customerId,
           orderId: order.id,
           usedAt: new Date(),
+        },
+      }),
+      // Audit log for coupon usage (Fix #13: compliance and debugging)
+      this.prisma.auditLog.create({
+        data: {
+          tenantId: order.tenantId,
+          userId: order.customerId,
+          action: 'COUPON_USED',
+          docType: 'Order',
+          docName: order.orderNumber,
+          meta: {
+            couponCode,
+            couponId: coupon.id,
+            discountAmount: Number(order.discountTotal),
+            orderId: order.id,
+          },
         },
       }),
     ]);

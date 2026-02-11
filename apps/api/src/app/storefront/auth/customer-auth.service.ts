@@ -240,15 +240,21 @@ export class CustomerAuthService implements OnModuleInit {
     const token = uuidv4();
     const expiresAt = new Date(Date.now() + RESET_TOKEN_EXPIRY);
 
-    // Create password reset record
-    await this.prisma.passwordReset.create({
-      data: {
-        tenantId,
-        customerId: customer.id,
-        token,
-        expiresAt,
-      },
-    });
+    // Invalidate any existing unused reset tokens for this customer, then create new one
+    await this.prisma.$transaction([
+      this.prisma.passwordReset.updateMany({
+        where: { customerId: customer.id, usedAt: null },
+        data: { usedAt: new Date() },
+      }),
+      this.prisma.passwordReset.create({
+        data: {
+          tenantId,
+          customerId: customer.id,
+          token,
+          expiresAt,
+        },
+      }),
+    ]);
 
     // Send password reset email
     this.sendPasswordResetEmail(customer.id, tenantId, token);

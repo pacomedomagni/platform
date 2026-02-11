@@ -38,6 +38,12 @@ export class CheckoutService {
         throw new NotFoundException('Cart not found');
       }
 
+      // Fix #11: Extend cart expiry to prevent cleanup job race during checkout
+      await tx.cart.update({
+        where: { id: dto.cartId },
+        data: { expiresAt: new Date(Date.now() + 30 * 60 * 1000) }, // 30 minutes
+      });
+
       // Get cart with items (now that we hold the lock)
       const cart = await tx.cart.findFirst({
         where: {
@@ -506,18 +512,21 @@ export class CheckoutService {
         },
       });
 
-      // PAY-10: Release stock reservations for each order item
+      // PAY-10: Release stock reservations for each order item with advisory locks
       for (const item of order.items) {
         if (item.product?.item?.id) {
-          await tx.warehouseItemBalance.updateMany({
-            where: {
-              tenantId,
-              itemId: item.product.item.id,
-            },
-            data: {
-              reservedQty: { decrement: item.quantity },
-            },
-          });
+          // Acquire advisory lock to prevent concurrent stock modifications
+          const itemKey = `${tenantId}:${item.product.item.id}`;
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${itemKey}))`;
+
+          // Safe decrement: only release if reservedQty >= quantity to prevent negative values
+          await tx.$executeRaw`
+            UPDATE warehouse_item_balances
+            SET "reservedQty" = "reservedQty" - ${item.quantity}
+            WHERE "tenantId" = ${tenantId}
+              AND "itemId" = ${item.product.item.id}
+              AND "reservedQty" >= ${item.quantity}
+          `;
         }
       }
 

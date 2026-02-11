@@ -49,6 +49,11 @@ export class CartController {
     customerId?: string,
     sessionToken?: string
   ): Promise<void> {
+    // Must have at least one identifier to verify ownership
+    if (!customerId && !sessionToken) {
+      throw new ForbiddenException('Authentication or session token required');
+    }
+
     const cart = await this.cartService.getCart(tenantId, cartId);
 
     // Cart must belong to either the authenticated customer OR the session

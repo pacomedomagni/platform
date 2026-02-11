@@ -721,6 +721,7 @@ export class CartService {
   /**
    * Release stock reservation for a cart item
    * Decrements reservedQty in warehouse balances
+   * Uses safe decrement to prevent negative values
    */
   private async releaseReservation(
     tx: Prisma.TransactionClient,
@@ -740,17 +741,15 @@ export class CartService {
       return; // Silently skip if no warehouse
     }
 
-    // Atomically decrement reservedQty
-    await tx.warehouseItemBalance.updateMany({
-      where: {
-        tenantId,
-        itemId,
-        warehouseId: warehouse.id,
-      },
-      data: {
-        reservedQty: { decrement: quantity },
-      },
-    });
+    // Safe decrement: only release if reservedQty >= quantity to prevent negative values
+    await tx.$executeRaw`
+      UPDATE warehouse_item_balances
+      SET "reservedQty" = "reservedQty" - ${quantity}
+      WHERE "tenantId" = ${tenantId}
+        AND "itemId" = ${itemId}
+        AND "warehouseId" = ${warehouse.id}
+        AND "reservedQty" >= ${quantity}
+    `;
   }
 
   /**

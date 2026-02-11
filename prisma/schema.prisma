@@ -1227,6 +1227,7 @@ model StoreCustomer {
 
   @@unique([tenantId, email])
   @@index([tenantId, isActive])
+  @@index([id, tokenVersion]) // For fast token validation lookups
   @@map("store_customers")
 }
 
