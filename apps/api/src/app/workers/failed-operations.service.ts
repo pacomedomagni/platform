@@ -212,6 +212,18 @@ export class FailedOperationsService {
     const payload = operation.payload as any;
     const { orderId, items, warehouseId } = payload;
 
+    // Idempotency: check if stock posting already exists for this order
+    const existingPosting = await this.prisma.stockPosting.findFirst({
+      where: {
+        tenantId: operation.tenantId,
+        voucherNo: { contains: payload.orderNumber },
+      },
+    });
+    if (existingPosting) {
+      this.logger.log(`Stock deduction already exists for order ${payload.orderNumber}, skipping retry`);
+      return;
+    }
+
     // Import StockMovementService dynamically to avoid circular dependency
     const { StockMovementService } = await import(
       '../inventory-management/stock-movement.service'

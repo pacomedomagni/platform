@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card } from '@platform/ui';
 import { DollarSign, ShoppingCart, Package, Activity, CheckCircle, Circle, ArrowRight, ExternalLink, Loader2, Rocket, X, Mail, FileText, Globe } from 'lucide-react';
 import Link from 'next/link';
@@ -67,6 +68,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function Dashboard() {
+  const router = useRouter();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -93,6 +95,12 @@ export default function Dashboard() {
           },
         });
 
+        if (res.status === 401) {
+          localStorage.removeItem('access_token');
+          localStorage.removeItem('tenantId');
+          router.push('/login');
+          return;
+        }
         if (!res.ok) throw new Error('Failed to load dashboard');
         const json = await res.json();
         setData(json);

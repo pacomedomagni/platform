@@ -433,6 +433,7 @@ export class CustomerAuthService implements OnModuleInit {
       const payload = jwt.verify(token, EFFECTIVE_JWT_SECRET, {
         issuer: 'storefront',
         audience: 'storefront',
+        algorithms: ['HS256'],
       }) as {
         customerId: string;
         tenantId: string;
@@ -440,13 +441,15 @@ export class CustomerAuthService implements OnModuleInit {
       };
 
       // Verify token version hasn't been revoked (AUTH-9)
-      if (payload.tokenVersion !== undefined) {
-        const customer = await this.prisma.storeCustomer.findUnique({
-          where: { id: payload.customerId },
-          select: { tokenVersion: true },
-        });
+      // Always check - tokens without version are from before versioning and should be revoked
+      const customer = await this.prisma.storeCustomer.findUnique({
+        where: { id: payload.customerId },
+        select: { tokenVersion: true },
+      });
 
-        if (customer && customer.tokenVersion !== payload.tokenVersion) {
+      if (customer) {
+        const tokenVer = payload.tokenVersion ?? 0;
+        if (customer.tokenVersion !== null && customer.tokenVersion !== tokenVer) {
           throw new UnauthorizedException('Token has been revoked');
         }
       }

@@ -1112,10 +1112,12 @@ export class CartService {
       customerId: cart.customerId,
       sessionToken: cart.sessionToken,
       items: cart.items.map((item) => {
-        const availableQty = item.product.item!.warehouseItemBalances.reduce(
-          (sum: number, b: WarehouseItemBalance) => sum + Number(b.actualQty) - Number(b.reservedQty),
-          0
-        );
+        const availableQty = item.product?.item?.warehouseItemBalances
+          ? item.product.item.warehouseItemBalances.reduce(
+              (sum: number, b: WarehouseItemBalance) => sum + Number(b.actualQty) - Number(b.reservedQty),
+              0
+            )
+          : 0;
         const currentPrice = Number(item.product.price);
         const cartPrice = Number(item.price);
         const priceChanged = Math.abs(currentPrice - cartPrice) >= 0.01;

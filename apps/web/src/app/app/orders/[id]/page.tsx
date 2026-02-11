@@ -76,6 +76,16 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
   const updateStatus = async (newStatus: string) => {
     if (!order) return;
 
+    // Confirm destructive/irreversible actions
+    const confirmMessage = newStatus === 'SHIPPED'
+      ? 'Mark this order as shipped? The customer will be notified.'
+      : newStatus === 'DELIVERED'
+      ? 'Mark this order as delivered?'
+      : newStatus === 'CANCELLED'
+      ? 'Cancel this order? This action cannot be easily reversed.'
+      : null;
+    if (confirmMessage && !window.confirm(confirmMessage)) return;
+
     try {
       const body: any = { status: newStatus };
 
@@ -104,6 +114,19 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
       await loadOrder();
     } catch (error: any) {
       throw new Error(error.response?.data?.message || 'Failed to process refund');
+    }
+  };
+
+  const handleSaveNotes = async () => {
+    if (!order) return;
+    try {
+      await api.put(`/v1/store/admin/orders/${order.id}/status`, {
+        status: order.status,
+        adminNotes,
+      });
+      alert('Notes saved');
+    } catch {
+      alert('Failed to save notes');
     }
   };
 
@@ -308,7 +331,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
               onChange={(e) => setAdminNotes(e.target.value)}
               rows={4}
             />
-            <Button size="sm" className="mt-3">Save Notes</Button>
+            <Button size="sm" className="mt-3" onClick={handleSaveNotes}>Save Notes</Button>
           </Card>
         </div>
 

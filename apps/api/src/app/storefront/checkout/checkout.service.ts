@@ -100,6 +100,11 @@ export class CheckoutService {
         throw new BadRequestException('Cart is empty');
       }
 
+      // Validate order total is positive
+      if (Number(cart.grandTotal) <= 0) {
+        throw new BadRequestException('Order total must be greater than $0');
+      }
+
       // Re-validate coupon at checkout time (may have expired or hit limit since added to cart)
       if (cart.couponCode) {
         const coupon = await tx.coupon.findFirst({
@@ -227,7 +232,7 @@ export class CheckoutService {
               sku: item.product.item.code,
               name: item.product.displayName,
               description: item.product.shortDescription,
-              imageUrl: item.product.images[0] || null,
+              imageUrl: item.product.images?.[0] || null,
               quantity: item.quantity,
               unitPrice: item.price,
               totalPrice: Number(item.price) * item.quantity,

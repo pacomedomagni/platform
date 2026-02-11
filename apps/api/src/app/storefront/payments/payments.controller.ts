@@ -7,6 +7,7 @@ import {
   Headers,
   Req,
   BadRequestException,
+  UnauthorizedException,
   RawBodyRequest,
   UseGuards,
 } from '@nestjs/common';
@@ -15,6 +16,7 @@ import { PaymentsService } from './payments.service';
 import { CreateRefundDto } from './dto';
 import { StoreAdminGuard } from '@platform/auth';
 import { SquarePaymentService } from '../../onboarding/square-payment.service';
+import { CustomerAuthService } from '../auth/customer-auth.service';
 import { IsString, IsNumber, IsOptional } from 'class-validator';
 
 class SquarePaymentDto {
@@ -34,6 +36,7 @@ export class PaymentsController {
   constructor(
     private readonly paymentsService: PaymentsService,
     private readonly squarePaymentService: SquarePaymentService,
+    private readonly authService: CustomerAuthService,
   ) {}
 
   /**
@@ -76,7 +79,16 @@ export class PaymentsController {
     if (!authHeader) {
       throw new BadRequestException('Authentication required');
     }
-    return this.paymentsService.getOrderPayments(tenantId, orderId);
+    // Verify order ownership to prevent IDOR
+    const [type, token] = (authHeader || '').split(' ');
+    if (type !== 'Bearer' || !token) {
+      throw new UnauthorizedException('Invalid authorization header');
+    }
+    const payload = await this.authService.verifyToken(token);
+    if (payload.tenantId !== tenantId) {
+      throw new UnauthorizedException('Invalid token');
+    }
+    return this.paymentsService.getOrderPayments(tenantId, orderId, payload.customerId);
   }
 
   /**

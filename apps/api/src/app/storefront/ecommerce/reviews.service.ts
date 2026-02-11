@@ -218,19 +218,28 @@ export class ReviewsService {
     if (existingVote) {
       // Update existing vote if different
       if (existingVote.isHelpful !== dto.isHelpful) {
-        await this.prisma.$transaction([
-          this.prisma.reviewVote.update({
+        await this.prisma.$transaction(async (tx) => {
+          await tx.reviewVote.update({
             where: { id: existingVote.id },
             data: { isHelpful: dto.isHelpful },
-          }),
-          this.prisma.productReview.update({
-            where: { id: reviewId },
-            data: {
-              helpfulCount: { increment: dto.isHelpful ? 1 : -1 },
-              notHelpfulCount: { increment: dto.isHelpful ? -1 : 1 },
-            },
-          }),
-        ]);
+          });
+          // Use raw SQL with GREATEST to prevent negative counts
+          if (dto.isHelpful) {
+            await tx.$executeRaw`
+              UPDATE product_reviews
+              SET "helpfulCount" = "helpfulCount" + 1,
+                  "notHelpfulCount" = GREATEST("notHelpfulCount" - 1, 0)
+              WHERE id = ${reviewId}
+            `;
+          } else {
+            await tx.$executeRaw`
+              UPDATE product_reviews
+              SET "helpfulCount" = GREATEST("helpfulCount" - 1, 0),
+                  "notHelpfulCount" = "notHelpfulCount" + 1
+              WHERE id = ${reviewId}
+            `;
+          }
+        });
       }
     } else {
       // Create new vote

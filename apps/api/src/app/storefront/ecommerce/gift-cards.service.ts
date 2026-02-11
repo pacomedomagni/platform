@@ -291,6 +291,12 @@ export class GiftCardsService {
       throw new BadRequestException('Resulting balance cannot be negative');
     }
 
+    // Prevent balance from exceeding 2x the initial value to avoid abuse
+    const maxBalance = Number(giftCard.initialValue) * 2;
+    if (newBalance > maxBalance) {
+      throw new BadRequestException(`Balance cannot exceed ${maxBalance.toFixed(2)}`);
+    }
+
     const [transaction, updated] = await this.prisma.$transaction([
       this.prisma.giftCardTransaction.create({
         data: {

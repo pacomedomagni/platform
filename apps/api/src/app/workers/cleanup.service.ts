@@ -58,6 +58,15 @@ export class CleanupService {
       for (const cart of expiredCarts) {
         try {
           await this.prisma.$transaction(async (tx) => {
+            // Re-check expiry inside transaction to prevent race with concurrent checkout
+            const freshCart = await tx.cart.findUnique({
+              where: { id: cart.id },
+              select: { status: true, expiresAt: true },
+            });
+            if (!freshCart || freshCart.status !== 'active' || !freshCart.expiresAt || freshCart.expiresAt > now) {
+              return; // Cart was extended by concurrent checkout or already processed
+            }
+
             // Release stock reservations for all items
             const warehouse = await tx.warehouse.findFirst({
               where: {

@@ -122,6 +122,12 @@ export class PaymentsService {
       return;
     }
 
+    // Idempotency: skip if order already fulfilled (prevents double stock deduction on webhook retry)
+    if (order.paymentStatus === 'CAPTURED' || order.status === 'CONFIRMED') {
+      this.logger.log(`Order ${order.orderNumber} already fulfilled, skipping duplicate webhook`);
+      return;
+    }
+
     // PAY-6: Verify payment amount matches order total
     const expectedAmountCents = Math.round(Number(order.grandTotal) * 100);
     if (Math.abs(paymentIntent.amount - expectedAmountCents) > 1) {
@@ -527,6 +533,12 @@ export class PaymentsService {
       return;
     }
 
+    // Don't overwrite CAPTURED/CONFIRMED if payment_failed arrives after payment_succeeded
+    if (order.paymentStatus === 'CAPTURED' || order.status === 'CONFIRMED') {
+      this.logger.warn(`Ignoring payment_failed for already-captured order ${order.orderNumber}`);
+      return;
+    }
+
     const lastError = paymentIntent.last_payment_error;
 
     // Update order and create payment record
@@ -619,6 +631,12 @@ export class PaymentsService {
       return;
     }
 
+    // Only process refund if payment was actually captured
+    if (!['CAPTURED', 'PARTIALLY_REFUNDED'].includes(order.paymentStatus)) {
+      this.logger.warn(`Ignoring refund webhook for order ${order.orderNumber} with paymentStatus=${order.paymentStatus}`);
+      return;
+    }
+
     const refundAmount = (charge.amount_refunded || 0) / 100;
     const isFullRefund = charge.refunded;
 
@@ -708,7 +726,17 @@ export class PaymentsService {
   /**
    * Get payments for an order
    */
-  async getOrderPayments(tenantId: string, orderId: string) {
+  async getOrderPayments(tenantId: string, orderId: string, customerId?: string) {
+    // Verify order ownership when customerId is provided
+    if (customerId) {
+      const order = await this.prisma.order.findFirst({
+        where: { id: orderId, tenantId, customerId },
+      });
+      if (!order) {
+        throw new NotFoundException('Order not found');
+      }
+    }
+
     const payments = await this.prisma.payment.findMany({
       where: {
         tenantId,

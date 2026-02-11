@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { IsOptional, IsString, IsNumber, Min, Max } from 'class-validator';
+import { IsOptional, IsString, IsNumber, IsDateString, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class ListOrdersDto {
@@ -8,11 +8,11 @@ export class ListOrdersDto {
   status?: string;
 
   @IsOptional()
-  @IsString()
+  @IsDateString()
   dateFrom?: string;
 
   @IsOptional()
-  @IsString()
+  @IsDateString()
   dateTo?: string;
 
   @IsOptional()
