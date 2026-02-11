@@ -36,7 +36,7 @@ export function CTASection() {
             className="mt-10 flex flex-col gap-4 sm:flex-row sm:justify-center"
           >
             <ButtonLink
-              href="/storefront/account/register"
+              href="/signup"
               className="group bg-white px-8 py-6 text-base font-semibold text-slate-900 shadow-xl hover:bg-slate-50"
             >
               Start Free Trial

@@ -22,10 +22,12 @@ import {
   Palette,
   Globe,
   Wrench,
+  Banknote,
 } from 'lucide-react';
 
 const PRIMARY_NAV = [
   { label: 'Dashboard', icon: LayoutDashboard, href: '/app', isActive: true },
+  { label: 'Earnings', icon: Banknote, href: '/app/earnings' },
   { label: 'Getting Started', icon: Rocket, href: '/app/getting-started' },
   { label: 'Products', icon: Package, href: '/app/products', section: 'Store' },
   { label: 'Orders', icon: ShoppingCart, href: '/app/orders', section: 'Store' },

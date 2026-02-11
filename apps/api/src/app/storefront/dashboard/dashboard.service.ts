@@ -100,7 +100,8 @@ export class DashboardService {
       storePublished: tenant?.storePublished ?? false,
     };
 
-    return {
+    // Build base result object
+    const result = {
       totalRevenue,
       totalOrders: orderCount,
       totalProducts: productCount,
@@ -111,13 +112,48 @@ export class DashboardService {
       recentOrders: recentOrders.map((o) => ({
         id: o.id,
         orderNumber: o.orderNumber,
-        email: o.email,
-        grandTotal: Number(o.grandTotal),
+        customerEmail: o.email,
+        amount: Number(o.grandTotal),
         status: o.status,
         createdAt: o.createdAt,
       })),
       checklist,
+      availableBalance: null as number | null,
+      pendingBalance: null as number | null,
+      nextPayoutAmount: null as number | null,
+      nextPayoutDate: null as string | null,
     };
+
+    // Add earnings data if payment provider is connected
+    if (tenant?.paymentProviderStatus === 'active') {
+      try {
+        const earningsData = await this.getEarnings(tenantId);
+        if (earningsData.balance) {
+          result.availableBalance = earningsData.balance.available?.reduce(
+            (sum: number, b: { amount: number }) => sum + b.amount,
+            0,
+          ) ?? 0;
+          result.pendingBalance = earningsData.balance.pending?.reduce(
+            (sum: number, b: { amount: number }) => sum + b.amount,
+            0,
+          ) ?? 0;
+
+          // Find next payout
+          const nextPayout = earningsData.payouts?.find(
+            (p: { status: string }) => p.status === 'pending' || p.status === 'in_transit',
+          );
+
+          if (nextPayout) {
+            result.nextPayoutAmount = nextPayout.amount;
+            result.nextPayoutDate = nextPayout.arrivalDate;
+          }
+        }
+      } catch (error) {
+        this.logger.warn(`Failed to fetch earnings for dashboard widget: ${error}`);
+      }
+    }
+
+    return result;
   }
 
   async getStoreReadiness(tenantId: string) {
@@ -150,13 +186,19 @@ export class DashboardService {
           Number(tenant.defaultShippingRate) !== 9.99),
     };
 
-    const ready = checks.paymentsConnected && checks.hasProducts && checks.hasLegalPages;
+    const ready = checks.emailVerified && checks.paymentsConnected && checks.hasProducts && checks.hasLegalPages;
 
     return { ready, checks, storePublished: tenant?.storePublished ?? false };
   }
 
   async publishStore(tenantId: string) {
     const readiness = await this.getStoreReadiness(tenantId);
+
+    if (!readiness.checks.emailVerified) {
+      throw new BadRequestException(
+        'Please verify your email address before publishing your store.',
+      );
+    }
 
     if (!readiness.ready) {
       throw new BadRequestException(

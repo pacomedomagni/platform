@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, Skeleton, toast } from '@platform/ui';
-import { DollarSign, ShoppingCart, Package, Activity, CheckCircle, Circle, ArrowRight, ExternalLink, Loader2, Rocket, X, Mail, FileText, Globe, Plus, CreditCard, Sparkles } from 'lucide-react';
+import { DollarSign, ShoppingCart, Package, Activity, CheckCircle, Circle, ArrowRight, ExternalLink, Loader2, Rocket, X, Mail, FileText, Globe, Plus, CreditCard, Sparkles, Banknote, AlertTriangle, TrendingUp } from 'lucide-react';
 import Link from 'next/link';
 
 interface DashboardData {
@@ -15,6 +15,10 @@ interface DashboardData {
   storeUrl: string | null;
   storePublished: boolean;
   storePublishedAt: string | null;
+  availableBalance?: number;
+  pendingBalance?: number;
+  nextPayoutAmount?: number;
+  nextPayoutDate?: string;
   checklist: {
     emailVerified: boolean;
     paymentsConnected: boolean;
@@ -311,6 +315,38 @@ export default function Dashboard() {
         <p className="mt-1 text-slate-500">Welcome back. Here&apos;s how your store is doing.</p>
       </div>
 
+      {/* Email Verification Banner - Always show until verified */}
+      {!data.checklist.emailVerified && (
+        <div className="flex items-center gap-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100">
+            <AlertTriangle className="h-5 w-5 text-amber-600" />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-semibold text-amber-800">Verify your email address</h3>
+            <p className="text-sm text-amber-700">
+              Check your inbox for a verification link. You won&apos;t be able to publish your store until verified.
+            </p>
+          </div>
+          <button
+            onClick={async () => {
+              try {
+                const token = localStorage.getItem('access_token');
+                await fetch('/api/v1/onboarding/resend-verification', {
+                  method: 'POST',
+                  headers: { Authorization: `Bearer ${token}` },
+                });
+                toast({ title: 'Email sent', description: 'Verification email sent! Check your inbox.', variant: 'success' });
+              } catch {
+                toast({ title: 'Failed', description: 'Could not send email. Try again later.', variant: 'destructive' });
+              }
+            }}
+            className="shrink-0 rounded-lg border border-amber-300 bg-white px-4 py-2 text-sm font-semibold text-amber-700 transition hover:bg-amber-50"
+          >
+            Resend Email
+          </button>
+        </div>
+      )}
+
       {/* Getting Started Banner */}
       {!setupBannerDismissed && (
         <div className="relative overflow-hidden rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-white">
@@ -369,6 +405,48 @@ export default function Dashboard() {
           );
         })}
       </div>
+
+      {/* Earnings Quick View */}
+      {data.checklist.paymentsConnected && (
+        <Card className="overflow-hidden border-emerald-200 bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-teal-950/30">
+          <div className="p-6">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-4">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-100 dark:bg-emerald-900/40">
+                  <Banknote className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-emerald-700 dark:text-emerald-300">Your Earnings</p>
+                  <p className="text-2xl font-bold text-emerald-900 dark:text-emerald-100">
+                    {formatCurrency((data.availableBalance ?? 0) + (data.pendingBalance ?? 0))}
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-6">
+                <div className="text-center">
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400">Available</p>
+                  <p className="text-lg font-semibold text-emerald-800 dark:text-emerald-200">
+                    {formatCurrency(data.availableBalance ?? 0)}
+                  </p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400">Pending</p>
+                  <p className="text-lg font-semibold text-emerald-800 dark:text-emerald-200">
+                    {formatCurrency(data.pendingBalance ?? 0)}
+                  </p>
+                </div>
+                <Link
+                  href="/app/earnings"
+                  className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700"
+                >
+                  View Earnings
+                  <TrendingUp className="h-4 w-4" />
+                </Link>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* New Merchant Getting Started Empty State */}
       {data.totalRevenue === 0 && data.totalOrders === 0 && data.totalProducts === 0 && (

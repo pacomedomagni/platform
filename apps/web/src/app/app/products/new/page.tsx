@@ -3,12 +3,53 @@
 import { useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Upload, X, Loader2, Image as ImageIcon } from 'lucide-react';
+import { ArrowLeft, Upload, X, Loader2, Image as ImageIcon, Sparkles, Package, Shirt, Coffee, Gift } from 'lucide-react';
 import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
+
+// Product templates for quick start
+const PRODUCT_TEMPLATES = [
+  {
+    id: 'clothing',
+    name: 'Clothing Item',
+    icon: Shirt,
+    displayName: 'Classic T-Shirt',
+    price: '29.99',
+    description: 'Premium quality cotton t-shirt. Comfortable fit for everyday wear. Available in multiple sizes.',
+    category: 'Apparel',
+  },
+  {
+    id: 'beverage',
+    name: 'Beverage',
+    icon: Coffee,
+    displayName: 'Artisan Coffee Blend',
+    price: '18.99',
+    description: 'Hand-roasted specialty coffee beans. Rich flavor with notes of chocolate and caramel. 12oz bag.',
+    category: 'Food & Beverage',
+  },
+  {
+    id: 'gift',
+    name: 'Gift Set',
+    icon: Gift,
+    displayName: 'Premium Gift Box',
+    price: '49.99',
+    description: 'Beautifully curated gift set. Perfect for any occasion. Includes premium packaging.',
+    category: 'Gifts',
+  },
+  {
+    id: 'general',
+    name: 'General Product',
+    icon: Package,
+    displayName: '',
+    price: '',
+    description: '',
+    category: '',
+  },
+];
 
 export default function NewProductPage() {
   const router = useRouter();
 
+  const [showTemplates, setShowTemplates] = useState(true);
   const [displayName, setDisplayName] = useState('');
   const [price, setPrice] = useState('');
   const [compareAtPrice, setCompareAtPrice] = useState('');
@@ -24,6 +65,15 @@ export default function NewProductPage() {
   const [error, setError] = useState<string | null>(null);
 
   useUnsavedChanges(isDirty);
+
+  const applyTemplate = (template: typeof PRODUCT_TEMPLATES[0]) => {
+    if (template.displayName) setDisplayName(template.displayName);
+    if (template.price) setPrice(template.price);
+    if (template.description) setDescription(template.description);
+    if (template.category) setCategory(template.category);
+    setShowTemplates(false);
+    if (template.displayName) setIsDirty(true);
+  };
 
   const getHeaders = useCallback(() => {
     const token = localStorage.getItem('access_token');
@@ -158,6 +208,42 @@ export default function NewProductPage() {
             Create a new product for your store.
           </p>
         </div>
+
+        {/* Product Templates */}
+        {showTemplates && !isDirty && (
+          <div className="rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50 p-6 dark:border-blue-800 dark:from-blue-950/30 dark:to-indigo-950/30">
+            <div className="flex items-center gap-2 text-blue-700 dark:text-blue-400">
+              <Sparkles className="h-5 w-5" />
+              <h3 className="font-semibold">Quick Start with Templates</h3>
+            </div>
+            <p className="mt-1 text-sm text-blue-600 dark:text-blue-400">
+              Choose a template to pre-fill common fields, or start from scratch.
+            </p>
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {PRODUCT_TEMPLATES.map((template) => {
+                const Icon = template.icon;
+                return (
+                  <button
+                    key={template.id}
+                    onClick={() => applyTemplate(template)}
+                    className="flex flex-col items-center gap-2 rounded-xl border border-blue-200 bg-white p-4 transition hover:border-blue-400 hover:shadow-md dark:border-blue-700 dark:bg-slate-800 dark:hover:border-blue-500"
+                  >
+                    <Icon className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+                    <span className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                      {template.name}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <button
+              onClick={() => setShowTemplates(false)}
+              className="mt-3 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400"
+            >
+              Skip templates →
+            </button>
+          </div>
+        )}
 
         {/* Error */}
         {error && (

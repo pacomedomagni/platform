@@ -68,7 +68,7 @@ export function HeroSection() {
               className="mt-8 flex flex-col gap-4 sm:flex-row sm:items-center"
             >
               <ButtonLink
-                href="/storefront/account/register"
+                href="/signup"
                 className="bg-gradient-to-r from-blue-600 to-purple-600 px-8 py-6 text-base font-semibold text-white shadow-xl shadow-blue-900/50 hover:shadow-2xl hover:shadow-blue-900/60"
               >
                 Start Free Trial
