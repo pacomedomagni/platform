@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Upload, X, Loader2, Save } from 'lucide-react';
+import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
 
 interface Product {
   id: string;
@@ -33,11 +34,15 @@ export default function EditProductPage() {
   const [isFeatured, setIsFeatured] = useState(false);
   const [isPublished, setIsPublished] = useState(false);
 
+  const [isDirty, setIsDirty] = useState(false);
+
   const [images, setImages] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+
+  useUnsavedChanges(isDirty);
 
   const getHeaders = useCallback(() => {
     const token = localStorage.getItem('access_token');
@@ -114,6 +119,7 @@ export default function EditProductPage() {
 
         const data = await res.json();
         setImages((prev) => [...prev, data.url]);
+        setIsDirty(true);
       } catch (err: any) {
         console.error('Upload failed:', err);
         setError(err.message || 'Image upload failed');
@@ -126,6 +132,7 @@ export default function EditProductPage() {
 
   const removeImage = (index: number) => {
     setImages((prev) => prev.filter((_, i) => i !== index));
+    setIsDirty(true);
   };
 
   const handleSubmit = async () => {
@@ -182,6 +189,7 @@ export default function EditProductPage() {
         throw new Error(errData?.message || 'Failed to update product');
       }
 
+      setIsDirty(false);
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err: any) {
@@ -256,7 +264,7 @@ export default function EditProductPage() {
                   id="displayName"
                   type="text"
                   value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
+                  onChange={(e) => { setDisplayName(e.target.value); setIsDirty(true); }}
                   placeholder="e.g. Organic Cotton T-Shirt"
                   className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
                   required
@@ -274,7 +282,7 @@ export default function EditProductPage() {
                   id="slug"
                   type="text"
                   value={slug}
-                  onChange={(e) => setSlug(e.target.value)}
+                  onChange={(e) => { setSlug(e.target.value); setIsDirty(true); }}
                   placeholder="organic-cotton-t-shirt"
                   className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
                 />
@@ -293,7 +301,7 @@ export default function EditProductPage() {
                 <textarea
                   id="description"
                   value={description}
-                  onChange={(e) => setDescription(e.target.value)}
+                  onChange={(e) => { setDescription(e.target.value); setIsDirty(true); }}
                   placeholder="Brief description of this product..."
                   rows={4}
                   className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
@@ -311,7 +319,7 @@ export default function EditProductPage() {
                   id="category"
                   type="text"
                   value={category}
-                  onChange={(e) => setCategory(e.target.value)}
+                  onChange={(e) => { setCategory(e.target.value); setIsDirty(true); }}
                   placeholder="e.g. Apparel, Electronics"
                   className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
                 />
@@ -342,7 +350,7 @@ export default function EditProductPage() {
                     step="0.01"
                     min="0"
                     value={price}
-                    onChange={(e) => setPrice(e.target.value)}
+                    onChange={(e) => { setPrice(e.target.value); setIsDirty(true); }}
                     placeholder="0.00"
                     className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-8 pr-3.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
                     required
@@ -367,7 +375,7 @@ export default function EditProductPage() {
                     step="0.01"
                     min="0"
                     value={compareAtPrice}
-                    onChange={(e) => setCompareAtPrice(e.target.value)}
+                    onChange={(e) => { setCompareAtPrice(e.target.value); setIsDirty(true); }}
                     placeholder="0.00"
                     className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-8 pr-3.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
                   />
@@ -458,7 +466,7 @@ export default function EditProductPage() {
                 <input
                   type="checkbox"
                   checked={isPublished}
-                  onChange={(e) => setIsPublished(e.target.checked)}
+                  onChange={(e) => { setIsPublished(e.target.checked); setIsDirty(true); }}
                   className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                 />
                 <div>
@@ -475,7 +483,7 @@ export default function EditProductPage() {
                 <input
                   type="checkbox"
                   checked={isFeatured}
-                  onChange={(e) => setIsFeatured(e.target.checked)}
+                  onChange={(e) => { setIsFeatured(e.target.checked); setIsDirty(true); }}
                   className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                 />
                 <div>

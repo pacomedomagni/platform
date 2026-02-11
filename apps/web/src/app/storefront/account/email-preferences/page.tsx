@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { ConfirmDialog } from '@platform/ui';
 import { useRouter } from 'next/navigation';
 import { resolveTenantId } from '@/lib/store-api';
 
@@ -35,6 +36,7 @@ export default function EmailPreferencesPage() {
     unsubscribedAt: null,
   });
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [unsubscribeConfirm, setUnsubscribeConfirm] = useState(false);
 
   useEffect(() => {
     fetchPreferences();
@@ -101,11 +103,12 @@ export default function EmailPreferencesPage() {
     }
   };
 
-  const handleUnsubscribeAll = async () => {
-    if (!confirm('Are you sure you want to unsubscribe from all emails?')) {
-      return;
-    }
+  const handleUnsubscribeAll = () => {
+    setUnsubscribeConfirm(true);
+  };
 
+  const confirmUnsubscribeAll = async () => {
+    setUnsubscribeConfirm(false);
     setSaving(true);
     setMessage(null);
 
@@ -259,6 +262,16 @@ export default function EmailPreferencesPage() {
           </a>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={unsubscribeConfirm}
+        onOpenChange={setUnsubscribeConfirm}
+        title="Unsubscribe from All"
+        description="Are you sure you want to unsubscribe from all emails?"
+        confirmLabel="Unsubscribe"
+        variant="destructive"
+        onConfirm={confirmUnsubscribeAll}
+      />
     </div>
   );
 }

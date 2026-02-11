@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Card, Button, NativeSelect, Label, Input } from '@platform/ui';
+import { Card, Button, NativeSelect, Label, Input, toast } from '@platform/ui';
 import { Download, FileJson, FileSpreadsheet, Calendar } from 'lucide-react';
 import api from '../../../../lib/api';
 
@@ -47,7 +47,7 @@ export default function ExportPage() {
       window.URL.revokeObjectURL(url);
     } catch (error: any) {
       console.error('Export failed:', error);
-      alert('Export failed: ' + (error.response?.data?.message || error.message));
+      toast({ title: 'Error', description: 'Export failed: ' + (error.response?.data?.message || error.message), variant: 'destructive' });
     } finally {
       setExporting(false);
     }

@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { Badge, Button, Card, Input, NativeSelect, Spinner } from '@platform/ui';
-import { Filter, SlidersHorizontal, AlertCircle } from 'lucide-react';
+import { Filter, SlidersHorizontal, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { SectionHeader } from '../_components/section-header';
 import { ProductCard } from '../_components/product-card';
 import { productsApi, type StoreProduct, type ProductCategory } from '@/lib/store-api';
@@ -18,14 +19,32 @@ const sortOptionsMap: Record<SortOption, { sortBy: string; sortOrder: 'asc' | 'd
   newest: { sortBy: 'createdAt', sortOrder: 'desc' },
 };
 
+const PAGE_SIZE = 12;
+
 export default function ProductsPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center py-20" role="status" aria-live="polite">
+        <Spinner className="h-8 w-8" aria-hidden="true" />
+        <span className="ml-3 text-muted-foreground">Loading products...</span>
+      </div>
+    }>
+      <ProductsContent />
+    </Suspense>
+  );
+}
+
+function ProductsContent() {
+  const searchParams = useSearchParams();
   const [products, setProducts] = useState<StoreProduct[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [sortBy, setSortBy] = useState<SortOption>('featured');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
 
   // Load categories on mount
   useEffect(() => {
@@ -33,6 +52,11 @@ export default function ProductsPage() {
       .then((cats) => setCategories(cats))
       .catch((err) => console.error('Failed to load categories:', err));
   }, []);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedCategory, sortBy]);
 
   useEffect(() => {
     const fetchProducts = async () => {
@@ -46,10 +70,12 @@ export default function ProductsPage() {
           categorySlug: selectedCategory !== 'all' ? selectedCategory : undefined,
           sortBy: apiSortBy as 'price' | 'name' | 'createdAt' | 'sortOrder',
           sortOrder,
-          limit: 50,
+          limit: PAGE_SIZE,
+          offset: (currentPage - 1) * PAGE_SIZE,
         });
 
         setProducts(data.data);
+        setTotalCount(data.pagination?.total ?? data.data.length);
       } catch (err) {
         console.error('Failed to fetch products:', err);
         setError('Failed to load products. Please try again.');
@@ -61,7 +87,9 @@ export default function ProductsPage() {
     // Debounce search
     const timeout = setTimeout(fetchProducts, 300);
     return () => clearTimeout(timeout);
-  }, [searchQuery, selectedCategory, sortBy]);
+  }, [searchQuery, selectedCategory, sortBy, currentPage]);
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   // Map API product to ProductCard expected format
   const mapProductForCard = (product: StoreProduct) => ({
@@ -246,11 +274,15 @@ export default function ProductsPage() {
         </Card>
       ) : (
         <main>
-          <h2 className="sr-only">Products</h2>
+          <div className="flex items-center justify-between mb-4">
+            <p className="text-sm text-muted-foreground">
+              Showing {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, totalCount)} of {totalCount} products
+            </p>
+          </div>
           <div
             className="grid gap-5 md:grid-cols-2 xl:grid-cols-3"
             role="list"
-            aria-label={`${products.length} products available`}
+            aria-label={`${totalCount} products available, page ${currentPage} of ${totalPages}`}
           >
             {products.map((product) => (
               <div key={product.id} role="listitem">
@@ -258,6 +290,51 @@ export default function ProductsPage() {
               </div>
             ))}
           </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <nav className="mt-8 flex items-center justify-center gap-2" aria-label="Product pagination">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage <= 1}
+                aria-label="Previous page"
+              >
+                <ChevronLeft className="h-4 w-4 mr-1" /> Previous
+              </Button>
+              <div className="flex items-center gap-1">
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter((page) => page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1)
+                  .map((page, idx, arr) => (
+                    <span key={page} className="flex items-center">
+                      {idx > 0 && arr[idx - 1] !== page - 1 && (
+                        <span className="px-1 text-muted-foreground">...</span>
+                      )}
+                      <Button
+                        variant={page === currentPage ? 'default' : 'outline'}
+                        size="sm"
+                        className="h-8 w-8 p-0"
+                        onClick={() => setCurrentPage(page)}
+                        aria-label={`Page ${page}`}
+                        aria-current={page === currentPage ? 'page' : undefined}
+                      >
+                        {page}
+                      </Button>
+                    </span>
+                  ))}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage >= totalPages}
+                aria-label="Next page"
+              >
+                Next <ChevronRight className="h-4 w-4 ml-1" />
+              </Button>
+            </nav>
+          )}
         </main>
       )}
 

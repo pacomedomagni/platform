@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Button, Card, Badge, Spinner, Textarea, Input } from '@platform/ui';
+import { Button, Card, Badge, Spinner, Textarea, Input, ConfirmDialog } from '@platform/ui';
 import { Star, ShieldCheck, Check, X, MessageSquare, Search, Filter } from 'lucide-react';
 import { adminReviewsApi, AdminReview } from '@/lib/reviews-api';
 
@@ -17,6 +17,7 @@ export default function AdminReviewsPage() {
   const [selectedReviews, setSelectedReviews] = useState<Set<string>>(new Set());
   const [respondingTo, setRespondingTo] = useState<string | null>(null);
   const [adminResponse, setAdminResponse] = useState('');
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   useEffect(() => {
     loadReviews();
@@ -73,8 +74,14 @@ export default function AdminReviewsPage() {
     }
   };
 
-  const handleDelete = async (reviewId: string) => {
-    if (!confirm('Are you sure you want to delete this review?')) return;
+  const handleDelete = (reviewId: string) => {
+    setDeleteConfirm(reviewId);
+  };
+
+  const confirmDeleteReview = async () => {
+    const reviewId = deleteConfirm;
+    if (!reviewId) return;
+    setDeleteConfirm(null);
 
     try {
       await adminReviewsApi.deleteReview(reviewId);
@@ -454,6 +461,16 @@ export default function AdminReviewsPage() {
           </Button>
         </div>
       )}
+
+      <ConfirmDialog
+        open={deleteConfirm !== null}
+        onOpenChange={(open) => { if (!open) setDeleteConfirm(null); }}
+        title="Delete Review"
+        description="Are you sure you want to delete this review?"
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={confirmDeleteReview}
+      />
     </div>
   );
 }

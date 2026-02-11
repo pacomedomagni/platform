@@ -108,6 +108,7 @@ export const ProductCard = ({ product, compact }: ProductCardProps) => {
           <Link
             href={`/storefront/products/${product.slug}`}
             className="text-xs font-semibold text-blue-600 hover:text-blue-500"
+            aria-label={`View ${name}`}
           >
             View
           </Link>

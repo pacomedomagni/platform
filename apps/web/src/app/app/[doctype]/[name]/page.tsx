@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { FormView, DocTypeDefinition } from '@platform/ui';
+import { FormView, DocTypeDefinition, toast } from '@platform/ui';
 import { Loader2 } from 'lucide-react';
 import api from '../../../../lib/api';
 
@@ -53,7 +53,7 @@ export default function DocTypeFormPage() {
             router.push(`/app/${docTypeName}`);
         } catch (e) {
             console.error(e);
-            alert('Failed to save');
+            toast({ title: 'Error', description: 'Failed to save', variant: 'destructive' });
             throw e;
         }
     };

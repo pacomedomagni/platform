@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { OrderStatusBadge, PaymentStatusBadge } from './order-status-badge';
 import { Spinner } from '@platform/ui';
+import { Package } from 'lucide-react';
 
 interface Order {
   id: string;
@@ -53,8 +54,10 @@ export function OrderTable({ orders, loading }: OrderTableProps) {
 
   if (orders.length === 0) {
     return (
-      <div className="text-center py-12">
-        <p className="text-muted-foreground">No orders found</p>
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <Package className="h-12 w-12 text-slate-300 mb-4" />
+        <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">No orders yet</h3>
+        <p className="mt-1 text-sm text-muted-foreground">Orders will appear here once customers start purchasing.</p>
       </div>
     );
   }

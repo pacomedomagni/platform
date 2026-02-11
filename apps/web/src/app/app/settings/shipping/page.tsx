@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { ConfirmDialog } from '@platform/ui';
 import Link from 'next/link';
 
 interface ShippingZone {
@@ -57,6 +58,7 @@ export default function ShippingTaxPage() {
   const [newRatePrice, setNewRatePrice] = useState('');
   const [newRateType, setNewRateType] = useState('flat');
   const [savingRate, setSavingRate] = useState(false);
+  const [deleteZoneConfirm, setDeleteZoneConfirm] = useState<string | null>(null);
 
   const fetchSettings = useCallback(async () => {
     try {
@@ -152,8 +154,15 @@ export default function ShippingTaxPage() {
     }
   };
 
-  const handleDeleteZone = async (zoneId: string) => {
-    if (!confirm('Delete this shipping zone and all its rates?')) return;
+  const handleDeleteZone = (zoneId: string) => {
+    setDeleteZoneConfirm(zoneId);
+  };
+
+  const confirmDeleteZone = async () => {
+    const zoneId = deleteZoneConfirm;
+    if (!zoneId) return;
+    setDeleteZoneConfirm(null);
+
     try {
       await fetch(`/api/v1/store/admin/shipping/zones/${zoneId}`, {
         method: 'DELETE',
@@ -552,6 +561,16 @@ export default function ShippingTaxPage() {
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={deleteZoneConfirm !== null}
+        onOpenChange={(open) => { if (!open) setDeleteZoneConfirm(null); }}
+        title="Delete Shipping Zone"
+        description="Delete this shipping zone and all its rates?"
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={confirmDeleteZone}
+      />
     </div>
   );
 }

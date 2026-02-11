@@ -98,7 +98,13 @@ function StepIndicator({ currentStep }: { currentStep: number }) {
 /* ------------------------------------------------------------------ */
 
 export default function GettingStartedPage() {
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('getting_started_step');
+      return saved ? Math.max(1, Math.min(6, parseInt(saved, 10) || 1)) : 1;
+    }
+    return 1;
+  });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -134,6 +140,11 @@ export default function GettingStartedPage() {
 
   // Store URL for final step
   const [storeUrl, setStoreUrl] = useState<string | null>(null);
+
+  // Persist step progress to localStorage
+  useEffect(() => {
+    localStorage.setItem('getting_started_step', String(step));
+  }, [step]);
 
   /* ---------- Fetch existing settings ---------- */
 

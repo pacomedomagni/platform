@@ -13,6 +13,7 @@ export * from './lib/app-shell';
 export * from './lib/studio';
 
 // New UI components
+export * from './lib/confirm-dialog';
 export * from './lib/dialog';
 export * from './lib/dropdown-menu';
 export * from './lib/toast';

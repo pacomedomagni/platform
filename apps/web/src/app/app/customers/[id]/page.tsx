@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Card, Button, Input, Label, Textarea, Badge } from '@platform/ui';
+import { Card, Button, Input, Label, Textarea, Badge, toast } from '@platform/ui';
 import {
   ArrowLeft,
   Mail,
@@ -118,7 +118,7 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
       setEditing(false);
     } catch (error: any) {
       console.error('Failed to update customer:', error);
-      alert('Failed to update customer');
+      toast({ title: 'Error', description: 'Failed to update customer', variant: 'destructive' });
     }
   };
 

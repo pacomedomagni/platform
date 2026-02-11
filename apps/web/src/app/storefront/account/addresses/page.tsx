@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Card, Button, Input, Badge } from '@platform/ui';
+import { Card, Button, Input, Badge, ConfirmDialog } from '@platform/ui';
 import { ArrowLeft, Plus, Trash2, Edit2, MapPin, Loader2 } from 'lucide-react';
 import { useAuthStore } from '../../../../lib/auth-store';
 import { authApi, CustomerAddress } from '../../../../lib/store-api';
@@ -22,6 +22,7 @@ export default function AddressesPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; addressId: string | null }>({ open: false, addressId: null });
 
   // Form state
   const [form, setForm] = useState({
@@ -120,12 +121,17 @@ export default function AddressesPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this address?')) return;
+  const handleDelete = (id: string) => {
+    setDeleteConfirm({ open: true, addressId: id });
+  };
 
+  const confirmDeleteAddress = async () => {
+    if (!deleteConfirm.addressId) return;
+
+    setDeleteConfirm({ open: false, addressId: null });
     try {
-      await authApi.deleteAddress(id);
-      setAddresses((prev) => prev.filter((a) => a.id !== id));
+      await authApi.deleteAddress(deleteConfirm.addressId);
+      setAddresses((prev) => prev.filter((a) => a.id !== deleteConfirm.addressId));
     } catch {
       setError('Failed to delete address');
     }
@@ -346,6 +352,16 @@ export default function AddressesPage() {
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={deleteConfirm.open}
+        onOpenChange={(open) => setDeleteConfirm({ open, addressId: open ? deleteConfirm.addressId : null })}
+        title="Delete Address"
+        description="Are you sure you want to delete this address? This action cannot be undone."
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={confirmDeleteAddress}
+      />
     </div>
   );
 }

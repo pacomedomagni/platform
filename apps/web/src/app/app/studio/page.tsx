@@ -1,5 +1,5 @@
 'use client';
-import { Studio, DocTypeDefinition, Card, Button } from '@platform/ui';
+import { Studio, DocTypeDefinition, Card, Button, toast } from '@platform/ui';
 import { useState, useEffect } from 'react';
 import api from '../../../lib/api';
 
@@ -29,7 +29,7 @@ export default function StudioPage() {
             // Refresh logic handled by Studio component largely, but we could reload here
         } catch (e) {
             console.error(e);
-            alert('Failed to save DocType');
+            toast({ title: 'Error', description: 'Failed to save DocType', variant: 'destructive' });
             throw e; 
         }
     };

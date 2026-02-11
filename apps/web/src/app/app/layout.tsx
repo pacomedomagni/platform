@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { AppShell } from '@platform/ui';
 import {
   LayoutDashboard,
@@ -26,16 +27,16 @@ import {
 const PRIMARY_NAV = [
   { label: 'Dashboard', icon: LayoutDashboard, href: '/app', isActive: true },
   { label: 'Getting Started', icon: Rocket, href: '/app/getting-started' },
-  { label: 'Products', icon: Package, href: '/app/products' },
-  { label: 'Orders', icon: ShoppingCart, href: '/app/orders' },
-  { label: 'Customers', icon: Users, href: '/app/customers' },
-  { label: 'Inventory', icon: Warehouse, href: '/app/inventory' },
-  { label: 'Marketplace', icon: Globe, href: '/app/marketplace/connections' },
-  { label: 'Reviews', icon: Star, href: '/app/reviews' },
-  { label: 'Operations', icon: Wrench, href: '/app/operations' },
-  { label: 'Reports', icon: BarChart3, href: '/app/reports/analytics' },
-  { label: 'Themes', icon: Palette, href: '/app/themes' },
-  { label: 'Settings', icon: Settings, href: '/app/settings' },
+  { label: 'Products', icon: Package, href: '/app/products', section: 'Store' },
+  { label: 'Orders', icon: ShoppingCart, href: '/app/orders', section: 'Store' },
+  { label: 'Customers', icon: Users, href: '/app/customers', section: 'Store' },
+  { label: 'Inventory', icon: Warehouse, href: '/app/inventory', section: 'Store' },
+  { label: 'Marketplace', icon: Globe, href: '/app/marketplace/connections', section: 'Marketing' },
+  { label: 'Reviews', icon: Star, href: '/app/reviews', section: 'Marketing' },
+  { label: 'Operations', icon: Wrench, href: '/app/operations', section: 'Management' },
+  { label: 'Reports', icon: BarChart3, href: '/app/reports/analytics', section: 'Management' },
+  { label: 'Themes', icon: Palette, href: '/app/themes', section: 'Management' },
+  { label: 'Settings', icon: Settings, href: '/app/settings', section: 'Management' },
 ];
 
 const ADVANCED_NAV = [
@@ -66,12 +67,22 @@ export default function AppLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const router = useRouter();
+
   const [showAdvanced, setShowAdvanced] = useState(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('sidebar_advanced') === 'true';
     }
     return false;
   });
+
+  const [gettingStartedComplete, setGettingStartedComplete] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setGettingStartedComplete(localStorage.getItem('getting_started_step') === '6');
+    }
+  }, []);
 
   const user = useMemo(() => {
     if (typeof window === 'undefined') return undefined;
@@ -89,8 +100,17 @@ export default function AppLayout({
     localStorage.setItem('sidebar_advanced', String(showAdvanced));
   }, [showAdvanced]);
 
+  const handleLogout = useCallback(() => {
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('user');
+    localStorage.removeItem('tenantId');
+    router.push('/login');
+  }, [router]);
+
   const navItems = [
-    ...PRIMARY_NAV,
+    ...PRIMARY_NAV.filter(
+      (item) => !(item.label === 'Getting Started' && gettingStartedComplete)
+    ),
     ...(showAdvanced ? ADVANCED_NAV : []),
   ];
 
@@ -100,6 +120,7 @@ export default function AppLayout({
       title="NoSlag"
       description="Store Admin"
       user={user}
+      onLogout={handleLogout}
       navFooter={
         <button
           onClick={() => setShowAdvanced(!showAdvanced)}

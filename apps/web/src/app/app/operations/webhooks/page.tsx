@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Button, Input, Card, Badge } from '@platform/ui';
+import { Button, Input, Card, Badge, ConfirmDialog } from '@platform/ui';
 import api from '../../../../lib/api';
 import { ReportAlert, ReportCard, ReportEmpty, ReportPage, ReportTable } from '../../reports/_components/report-shell';
 import {
@@ -82,6 +82,7 @@ export default function WebhooksPage() {
   const [showDeliveriesModal, setShowDeliveriesModal] = useState(false);
   const [editingWebhook, setEditingWebhook] = useState<WebhookRecord | null>(null);
   const [showSecret, setShowSecret] = useState<Record<string, boolean>>({});
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -146,8 +147,14 @@ export default function WebhooksPage() {
     }
   };
 
-  const deleteWebhook = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this webhook?')) return;
+  const deleteWebhook = (id: string) => {
+    setDeleteConfirm(id);
+  };
+
+  const confirmDeleteWebhook = async () => {
+    const id = deleteConfirm;
+    if (!id) return;
+    setDeleteConfirm(null);
     setError(null);
     try {
       await api.delete(`/v1/operations/webhooks/${id}`);
@@ -517,6 +524,16 @@ export default function WebhooksPage() {
           </Card>
         </div>
       )}
+
+      <ConfirmDialog
+        open={deleteConfirm !== null}
+        onOpenChange={(open) => { if (!open) setDeleteConfirm(null); }}
+        title="Delete Webhook"
+        description="Are you sure you want to delete this webhook?"
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={confirmDeleteWebhook}
+      />
 
       {/* Deliveries Modal */}
       {showDeliveriesModal && selectedWebhook && (

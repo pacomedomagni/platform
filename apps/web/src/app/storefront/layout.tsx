@@ -9,6 +9,7 @@ import { generateOrganizationSchema, serializeJsonLd } from '@/lib/seo/schema';
 import { WelcomeWizard } from '../../components/onboarding/welcome-wizard';
 import { ProductTour } from '../../components/onboarding/product-tour';
 import { StorefrontSearchInput } from './_components/storefront-search-input';
+import { MobileMenu } from './_components/mobile-menu';
 
 export const metadata: Metadata = {
   title: {
@@ -148,6 +149,7 @@ export default function StorefrontLayout({ children }: { children: React.ReactNo
                 Sales inquiry
               </Button>
               <CartIcon />
+              <MobileMenu />
             </div>
           </div>
         </header>

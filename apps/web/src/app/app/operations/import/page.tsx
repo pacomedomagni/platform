@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Card, Button, NativeSelect, Label, Badge } from '@platform/ui';
+import { Card, Button, NativeSelect, Label, Badge, toast } from '@platform/ui';
 import { Upload, Download, FileText, AlertCircle, CheckCircle, X } from 'lucide-react';
 import api from '../../../../lib/api';
 
@@ -82,7 +82,7 @@ export default function ImportPage() {
       setResult(res.data);
     } catch (error: any) {
       console.error('Import failed:', error);
-      alert('Import failed: ' + (error.response?.data?.message || error.message));
+      toast({ title: 'Error', description: 'Import failed: ' + (error.response?.data?.message || error.message), variant: 'destructive' });
     } finally {
       setImporting(false);
     }

@@ -43,6 +43,7 @@ export default function SignupPage() {
 
   const form = useForm<SignupFormData>({
     resolver: zodResolver(signupSchema),
+    mode: 'onBlur',
     defaultValues: {
       businessName: '',
       email: '',
@@ -188,6 +189,9 @@ export default function SignupPage() {
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  Must be 8+ characters with uppercase, lowercase, and a number
+                </p>
                 {/* Password strength indicator */}
                 {(() => {
                   const pwd = form.watch('password');
@@ -220,6 +224,7 @@ export default function SignupPage() {
 
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-slate-700">Store Subdomain</label>
+                <p className="mb-1.5 text-xs text-slate-500">This will be your store&apos;s web address</p>
                 <div className="flex">
                   <input
                     type="text"

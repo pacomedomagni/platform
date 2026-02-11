@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { Button, Card, Input, Label, Badge, Spinner } from '@platform/ui';
+import { Button, Card, Input, Label, Badge, Spinner, ConfirmDialog, toast } from '@platform/ui';
 import { Plus, Edit2, Trash2, Package, DollarSign, Image as ImageIcon } from 'lucide-react';
 import {
   variantsApi,
@@ -25,6 +25,7 @@ export default function ProductVariantsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingVariant, setEditingVariant] = useState<ProductVariant | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; variantId: string | null }>({ open: false, variantId: null });
 
   useEffect(() => {
     loadData();
@@ -46,14 +47,20 @@ export default function ProductVariantsPage() {
     }
   };
 
-  const handleDelete = async (variantId: string) => {
-    if (!confirm('Are you sure you want to delete this variant?')) return;
+  const handleDelete = (variantId: string) => {
+    setDeleteConfirm({ open: true, variantId });
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteConfirm.variantId) return;
 
     try {
-      await variantsApi.delete(variantId);
+      await variantsApi.delete(deleteConfirm.variantId);
       await loadData();
     } catch (error) {
       console.error('Failed to delete variant:', error);
+    } finally {
+      setDeleteConfirm({ open: false, variantId: null });
     }
   };
 
@@ -145,6 +152,19 @@ export default function ProductVariantsPage() {
         />
       )}
 
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        open={deleteConfirm.open}
+        onOpenChange={(open) => {
+          if (!open) setDeleteConfirm({ open: false, variantId: null });
+        }}
+        variant="destructive"
+        title="Delete Variant"
+        description="Are you sure you want to delete this variant? This action cannot be undone."
+        confirmLabel="Delete"
+        onConfirm={confirmDelete}
+      />
+
       {/* Bulk Generation Helper */}
       {attributeTypes.length > 0 && (
         <Card className="border-blue-200/70 bg-blue-50 p-6 shadow-sm">
@@ -159,7 +179,7 @@ export default function ProductVariantsPage() {
             className="mt-3 border-blue-300 bg-white text-blue-700 hover:bg-blue-100"
             onClick={() => {
               /* TODO: Implement bulk generation */
-              alert('Bulk generation feature coming soon!');
+              toast({ title: 'Info', description: 'Bulk generation feature coming soon!' });
             }}
           >
             Generate All Combinations

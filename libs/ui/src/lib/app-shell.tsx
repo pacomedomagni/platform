@@ -2,16 +2,17 @@
 import React, { useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { cn } from './utils';
-import { 
-    LayoutDashboard, 
-    Settings, 
+import {
+    LayoutDashboard,
+    Settings,
     Search,
     Bell,
     User as UserIcon,
     ChevronLeft,
     Box,
     FileText,
-    Users
+    Users,
+    LogOut,
 } from 'lucide-react';
 import { Button } from './atoms';
 import { GlobalCommandBar } from './global-command-bar';
@@ -21,6 +22,7 @@ interface NavItem {
     icon: React.ElementType;
     href: string;
     isActive?: boolean;
+    section?: string;
 }
 
 interface AppShellProps {
@@ -30,6 +32,7 @@ interface AppShellProps {
     title?: string;
     description?: string;
     navFooter?: React.ReactNode;
+    onLogout?: () => void;
 }
 
 const defaultNavItems: NavItem[] = [
@@ -47,6 +50,7 @@ export const AppShell = ({
     title = 'NoSlag',
     description = 'Enterprise Platform',
     navFooter,
+    onLogout,
 }: AppShellProps) => {
     const [collapsed, setCollapsed] = useState(false);
     const [searchOpen, setSearchOpen] = useState(false);
@@ -81,42 +85,68 @@ export const AppShell = ({
                 </div>
 
                 {/* Sidebar Nav */}
-                <div className="flex-1 overflow-y-auto py-4 px-2 space-y-1">
-                    {navItems.map((item) => (
-                        (() => {
-                            const isActive = item.isActive || pathname === item.href || pathname?.startsWith(item.href + '/');
-                            return (
-                        <a 
-                            key={item.label}
-                            href={item.href} 
-                            className={cn(
-                                "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors relative group",
-                                isActive 
-                                    ? "bg-indigo-50/70 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200" 
-                                    : "text-slate-600 hover:bg-slate-100/70 dark:text-slate-400 dark:hover:bg-slate-900"
-                            )}
-                            aria-current={isActive ? 'page' : undefined}
-                        >
-                            <item.icon className={cn("h-5 w-5 shrink-0 transition-colors", isActive ? "text-indigo-600" : "text-slate-500")} />
-                            <span 
-                                className={cn(
-                                    "transition-all duration-300 whitespace-nowrap overflow-hidden",
-                                    collapsed ? "w-0 opacity-0" : "w-auto opacity-100"
+                <div className="flex-1 overflow-y-auto py-4 px-2">
+                    {(() => {
+                        // Group nav items by section, preserving order
+                        const sections: { key: string; items: NavItem[] }[] = [];
+                        let currentSection: { key: string; items: NavItem[] } | null = null;
+                        for (const item of navItems) {
+                            const sectionKey = item.section || '';
+                            if (!currentSection || currentSection.key !== sectionKey) {
+                                currentSection = { key: sectionKey, items: [] };
+                                sections.push(currentSection);
+                            }
+                            currentSection.items.push(item);
+                        }
+
+                        return sections.map((section, sectionIdx) => (
+                            <div key={section.key || `section-${sectionIdx}`} className={cn(sectionIdx > 0 && "mt-4")}>
+                                {section.key && !collapsed && (
+                                    <div className="px-3 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                                        {section.key}
+                                    </div>
                                 )}
-                            >
-                                {item.label}
-                            </span>
-                            
-                            {/* Tooltip for collapsed state */}
-                            {collapsed && (
-                                <div className="absolute left-full ml-2 px-2 py-1 bg-slate-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50">
-                                    {item.label}
+                                {section.key && collapsed && (
+                                    <div className="mx-auto my-1 h-px w-6 bg-slate-200 dark:bg-slate-700" />
+                                )}
+                                <div className="space-y-1">
+                                    {section.items.map((item) => {
+                                        const isActive = item.isActive || pathname === item.href || pathname?.startsWith(item.href + '/');
+                                        return (
+                                            <a
+                                                key={item.label}
+                                                href={item.href}
+                                                className={cn(
+                                                    "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors relative group",
+                                                    isActive
+                                                        ? "bg-indigo-50/70 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-200"
+                                                        : "text-slate-600 hover:bg-slate-100/70 dark:text-slate-400 dark:hover:bg-slate-900"
+                                                )}
+                                                aria-current={isActive ? 'page' : undefined}
+                                            >
+                                                <item.icon className={cn("h-5 w-5 shrink-0 transition-colors", isActive ? "text-indigo-600" : "text-slate-500")} />
+                                                <span
+                                                    className={cn(
+                                                        "transition-all duration-300 whitespace-nowrap overflow-hidden",
+                                                        collapsed ? "w-0 opacity-0" : "w-auto opacity-100"
+                                                    )}
+                                                >
+                                                    {item.label}
+                                                </span>
+
+                                                {/* Tooltip for collapsed state */}
+                                                {collapsed && (
+                                                    <div className="absolute left-full ml-2 px-2 py-1 bg-slate-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50">
+                                                        {item.label}
+                                                    </div>
+                                                )}
+                                            </a>
+                                        );
+                                    })}
                                 </div>
-                            )}
-                        </a>
-                            );
-                        })()
-                    ))}
+                            </div>
+                        ));
+                    })()}
                 </div>
 
                 {/* Nav Footer (optional extra content) */}
@@ -127,7 +157,7 @@ export const AppShell = ({
                 )}
 
                 {/* Sidebar Footer */}
-                <div className="p-4 border-t flex flex-col gap-4">
+                <div className="p-4 border-t flex flex-col gap-3">
                      {/* User Profile Simplified */}
                      <div className={cn("flex items-center gap-3 transition-opacity overflow-hidden", collapsed && "justify-center")}>
                         <div className="h-8 w-8 rounded-full bg-slate-200 flex items-center justify-center shrink-0 border">
@@ -138,6 +168,22 @@ export const AppShell = ({
                             <span className="text-xs text-slate-500 truncate">{user.email}</span>
                         </div>
                      </div>
+
+                    {onLogout && (
+                        <Button
+                            variant="ghost"
+                            size={collapsed ? "icon" : "sm"}
+                            onClick={onLogout}
+                            className={cn(
+                                "w-full text-slate-500 hover:text-red-600 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-950/30",
+                                collapsed ? "" : "flex justify-center"
+                            )}
+                            aria-label="Log out"
+                        >
+                            <LogOut className={cn("h-4 w-4 shrink-0", !collapsed && "mr-2")} aria-hidden="true" />
+                            {!collapsed && "Log Out"}
+                        </Button>
+                    )}
 
                     <Button
                         variant="ghost"

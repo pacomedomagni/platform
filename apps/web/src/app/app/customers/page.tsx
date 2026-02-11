@@ -247,8 +247,12 @@ export default function CustomersPage() {
                 </tr>
               ) : customers.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="p-8 text-center text-muted-foreground">
-                    No customers found
+                  <td colSpan={8} className="py-16 text-center">
+                    <div className="flex flex-col items-center justify-center">
+                      <Users className="h-12 w-12 text-slate-300 mb-4" />
+                      <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">No customers yet</h3>
+                      <p className="mt-1 text-sm text-muted-foreground">Customers will appear here once they create accounts or place orders.</p>
+                    </div>
                   </td>
                 </tr>
               ) : (

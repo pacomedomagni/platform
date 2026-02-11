@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { ConfirmDialog, toast } from '@platform/ui';
 import Link from 'next/link';
 import {
   PlusIcon,
@@ -53,6 +54,9 @@ export default function MarketplaceListingsPage() {
   const [selectedConnection, setSelectedConnection] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [syncing, setSyncing] = useState<string | null>(null);
+  const [publishConfirm, setPublishConfirm] = useState<string | null>(null);
+  const [endConfirm, setEndConfirm] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   useEffect(() => {
     loadData();
@@ -93,8 +97,14 @@ export default function MarketplaceListingsPage() {
     }
   };
 
-  const handlePublish = async (listingId: string) => {
-    if (!confirm('Publish this listing to eBay?')) return;
+  const handlePublish = (listingId: string) => {
+    setPublishConfirm(listingId);
+  };
+
+  const confirmPublish = async () => {
+    const listingId = publishConfirm;
+    if (!listingId) return;
+    setPublishConfirm(null);
 
     try {
       const res = await fetch(`/api/v1/marketplace/listings/${listingId}/publish`, {
@@ -103,20 +113,26 @@ export default function MarketplaceListingsPage() {
       });
 
       if (res.ok) {
-        alert('Listing published successfully!');
+        toast({ title: 'Success', description: 'Listing published successfully!' });
         loadData();
       } else {
         const error = await res.json();
-        alert(error.error || 'Failed to publish listing');
+        toast({ title: 'Error', description: error.error || 'Failed to publish listing', variant: 'destructive' });
       }
     } catch (error) {
       console.error('Failed to publish:', error);
-      alert('Failed to publish listing');
+      toast({ title: 'Error', description: 'Failed to publish listing', variant: 'destructive' });
     }
   };
 
-  const handleEnd = async (listingId: string) => {
-    if (!confirm('End this eBay listing? This will remove it from eBay.')) return;
+  const handleEnd = (listingId: string) => {
+    setEndConfirm(listingId);
+  };
+
+  const confirmEnd = async () => {
+    const listingId = endConfirm;
+    if (!listingId) return;
+    setEndConfirm(null);
 
     try {
       const res = await fetch(`/api/v1/marketplace/listings/${listingId}/end`, {
@@ -125,15 +141,15 @@ export default function MarketplaceListingsPage() {
       });
 
       if (res.ok) {
-        alert('Listing ended successfully');
+        toast({ title: 'Success', description: 'Listing ended successfully' });
         loadData();
       } else {
         const error = await res.json();
-        alert(error.error || 'Failed to end listing');
+        toast({ title: 'Error', description: error.error || 'Failed to end listing', variant: 'destructive' });
       }
     } catch (error) {
       console.error('Failed to end listing:', error);
-      alert('Failed to end listing');
+      toast({ title: 'Error', description: 'Failed to end listing', variant: 'destructive' });
     }
   };
 
@@ -146,22 +162,28 @@ export default function MarketplaceListingsPage() {
       });
 
       if (res.ok) {
-        alert('Inventory synced successfully');
+        toast({ title: 'Success', description: 'Inventory synced successfully' });
         loadData();
       } else {
         const error = await res.json();
-        alert(error.error || 'Failed to sync inventory');
+        toast({ title: 'Error', description: error.error || 'Failed to sync inventory', variant: 'destructive' });
       }
     } catch (error) {
       console.error('Failed to sync inventory:', error);
-      alert('Failed to sync inventory');
+      toast({ title: 'Error', description: 'Failed to sync inventory', variant: 'destructive' });
     } finally {
       setSyncing(null);
     }
   };
 
-  const handleDelete = async (listingId: string) => {
-    if (!confirm('Delete this listing? This cannot be undone.')) return;
+  const handleDelete = (listingId: string) => {
+    setDeleteConfirm(listingId);
+  };
+
+  const confirmDelete = async () => {
+    const listingId = deleteConfirm;
+    if (!listingId) return;
+    setDeleteConfirm(null);
 
     try {
       const res = await fetch(`/api/v1/marketplace/listings/${listingId}`, {
@@ -173,11 +195,11 @@ export default function MarketplaceListingsPage() {
         setListings(listings.filter((l) => l.id !== listingId));
       } else {
         const error = await res.json();
-        alert(error.error || 'Failed to delete listing');
+        toast({ title: 'Error', description: error.error || 'Failed to delete listing', variant: 'destructive' });
       }
     } catch (error) {
       console.error('Failed to delete:', error);
-      alert('Failed to delete listing');
+      toast({ title: 'Error', description: 'Failed to delete listing', variant: 'destructive' });
     }
   };
 
@@ -329,6 +351,35 @@ export default function MarketplaceListingsPage() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={publishConfirm !== null}
+        onOpenChange={(open) => { if (!open) setPublishConfirm(null); }}
+        title="Publish Listing"
+        description="Publish this listing to eBay?"
+        confirmLabel="Publish"
+        onConfirm={confirmPublish}
+      />
+
+      <ConfirmDialog
+        open={endConfirm !== null}
+        onOpenChange={(open) => { if (!open) setEndConfirm(null); }}
+        title="End Listing"
+        description="End this eBay listing? This will remove it from eBay."
+        confirmLabel="End Listing"
+        variant="destructive"
+        onConfirm={confirmEnd}
+      />
+
+      <ConfirmDialog
+        open={deleteConfirm !== null}
+        onOpenChange={(open) => { if (!open) setDeleteConfirm(null); }}
+        title="Delete Listing"
+        description="Delete this listing? This cannot be undone."
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={confirmDelete}
+      />
     </div>
   );
 }

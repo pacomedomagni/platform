@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { ConfirmDialog, toast } from '@platform/ui';
 import { PlusIcon, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
 
 interface Connection {
@@ -33,6 +34,8 @@ export default function MarketplaceConnectionsPage() {
     marketplaceId: 'EBAY_US',
     isDefault: false,
   });
+  const [disconnectConfirm, setDisconnectConfirm] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   const authHeaders = () => {
     const token = localStorage.getItem('access_token') || '';
@@ -50,11 +53,11 @@ export default function MarketplaceConnectionsPage() {
     // Check for OAuth callback success/error
     const params = new URLSearchParams(window.location.search);
     if (params.get('success') === 'true') {
-      alert('eBay store connected successfully!');
+      toast({ title: 'Success', description: 'eBay store connected successfully!' });
       window.history.replaceState({}, '', '/app/marketplace/connections');
       loadConnections();
     } else if (params.get('error')) {
-      alert(`Connection failed: ${params.get('error')}`);
+      toast({ title: 'Error', description: `Connection failed: ${params.get('error')}`, variant: 'destructive' });
       window.history.replaceState({}, '', '/app/marketplace/connections');
     }
   }, []);
@@ -77,7 +80,7 @@ export default function MarketplaceConnectionsPage() {
 
   const handleCreateConnection = async () => {
     if (!newConnection.name.trim()) {
-      alert('Store name is required');
+      toast({ title: 'Validation Error', description: 'Store name is required', variant: 'destructive' });
       return;
     }
 
@@ -101,16 +104,22 @@ export default function MarketplaceConnectionsPage() {
         window.location.href = `/api/v1/marketplace/ebay/auth/connect?connectionId=${connection.id}`;
       } else {
         const error = await res.json();
-        alert(error.error || 'Failed to create connection');
+        toast({ title: 'Error', description: error.error || 'Failed to create connection', variant: 'destructive' });
       }
     } catch (error) {
       console.error('Failed to create connection:', error);
-      alert('Failed to create connection');
+      toast({ title: 'Error', description: 'Failed to create connection', variant: 'destructive' });
     }
   };
 
-  const handleDisconnect = async (connectionId: string) => {
-    if (!confirm('Are you sure you want to disconnect this store?')) return;
+  const handleDisconnect = (connectionId: string) => {
+    setDisconnectConfirm(connectionId);
+  };
+
+  const confirmDisconnect = async () => {
+    const connectionId = disconnectConfirm;
+    if (!connectionId) return;
+    setDisconnectConfirm(null);
 
     try {
       const res = await fetch(`/api/v1/marketplace/connections/${connectionId}/disconnect`, {
@@ -126,8 +135,14 @@ export default function MarketplaceConnectionsPage() {
     }
   };
 
-  const handleDelete = async (connectionId: string) => {
-    if (!confirm('Are you sure you want to delete this store? This cannot be undone.')) return;
+  const handleDelete = (connectionId: string) => {
+    setDeleteConfirm(connectionId);
+  };
+
+  const confirmDelete = async () => {
+    const connectionId = deleteConfirm;
+    if (!connectionId) return;
+    setDeleteConfirm(null);
 
     try {
       const res = await fetch(`/api/v1/marketplace/connections/${connectionId}`, {
@@ -139,7 +154,7 @@ export default function MarketplaceConnectionsPage() {
         setConnections(connections.filter((c) => c.id !== connectionId));
       } else {
         const error = await res.json();
-        alert(error.error || 'Failed to delete connection');
+        toast({ title: 'Error', description: error.error || 'Failed to delete connection', variant: 'destructive' });
       }
     } catch (error) {
       console.error('Failed to delete:', error);
@@ -216,6 +231,26 @@ export default function MarketplaceConnectionsPage() {
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={disconnectConfirm !== null}
+        onOpenChange={(open) => { if (!open) setDisconnectConfirm(null); }}
+        title="Disconnect Store"
+        description="Are you sure you want to disconnect this store?"
+        confirmLabel="Disconnect"
+        variant="destructive"
+        onConfirm={confirmDisconnect}
+      />
+
+      <ConfirmDialog
+        open={deleteConfirm !== null}
+        onOpenChange={(open) => { if (!open) setDeleteConfirm(null); }}
+        title="Delete Store"
+        description="Are you sure you want to delete this store? This cannot be undone."
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={confirmDelete}
+      />
 
       {/* Add Connection Modal */}
       {showAddModal && (

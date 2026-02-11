@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { toast } from '@platform/ui';
 import { ArrowLeft, Save, Upload } from 'lucide-react';
 import Link from 'next/link';
 
@@ -108,32 +109,32 @@ export default function CreateListingPage() {
     e.preventDefault();
 
     if (!formData.connectionId) {
-      alert('Please select an eBay store');
+      toast({ title: 'Validation Error', description: 'Please select an eBay store', variant: 'destructive' });
       return;
     }
 
     if (!formData.productListingId) {
-      alert('Please select a product');
+      toast({ title: 'Validation Error', description: 'Please select a product', variant: 'destructive' });
       return;
     }
 
     if (!formData.title.trim()) {
-      alert('Title is required');
+      toast({ title: 'Validation Error', description: 'Title is required', variant: 'destructive' });
       return;
     }
 
     if (!formData.price || parseFloat(formData.price) <= 0) {
-      alert('Valid price is required');
+      toast({ title: 'Validation Error', description: 'Valid price is required', variant: 'destructive' });
       return;
     }
 
     if (!formData.quantity || parseInt(formData.quantity) < 0) {
-      alert('Valid quantity is required');
+      toast({ title: 'Validation Error', description: 'Valid quantity is required', variant: 'destructive' });
       return;
     }
 
     if (!formData.categoryId) {
-      alert('Category is required');
+      toast({ title: 'Validation Error', description: 'Category is required', variant: 'destructive' });
       return;
     }
 
@@ -171,22 +172,22 @@ export default function CreateListingPage() {
           );
 
           if (publishRes.ok) {
-            alert('Listing created and published successfully!');
+            toast({ title: 'Success', description: 'Listing created and published successfully!' });
           } else {
-            alert('Listing created but publishing failed. You can publish it manually.');
+            toast({ title: 'Error', description: 'Listing created but publishing failed. You can publish it manually.', variant: 'destructive' });
           }
         } else {
-          alert('Listing created successfully!');
+          toast({ title: 'Success', description: 'Listing created successfully!' });
         }
 
         router.push('/app/marketplace/listings');
       } else {
         const error = await res.json();
-        alert(error.error || 'Failed to create listing');
+        toast({ title: 'Error', description: error.error || 'Failed to create listing', variant: 'destructive' });
       }
     } catch (error) {
       console.error('Failed to create listing:', error);
-      alert('Failed to create listing');
+      toast({ title: 'Error', description: 'Failed to create listing', variant: 'destructive' });
     } finally {
       setSubmitting(false);
     }

@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Card } from '@platform/ui';
-import { DollarSign, ShoppingCart, Package, Activity, CheckCircle, Circle, ArrowRight, ExternalLink, Loader2, Rocket, X, Mail, FileText, Globe } from 'lucide-react';
+import { Card, Skeleton, toast } from '@platform/ui';
+import { DollarSign, ShoppingCart, Package, Activity, CheckCircle, Circle, ArrowRight, ExternalLink, Loader2, Rocket, X, Mail, FileText, Globe, Plus, CreditCard, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 
 interface DashboardData {
@@ -116,11 +116,56 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-          <p className="text-sm text-slate-500">Loading dashboard...</p>
+      <div className="p-6 lg:p-8 space-y-8">
+        {/* Header skeleton */}
+        <div>
+          <Skeleton className="h-9 w-40" />
+          <Skeleton className="mt-2 h-5 w-72" />
         </div>
+
+        {/* Stat card skeletons */}
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Card key={i} className="p-6">
+              <div className="flex items-center justify-between pb-2">
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-9 w-9 rounded-xl" />
+              </div>
+              <Skeleton className="mt-2 h-7 w-32" />
+            </Card>
+          ))}
+        </div>
+
+        {/* Recent orders table skeleton */}
+        <Card className="p-6">
+          <div className="mb-5 flex items-center justify-between">
+            <div>
+              <Skeleton className="h-6 w-36" />
+              <Skeleton className="mt-1.5 h-4 w-48" />
+            </div>
+            <Skeleton className="h-9 w-36 rounded-lg" />
+          </div>
+          <div className="space-y-4">
+            {/* Table header skeleton */}
+            <div className="flex gap-4 border-b border-slate-200 pb-3">
+              <Skeleton className="h-4 w-16" />
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-4 w-20" />
+              <Skeleton className="h-4 w-16" />
+              <Skeleton className="h-4 w-24" />
+            </div>
+            {/* Table row skeletons */}
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-4 py-1">
+                <Skeleton className="h-4 w-16" />
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-5 w-20 rounded-full" />
+                <Skeleton className="h-4 w-24" />
+              </div>
+            ))}
+          </div>
+        </Card>
       </div>
     );
   }
@@ -197,12 +242,12 @@ export default function Dashboard() {
       });
       if (!res.ok) {
         const err = await res.json();
-        alert(err.message || 'Failed to publish store');
+        toast({ title: 'Publish failed', description: err.message || 'Failed to publish store', variant: 'destructive' });
       } else {
         window.location.reload();
       }
     } catch {
-      alert('Failed to publish store');
+      toast({ title: 'Publish failed', description: 'Failed to publish store. Please try again.', variant: 'destructive' });
     } finally {
       setPublishing(false);
     }
@@ -220,9 +265,9 @@ export default function Dashboard() {
             method: 'POST',
             headers: { Authorization: `Bearer ${token}` },
           });
-          alert('Verification email sent! Check your inbox.');
+          toast({ title: 'Email sent', description: 'Verification email sent! Check your inbox.', variant: 'success' });
         } catch {
-          alert('Failed to send verification email. Please try again.');
+          toast({ title: 'Email failed', description: 'Failed to send verification email. Please try again.', variant: 'destructive' });
         }
       } : undefined,
     },
@@ -324,6 +369,50 @@ export default function Dashboard() {
           );
         })}
       </div>
+
+      {/* New Merchant Getting Started Empty State */}
+      {data.totalRevenue === 0 && data.totalOrders === 0 && data.totalProducts === 0 && (
+        <Card className="overflow-hidden border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30">
+          <div className="p-6">
+            <div className="flex items-start gap-4">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-100 dark:bg-blue-900/40">
+                <Sparkles className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+                  Welcome! Your store is ready.
+                </h3>
+                <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+                  Here are some things to get started:
+                </p>
+                <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                  <Link
+                    href="/app/products/new"
+                    className="flex items-center gap-3 rounded-xl border border-blue-200 bg-white px-4 py-3 transition hover:border-blue-300 hover:shadow-sm dark:border-blue-800 dark:bg-blue-950/40 dark:hover:border-blue-700"
+                  >
+                    <Plus className="h-4 w-4 text-blue-600" />
+                    <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Add your first product</span>
+                  </Link>
+                  <Link
+                    href="/app/settings/payments"
+                    className="flex items-center gap-3 rounded-xl border border-blue-200 bg-white px-4 py-3 transition hover:border-blue-300 hover:shadow-sm dark:border-blue-800 dark:bg-blue-950/40 dark:hover:border-blue-700"
+                  >
+                    <CreditCard className="h-4 w-4 text-blue-600" />
+                    <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Connect payments</span>
+                  </Link>
+                  <Link
+                    href="/app/settings"
+                    className="flex items-center gap-3 rounded-xl border border-blue-200 bg-white px-4 py-3 transition hover:border-blue-300 hover:shadow-sm dark:border-blue-800 dark:bg-blue-950/40 dark:hover:border-blue-700"
+                  >
+                    <Globe className="h-4 w-4 text-blue-600" />
+                    <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Customize your store</span>
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Store Status Badge */}
       {data.storePublished && (

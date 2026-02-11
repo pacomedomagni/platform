@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Card, Button, Badge, Textarea } from '@platform/ui';
+import { Card, Button, Badge, Textarea, ConfirmDialog, toast } from '@platform/ui';
 import {
   ArrowLeft,
   Printer,
@@ -57,6 +57,9 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
   const [adminNotes, setAdminNotes] = useState('');
   const [showRefundModal, setShowRefundModal] = useState(false);
   const [trackingInfo, setTrackingInfo] = useState({ carrier: '', number: '' });
+  const [shipConfirm, setShipConfirm] = useState(false);
+  const [deliverConfirm, setDeliverConfirm] = useState(false);
+  const [cancelConfirm, setCancelConfirm] = useState(false);
 
   const loadOrder = async () => {
     try {
@@ -73,18 +76,8 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
     }
   };
 
-  const updateStatus = async (newStatus: string) => {
+  const executeStatusUpdate = async (newStatus: string) => {
     if (!order) return;
-
-    // Confirm destructive/irreversible actions
-    const confirmMessage = newStatus === 'SHIPPED'
-      ? 'Mark this order as shipped? The customer will be notified.'
-      : newStatus === 'DELIVERED'
-      ? 'Mark this order as delivered?'
-      : newStatus === 'CANCELLED'
-      ? 'Cancel this order? This action cannot be easily reversed.'
-      : null;
-    if (confirmMessage && !window.confirm(confirmMessage)) return;
 
     try {
       const body: any = { status: newStatus };
@@ -98,8 +91,43 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
       await loadOrder();
     } catch (error: any) {
       console.error('Failed to update status:', error);
-      alert('Failed to update order status');
+      toast({ title: 'Error', description: 'Failed to update order status', variant: 'destructive' });
     }
+  };
+
+  const updateStatus = (newStatus: string) => {
+    if (!order) return;
+
+    if (newStatus === 'SHIPPED') {
+      setShipConfirm(true);
+      return;
+    }
+    if (newStatus === 'DELIVERED') {
+      setDeliverConfirm(true);
+      return;
+    }
+    if (newStatus === 'CANCELLED') {
+      setCancelConfirm(true);
+      return;
+    }
+
+    // Non-confirmable statuses (CONFIRMED, PROCESSING) execute directly
+    executeStatusUpdate(newStatus);
+  };
+
+  const confirmShip = async () => {
+    setShipConfirm(false);
+    await executeStatusUpdate('SHIPPED');
+  };
+
+  const confirmDeliver = async () => {
+    setDeliverConfirm(false);
+    await executeStatusUpdate('DELIVERED');
+  };
+
+  const confirmCancel = async () => {
+    setCancelConfirm(false);
+    await executeStatusUpdate('CANCELLED');
   };
 
   const handleRefund = async (amount: number, reason: string, type: 'full' | 'partial') => {
@@ -124,9 +152,9 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
         status: order.status,
         adminNotes,
       });
-      alert('Notes saved');
+      toast({ title: 'Success', description: 'Notes saved' });
     } catch {
-      alert('Failed to save notes');
+      toast({ title: 'Error', description: 'Failed to save notes', variant: 'destructive' });
     }
   };
 
@@ -418,6 +446,33 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
         onClose={() => setShowRefundModal(false)}
         orderTotal={order.grandTotal}
         onRefund={handleRefund}
+      />
+
+      {/* Status Confirm Dialogs */}
+      <ConfirmDialog
+        open={shipConfirm}
+        onOpenChange={setShipConfirm}
+        title="Mark as Shipped"
+        description="Mark this order as shipped? The customer will be notified."
+        confirmLabel="Mark as Shipped"
+        onConfirm={confirmShip}
+      />
+      <ConfirmDialog
+        open={deliverConfirm}
+        onOpenChange={setDeliverConfirm}
+        title="Mark as Delivered"
+        description="Mark this order as delivered?"
+        confirmLabel="Mark as Delivered"
+        onConfirm={confirmDeliver}
+      />
+      <ConfirmDialog
+        open={cancelConfirm}
+        onOpenChange={setCancelConfirm}
+        title="Cancel Order"
+        description="Cancel this order? This action cannot be easily reversed."
+        confirmLabel="Cancel Order"
+        variant="destructive"
+        onConfirm={confirmCancel}
       />
     </div>
   );
