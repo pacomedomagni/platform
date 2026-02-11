@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsDateString, IsEnum, IsArray, ValidateNested, IsBoolean } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsDateString, IsEnum, IsArray, ValidateNested, IsBoolean, Min, Max, ArrayMinSize } from 'class-validator';
 import { Type } from 'class-transformer';
 
 // ==========================================
@@ -66,6 +66,7 @@ export class CreateStockMovementDto {
   remarks?: string;
 
   @IsArray()
+  @ArrayMinSize(1, { message: 'At least one item is required' })
   @ValidateNested({ each: true })
   @Type(() => StockMovementItemDto)
   items!: StockMovementItemDto[];
@@ -94,11 +95,14 @@ export class StockMovementQueryDto {
 
   @IsNumber()
   @IsOptional()
+  @Min(1)
+  @Max(500)
   @Type(() => Number)
   limit?: number;
 
   @IsNumber()
   @IsOptional()
+  @Min(0)
   @Type(() => Number)
   offset?: number;
 }
@@ -154,11 +158,14 @@ export class BatchQueryDto {
 
   @IsNumber()
   @IsOptional()
+  @Min(1)
+  @Max(500)
   @Type(() => Number)
   limit?: number;
 
   @IsNumber()
   @IsOptional()
+  @Min(0)
   @Type(() => Number)
   offset?: number;
 }
@@ -245,11 +252,14 @@ export class SerialQueryDto {
 
   @IsNumber()
   @IsOptional()
+  @Min(1)
+  @Max(500)
   @Type(() => Number)
   limit?: number;
 
   @IsNumber()
   @IsOptional()
+  @Min(0)
   @Type(() => Number)
   offset?: number;
 }

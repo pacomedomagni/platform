@@ -50,14 +50,14 @@ export class UpdateThemeDto {
 
   @IsOptional()
   @IsInt()
-  @Min(100)
-  @Max(900)
+  @Min(100, { message: 'Font weight must be at least 100' })
+  @Max(900, { message: 'Font weight must be at most 900' })
   fontWeightBody?: number;
 
   @IsOptional()
   @IsInt()
-  @Min(100)
-  @Max(900)
+  @Min(100, { message: 'Font weight must be at least 100' })
+  @Max(900, { message: 'Font weight must be at most 900' })
   fontWeightHeading?: number;
 
   // Layout Settings
@@ -105,8 +105,8 @@ export class UpdateThemeDto {
   // Product Display
   @IsOptional()
   @IsInt()
-  @Min(2)
-  @Max(6)
+  @Min(2, { message: 'Product grid must have at least 2 columns' })
+  @Max(6, { message: 'Product grid must have at most 6 columns' })
   productGridColumns?: number;
 
   @IsOptional()

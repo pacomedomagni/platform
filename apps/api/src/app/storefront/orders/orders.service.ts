@@ -2,6 +2,8 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { EmailService } from '@platform/email';
+import { StockMovementService } from '../../inventory-management/stock-movement.service';
+import { MovementType } from '../../inventory-management/inventory-management.dto';
 import { Prisma } from '@prisma/client';
 import { ListOrdersDto } from './dto';
 
@@ -26,6 +28,7 @@ export class OrdersService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly stockMovementService: StockMovementService,
     @Optional() @Inject(EmailService) private readonly emailService?: EmailService,
   ) {}
 
@@ -275,6 +278,11 @@ export class OrdersService {
       data: updateData,
     });
 
+    // Return stock to inventory when cancelling a paid order
+    if (status === 'CANCELLED' && ['CAPTURED', 'PARTIALLY_REFUNDED'].includes(order.paymentStatus)) {
+      await this.returnStockForOrder(tenantId, orderId);
+    }
+
     // Fire-and-forget transactional emails
     if (status === 'SHIPPED') {
       this.sendOrderStatusEmailAsync(orderId, 'store-order-shipped').catch(err =>
@@ -288,6 +296,62 @@ export class OrdersService {
     }
 
     return this.getOrder(tenantId, orderId);
+  }
+
+  /**
+   * Return stock to inventory when an order is cancelled after payment
+   */
+  private async returnStockForOrder(tenantId: string, orderId: string) {
+    try {
+      const order = await this.prisma.order.findUnique({
+        where: { id: orderId },
+        include: {
+          items: {
+            include: {
+              product: {
+                include: { item: true },
+              },
+            },
+          },
+        },
+      });
+
+      if (!order || !order.items.length) return;
+
+      const warehouse = await this.prisma.warehouse.findFirst({
+        where: { tenantId, isActive: true },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      if (!warehouse) {
+        this.logger.error(`No active warehouse found for stock return on order ${orderId}`);
+        return;
+      }
+
+      const items = order.items
+        .filter((item) => item.product?.item?.code)
+        .map((item) => ({
+          itemCode: item.product.item.code,
+          quantity: item.quantity,
+          rate: Number(item.unitPrice),
+        }));
+
+      if (items.length > 0) {
+        await this.stockMovementService.createMovement(
+          { tenantId },
+          {
+            movementType: MovementType.RECEIPT,
+            warehouseCode: warehouse.code,
+            items,
+            reference: `Cancellation of Order ${order.orderNumber}`,
+            remarks: `Stock returned due to order cancellation`,
+          },
+        );
+        this.logger.log(`Stock returned for cancelled order: ${order.orderNumber}`);
+      }
+    } catch (error) {
+      this.logger.error(`Failed to return stock for order ${orderId}:`, error);
+    }
   }
 
   // ============ EMAIL HELPERS ============

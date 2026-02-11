@@ -461,8 +461,12 @@ export class EcommerceController {
   // ============ WISHLIST - PUBLIC (SHARED) ============
 
   @Get('wishlist/shared/:shareToken')
-  async getSharedWishlist(@Param('shareToken') shareToken: string) {
-    return this.wishlistService.getSharedWishlist(shareToken);
+  async getSharedWishlist(
+    @Headers('x-tenant-id') tenantId: string,
+    @Param('shareToken') shareToken: string,
+  ) {
+    if (!tenantId) throw new BadRequestException('Tenant ID required');
+    return this.wishlistService.getSharedWishlist(tenantId, shareToken);
   }
 
   // ============ HELPERS ============

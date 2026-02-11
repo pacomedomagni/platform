@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, OnModuleDestroy } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { PrismaService } from '@platform/db';
 import { EbayStoreService } from './ebay-store.service';
@@ -9,7 +9,7 @@ import eBayApi from 'ebay-api';
  * Handles OAuth 2.0 flow for connecting eBay stores
  */
 @Injectable()
-export class EbayAuthService {
+export class EbayAuthService implements OnModuleDestroy {
   private readonly logger = new Logger(EbayAuthService.name);
   private cleanupInterval: ReturnType<typeof setInterval>;
 
@@ -19,6 +19,12 @@ export class EbayAuthService {
   ) {
     // Clean up expired OAuth states every 10 minutes
     this.cleanupInterval = setInterval(() => this.cleanupExpiredStates(), 10 * 60 * 1000);
+  }
+
+  onModuleDestroy() {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+    }
   }
 
   /**

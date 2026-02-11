@@ -160,7 +160,7 @@ export class ThemesService implements OnModuleInit {
         productImageRatio: dto.productImageRatio || 'square',
         showQuickView: dto.showQuickView ?? true,
         showWishlist: dto.showWishlist ?? true,
-        customCSS: dto.customCSS,
+        customCSS: dto.customCSS ? this.sanitizeCss(dto.customCSS) : null,
         logoUrl: dto.logoUrl,
         faviconUrl: dto.faviconUrl,
         previewImageUrl: dto.previewImageUrl,
@@ -236,7 +236,7 @@ export class ThemesService implements OnModuleInit {
       ...(dto.productImageRatio && { productImageRatio: dto.productImageRatio }),
       ...(dto.showQuickView !== undefined && { showQuickView: dto.showQuickView }),
       ...(dto.showWishlist !== undefined && { showWishlist: dto.showWishlist }),
-      ...(dto.customCSS !== undefined && { customCSS: dto.customCSS }),
+      ...(dto.customCSS !== undefined && { customCSS: dto.customCSS ? this.sanitizeCss(dto.customCSS) : null }),
       ...(dto.logoUrl !== undefined && { logoUrl: dto.logoUrl }),
       ...(dto.faviconUrl !== undefined && { faviconUrl: dto.faviconUrl }),
       ...(dto.previewImageUrl !== undefined && { previewImageUrl: dto.previewImageUrl }),
@@ -480,5 +480,19 @@ export class ThemesService implements OnModuleInit {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '');
+  }
+
+  /**
+   * Sanitize custom CSS to prevent script injection and dangerous properties.
+   * Strips javascript: URLs, expression(), behavior, and @import.
+   */
+  private sanitizeCss(css: string): string {
+    return css
+      .replace(/javascript\s*:/gi, '')
+      .replace(/expression\s*\(/gi, '')
+      .replace(/behavior\s*:/gi, '')
+      .replace(/@import\b/gi, '')
+      .replace(/url\s*\(\s*['"]?\s*javascript:/gi, 'url(')
+      .replace(/-moz-binding\s*:/gi, '');
   }
 }

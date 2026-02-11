@@ -183,11 +183,33 @@ export class ProvisioningService {
       });
       await this.seedData.seedDefaults(tenantId);
 
-      // Step 5: Seed Legal Pages
+      // Step 5: Seed Legal Pages and Store Defaults
       const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId } });
       if (tenant) {
         await this.seedData.seedLegalPages(tenantId, tenant.businessName || tenant.name);
       }
+
+      // Step 6: Seed default store currency (base currency)
+      const baseCurrency = tenant?.baseCurrency || 'USD';
+      await this.prisma.storeCurrency.upsert({
+        where: {
+          tenantId_currencyCode: {
+            tenantId,
+            currencyCode: baseCurrency,
+          },
+        },
+        update: {},
+        create: {
+          tenantId,
+          currencyCode: baseCurrency,
+          name: baseCurrency,
+          symbol: baseCurrency === 'USD' ? '$' : baseCurrency === 'EUR' ? '€' : baseCurrency === 'GBP' ? '£' : baseCurrency,
+          exchangeRate: 1,
+          isBase: true,
+          isEnabled: true,
+          decimalPlaces: 2,
+        },
+      });
 
       // Activate tenant
       await this.prisma.tenant.update({
@@ -208,6 +230,12 @@ export class ProvisioningService {
       });
     } catch (error) {
       this.logger.error(`Seed data provisioning failed for tenant ${tenantId}:`, error);
+
+      // Deactivate tenant on provisioning failure to prevent access to partially configured system
+      await this.prisma.tenant.update({
+        where: { id: tenantId },
+        data: { isActive: false },
+      }).catch((e) => this.logger.error(`Failed to deactivate tenant ${tenantId}:`, e));
 
       await this.updateProvisioningStatus(tenantId, {
         tenantId,

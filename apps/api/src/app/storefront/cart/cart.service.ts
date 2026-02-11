@@ -504,17 +504,36 @@ export class CartService {
    * Remove coupon
    */
   async removeCoupon(tenantId: string, cartId: string) {
-    await this.prisma.cart.update({
-      where: { id: cartId },
-      data: {
-        couponCode: null,
-        discountAmount: 0,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const cart = await tx.cart.findFirst({
+        where: { id: cartId, tenantId, status: 'active' },
+      });
+
+      if (!cart) {
+        throw new NotFoundException('Cart not found');
+      }
+
+      await tx.cart.update({
+        where: { id: cartId },
+        data: {
+          couponCode: null,
+          discountAmount: 0,
+        },
+      });
+
+      await this.recalculateCartInTx(tx, cartId);
+
+      const updatedCart = await tx.cart.findFirst({
+        where: { id: cartId, tenantId, status: 'active' },
+        include: this.cartInclude,
+      });
+
+      if (!updatedCart) {
+        throw new NotFoundException('Cart not found');
+      }
+
+      return this.mapCartToResponse(updatedCart);
     });
-
-    await this.recalculateCart(cartId);
-
-    return this.getCart(tenantId, cartId);
   }
 
   /**
@@ -586,7 +605,46 @@ export class CartService {
         });
       } else {
         // Merge items from anonymous cart using atomic upsert
+        // Validate stock and refresh prices during merge
         for (const item of anonymousCart.items) {
+          // Refresh current price from product listing
+          const product = await tx.productListing.findFirst({
+            where: { id: item.productId, tenantId },
+            include: {
+              item: {
+                include: { warehouseItemBalances: true },
+              },
+            },
+          });
+
+          if (!product || !product.isPublished) {
+            // Skip items that are no longer available
+            continue;
+          }
+
+          const currentPrice = product.price;
+
+          // Check stock availability for merged quantity
+          const existingCartItem = await tx.cartItem.findUnique({
+            where: {
+              cartId_productId_variantId: {
+                cartId: customerCart.id,
+                productId: item.productId,
+                variantId: item.variantId || null,
+              },
+            },
+          });
+
+          const totalQty = (existingCartItem?.quantity || 0) + item.quantity;
+          const availableStock = product.item.warehouseItemBalances.reduce(
+            (sum, b) => sum + Number(b.actualQty) - Number(b.reservedQty),
+            0,
+          );
+
+          // Cap quantity at available stock
+          const cappedQty = Math.min(totalQty, Math.max(availableStock, 0));
+          if (cappedQty <= 0) continue;
+
           await tx.cartItem.upsert({
             where: {
               cartId_productId_variantId: {
@@ -596,14 +654,15 @@ export class CartService {
               },
             },
             update: {
-              quantity: { increment: item.quantity },
+              quantity: cappedQty,
+              price: currentPrice, // Refresh price
             },
             create: {
               tenantId,
               cartId: customerCart.id,
               productId: item.productId,
-              quantity: item.quantity,
-              price: item.price,
+              quantity: cappedQty,
+              price: currentPrice,
             },
           });
         }

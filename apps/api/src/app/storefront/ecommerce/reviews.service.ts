@@ -115,6 +115,11 @@ export class ReviewsService {
   }
 
   async createReview(tenantId: string, customerId: string | null, dto: CreateReviewDto) {
+    // Require authentication to prevent anonymous review spam
+    if (!customerId) {
+      throw new ForbiddenException('You must be logged in to write a review');
+    }
+
     // Verify product exists
     const product = await this.prisma.productListing.findFirst({
       where: { id: dto.productListingId, tenantId },
@@ -125,18 +130,16 @@ export class ReviewsService {
     }
 
     // Check if customer already reviewed this product
-    if (customerId) {
-      const existingReview = await this.prisma.productReview.findFirst({
-        where: {
-          tenantId,
-          productListingId: dto.productListingId,
-          customerId,
-        },
-      });
+    const existingReview = await this.prisma.productReview.findFirst({
+      where: {
+        tenantId,
+        productListingId: dto.productListingId,
+        customerId,
+      },
+    });
 
-      if (existingReview) {
-        throw new BadRequestException('You have already reviewed this product');
-      }
+    if (existingReview) {
+      throw new BadRequestException('You have already reviewed this product');
     }
 
     // Check for verified purchase
@@ -196,14 +199,19 @@ export class ReviewsService {
       throw new NotFoundException('Review not found');
     }
 
-    // Check for existing vote
+    // Check for existing vote - build OR conditions only for provided identifiers
+    const orConditions: any[] = [];
+    if (customerId) orConditions.push({ customerId });
+    if (sessionToken) orConditions.push({ sessionToken });
+
+    if (orConditions.length === 0) {
+      throw new BadRequestException('Must be logged in or have a session to vote');
+    }
+
     const existingVote = await this.prisma.reviewVote.findFirst({
       where: {
         reviewId,
-        OR: [
-          { customerId: customerId || undefined },
-          { sessionToken: sessionToken || undefined },
-        ],
+        OR: orConditions,
       },
     });
 
@@ -308,8 +316,8 @@ export class ReviewsService {
       },
     });
 
-    // Update product rating stats if approved
-    if (dto.status === 'approved') {
+    // Update product rating stats when approval status changes
+    if (dto.status === 'approved' || dto.status === 'rejected') {
       await this.updateProductRatingStats(tenantId, review.productListingId);
     }
 

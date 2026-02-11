@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { UpdateStoreSettingsDto } from './store-settings.dto';
 import { DomainResolverService } from '../domain-resolver/domain-resolver.service';
@@ -131,6 +131,19 @@ export class StoreSettingsService {
     }
 
     const normalized = normalizeDomain(customDomain);
+
+    // Prevent domain hijacking: ensure no other tenant already uses this domain
+    const existingTenant = await this.prisma.tenant.findFirst({
+      where: {
+        customDomain: normalized,
+        id: { not: tenantId },
+      },
+    });
+
+    if (existingTenant) {
+      throw new BadRequestException('This domain is already associated with another store');
+    }
+
     const targetCname = normalizeDomain(process.env['CUSTOM_DOMAIN_CNAME_TARGET'] || 'noslag.com');
     const expectedARecords = (process.env['CUSTOM_DOMAIN_A_RECORDS'] || '')
       .split(',')

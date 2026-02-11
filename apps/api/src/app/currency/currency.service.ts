@@ -254,8 +254,13 @@ export class CurrencyService {
     }
 
     // Convert: amount in FROM -> base -> TO
-    const baseAmount = amount / Number(from.exchangeRate);
-    const convertedAmount = baseAmount * Number(to.exchangeRate);
+    const fromRate = Number(from.exchangeRate) || 1;
+    const toRate = Number(to.exchangeRate) || 1;
+    if (fromRate === 0) {
+      throw new BadRequestException(`Exchange rate for ${fromCurrency} is zero`);
+    }
+    const baseAmount = amount / fromRate;
+    const convertedAmount = baseAmount * toRate;
 
     // Round to decimal places
     const rounded = Math.round(convertedAmount * Math.pow(10, to.decimalPlaces)) / Math.pow(10, to.decimalPlaces);

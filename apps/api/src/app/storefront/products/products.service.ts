@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { Prisma } from '@prisma/client';
 import * as crypto from 'crypto';
@@ -333,66 +333,74 @@ export class ProductsService {
    * Create a new product listing (admin)
    */
   async createProductListing(tenantId: string, dto: CreateProductListingDto) {
-    // Check if item exists
-    const item = await this.prisma.item.findFirst({
-      where: { id: dto.itemId, tenantId },
-    });
+    // Use transaction to make validation + creation atomic (prevent TOCTOU race on slug)
+    const product = await this.prisma.$transaction(async (tx) => {
+      // Check if item exists
+      const item = await tx.item.findFirst({
+        where: { id: dto.itemId, tenantId },
+      });
 
-    if (!item) {
-      throw new NotFoundException('Item not found');
-    }
+      if (!item) {
+        throw new NotFoundException('Item not found');
+      }
 
-    // Check if slug is unique
-    const existingSlug = await this.prisma.productListing.findFirst({
-      where: { tenantId, slug: dto.slug },
-    });
+      // Check if slug is unique
+      const existingSlug = await tx.productListing.findFirst({
+        where: { tenantId, slug: dto.slug },
+      });
 
-    if (existingSlug) {
-      throw new ConflictException('Product with this slug already exists');
-    }
+      if (existingSlug) {
+        throw new ConflictException('Product with this slug already exists');
+      }
 
-    // Check if item already has a listing
-    const existingListing = await this.prisma.productListing.findFirst({
-      where: { tenantId, itemId: dto.itemId },
-    });
+      // Check if item already has a listing
+      const existingListing = await tx.productListing.findFirst({
+        where: { tenantId, itemId: dto.itemId },
+      });
 
-    if (existingListing) {
-      throw new ConflictException('Item already has a product listing');
-    }
+      if (existingListing) {
+        throw new ConflictException('Item already has a product listing');
+      }
 
-    const product = await this.prisma.productListing.create({
-      data: {
-        tenantId,
-        itemId: dto.itemId,
-        slug: dto.slug,
-        displayName: dto.displayName,
-        shortDescription: dto.shortDescription,
-        longDescription: dto.longDescription,
-        price: dto.price,
-        compareAtPrice: dto.compareAtPrice,
-        images: dto.images || [],
-        categoryId: dto.categoryId,
-        badge: dto.badge,
-        isFeatured: dto.isFeatured ?? false,
-        isPublished: dto.isPublished ?? false,
-        publishedAt: dto.isPublished ? new Date() : null,
-        metaTitle: dto.metaTitle,
-        metaDescription: dto.metaDescription,
-      },
-      include: {
-        category: {
-          select: { id: true, name: true, slug: true },
+      // Validate price is positive if set
+      if (dto.price !== undefined && Number(dto.price) < 0) {
+        throw new BadRequestException('Price cannot be negative');
+      }
+
+      return tx.productListing.create({
+        data: {
+          tenantId,
+          itemId: dto.itemId,
+          slug: dto.slug,
+          displayName: dto.displayName,
+          shortDescription: dto.shortDescription,
+          longDescription: dto.longDescription,
+          price: dto.price,
+          compareAtPrice: dto.compareAtPrice,
+          images: dto.images || [],
+          categoryId: dto.categoryId,
+          badge: dto.badge,
+          isFeatured: dto.isFeatured ?? false,
+          isPublished: false, // Always start unpublished, use update to publish
+          publishedAt: null,
+          metaTitle: dto.metaTitle,
+          metaDescription: dto.metaDescription,
         },
-        item: {
-          select: {
-            code: true,
-            stockUomCode: true,
-            warehouseItemBalances: {
-              select: { actualQty: true, reservedQty: true },
+        include: {
+          category: {
+            select: { id: true, name: true, slug: true },
+          },
+          item: {
+            select: {
+              code: true,
+              stockUomCode: true,
+              warehouseItemBalances: {
+                select: { actualQty: true, reservedQty: true },
+              },
             },
           },
         },
-      },
+      });
     });
 
     return this.mapProductToDetailResponse(product);
@@ -436,12 +444,26 @@ export class ProductsService {
       ...(dto.metaDescription !== undefined && { metaDescription: dto.metaDescription }),
     };
 
-    // Handle publishing
+    // Handle publishing with validation
     if (dto.isPublished !== undefined) {
-      updateData.isPublished = dto.isPublished;
       if (dto.isPublished && !existing.isPublished) {
+        // Validate required fields before publishing
+        const displayName = dto.displayName || existing.displayName;
+        const price = dto.price ?? existing.price;
+
+        if (!displayName || !displayName.trim()) {
+          throw new BadRequestException('Product must have a display name before publishing');
+        }
+        if (price === null || price === undefined || Number(price) <= 0) {
+          throw new BadRequestException('Product must have a valid price before publishing');
+        }
+        if (!existing.images?.length && !dto.images?.length) {
+          throw new BadRequestException('Product must have at least one image before publishing');
+        }
+
         updateData.publishedAt = new Date();
       }
+      updateData.isPublished = dto.isPublished;
     }
 
     const product = await this.prisma.productListing.update({

@@ -196,6 +196,14 @@ export class OperationsController {
   // Background Jobs
   // ==========================================
 
+  // Static routes MUST come before parameterized routes to prevent shadowing
+  @Get('jobs/stats')
+  @Roles('admin')
+  async getJobStats(@Tenant() tenantId: string, @Request() req: RequestWithUser) {
+    const ctx = this.getContext(tenantId, req);
+    return this.jobService.getStats(ctx);
+  }
+
   @Get('jobs')
   @Roles('admin')
   async getJobs(
@@ -241,13 +249,6 @@ export class OperationsController {
   async retryJob(@Tenant() tenantId: string, @Request() req: RequestWithUser, @Param('id') id: string) {
     const ctx = this.getContext(tenantId, req);
     return this.jobService.retryJob(ctx, id);
-  }
-
-  @Get('jobs/stats')
-  @Roles('admin')
-  async getJobStats(@Tenant() tenantId: string, @Request() req: RequestWithUser) {
-    const ctx = this.getContext(tenantId, req);
-    return this.jobService.getStats(ctx);
   }
 
   // ==========================================
@@ -357,6 +358,15 @@ export class OperationsController {
   // Notifications
   // ==========================================
 
+  // Static routes MUST come before parameterized routes to prevent shadowing
+
+  @Get('notifications/unread-count')
+  async getUnreadCount(@Tenant() tenantId: string, @Request() req: RequestWithUser) {
+    const ctx = this.getContext(tenantId, req);
+    const count = await this.notificationService.getUnreadCount(ctx, req.user.userId);
+    return { count };
+  }
+
   @Get('notifications')
   async getNotifications(
     @Tenant() tenantId: string,
@@ -376,23 +386,10 @@ export class OperationsController {
     });
   }
 
-  @Get('notifications/unread-count')
-  async getUnreadCount(@Tenant() tenantId: string, @Request() req: RequestWithUser) {
-    const ctx = this.getContext(tenantId, req);
-    const count = await this.notificationService.getUnreadCount(ctx, req.user.userId);
-    return { count };
-  }
-
   @Get('notifications/:id')
   async getNotification(@Tenant() tenantId: string, @Request() req: RequestWithUser, @Param('id') id: string) {
     const ctx = this.getContext(tenantId, req);
     return this.notificationService.findOne(ctx, id);
-  }
-
-  @Put('notifications/:id/read')
-  async markAsRead(@Tenant() tenantId: string, @Request() req: RequestWithUser, @Param('id') id: string) {
-    const ctx = this.getContext(tenantId, req);
-    return this.notificationService.markAsRead(ctx, id);
   }
 
   @Put('notifications/read-all')
@@ -409,11 +406,10 @@ export class OperationsController {
     return { marked: count };
   }
 
-  @Delete('notifications/:id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async deleteNotification(@Tenant() tenantId: string, @Request() req: RequestWithUser, @Param('id') id: string) {
+  @Put('notifications/:id/read')
+  async markAsRead(@Tenant() tenantId: string, @Request() req: RequestWithUser, @Param('id') id: string) {
     const ctx = this.getContext(tenantId, req);
-    await this.notificationService.delete(ctx, id);
+    return this.notificationService.markAsRead(ctx, id);
   }
 
   @Delete('notifications/read')
@@ -421,5 +417,12 @@ export class OperationsController {
     const ctx = this.getContext(tenantId, req);
     const count = await this.notificationService.deleteRead(ctx, req.user.userId);
     return { deleted: count };
+  }
+
+  @Delete('notifications/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async deleteNotification(@Tenant() tenantId: string, @Request() req: RequestWithUser, @Param('id') id: string) {
+    const ctx = this.getContext(tenantId, req);
+    await this.notificationService.delete(ctx, id);
   }
 }

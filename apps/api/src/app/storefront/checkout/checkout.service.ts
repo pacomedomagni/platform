@@ -6,9 +6,12 @@ import {
 } from '@nestjs/common';
 import { PinoLogger, InjectPinoLogger } from 'nestjs-pino';
 import { PrismaService } from '@platform/db';
+import { Prisma } from '@prisma/client';
 import { StripeService } from '../payments/stripe.service';
 import { StripeConnectService } from '../../onboarding/stripe-connect.service';
 import { CreateCheckoutDto, UpdateCheckoutDto } from './dto';
+
+const CHECKOUT_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
 
 @Injectable()
 export class CheckoutService {
@@ -44,7 +47,7 @@ export class CheckoutService {
       // Fix #11: Extend cart expiry to prevent cleanup job race during checkout
       await tx.cart.update({
         where: { id: dto.cartId },
-        data: { expiresAt: new Date(Date.now() + 30 * 60 * 1000) }, // 30 minutes
+        data: { expiresAt: new Date(Date.now() + CHECKOUT_EXPIRY_MS) }, // 30 minutes
       });
 
       // Get cart with items (now that we hold the lock)
@@ -73,6 +76,30 @@ export class CheckoutService {
 
       if (!cart || cart.items.length === 0) {
         throw new BadRequestException('Cart is empty');
+      }
+
+      // Re-validate coupon at checkout time (may have expired or hit limit since added to cart)
+      if (cart.couponCode) {
+        const coupon = await tx.coupon.findFirst({
+          where: { tenantId, code: cart.couponCode },
+        });
+        const now = new Date();
+        const invalid = !coupon || !coupon.isActive
+          || (coupon.expiresAt && new Date(coupon.expiresAt) < now)
+          || (coupon.usageLimit && coupon.timesUsed >= coupon.usageLimit);
+
+        if (invalid) {
+          await tx.cart.update({
+            where: { id: cart.id },
+            data: { couponCode: null, discountAmount: 0 },
+          });
+          (cart as any).discountAmount = new Prisma.Decimal(0);
+          (cart as any).couponCode = null;
+          // Recalculate grandTotal without discount
+          (cart as any).grandTotal = new Prisma.Decimal(
+            Number(cart.subtotal) + Number(cart.shippingTotal) + Number(cart.taxTotal)
+          );
+        }
       }
 
       // PAY-4: Acquire advisory locks per item to prevent concurrent stock modifications
@@ -202,6 +229,9 @@ export class CheckoutService {
         customerEmail: dto.email,
       };
 
+      // Determine currency from tenant configuration
+      const tenantCurrency = (result.currency || 'usd').toLowerCase();
+
       if (
         tenant?.paymentProvider === 'stripe' &&
         tenant.stripeConnectAccountId &&
@@ -217,7 +247,7 @@ export class CheckoutService {
           await this.stripeConnectService.createConnectedPaymentIntent(
             tenant.stripeConnectAccountId,
             amount,
-            'usd',
+            tenantCurrency,
             fee,
             metadata,
             idempotencyKey,
@@ -240,7 +270,7 @@ export class CheckoutService {
         // Fallback: direct Stripe (for tenants without Connect setup)
         const paymentIntent = await this.stripeService.createPaymentIntent(
           Number(result.grandTotal),
-          'usd',
+          tenantCurrency,
           metadata,
           idempotencyKey,
         );
@@ -302,6 +332,8 @@ export class CheckoutService {
     let clientSecret: string | null = null;
     let paymentProvider = 'stripe';
 
+    const retryCurrency = (order.currency || 'usd').toLowerCase();
+
     if (
       tenant?.paymentProvider === 'stripe' &&
       tenant.stripeConnectAccountId &&
@@ -316,7 +348,7 @@ export class CheckoutService {
         await this.stripeConnectService.createConnectedPaymentIntent(
           tenant.stripeConnectAccountId,
           amount,
-          'usd',
+          retryCurrency,
           fee,
           metadata,
           idempotencyKey,
@@ -331,7 +363,7 @@ export class CheckoutService {
     } else {
       const paymentIntent = await this.stripeService.createPaymentIntent(
         Number(order.grandTotal),
-        'usd',
+        retryCurrency,
         metadata,
         idempotencyKey,
       );

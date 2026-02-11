@@ -1,30 +1,15 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '@platform/db';
 
 interface TenantContext {
   tenantId: string;
 }
 
 type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+const DEFAULT_MAX_ATTEMPTS = 3;
 
 interface JobHandler {
   (tenantId: string, payload: Record<string, unknown>): Promise<unknown>;
-}
-
-interface BackgroundJob {
-  id: string;
-  tenantId: string;
-  type: string;
-  payload?: Record<string, unknown>;
-  status: JobStatus;
-  priority: number;
-  attempts: number;
-  maxAttempts: number;
-  error?: string;
-  result?: unknown;
-  scheduledAt?: Date;
-  startedAt?: Date;
-  completedAt?: Date;
-  createdAt: Date;
 }
 
 @Injectable()
@@ -32,10 +17,8 @@ export class BackgroundJobService {
   private readonly logger = new Logger(BackgroundJobService.name);
   private handlers = new Map<string, JobHandler>();
   private processingJobs = new Set<string>();
-  
-  // In-memory job store
-  private jobs: BackgroundJob[] = [];
-  private jobIdCounter = 0;
+
+  constructor(private readonly prisma: PrismaService) {}
 
   /**
    * Register a job handler
@@ -56,23 +39,21 @@ export class BackgroundJobService {
       scheduledAt?: Date;
       priority?: number;
     }
-  ): Promise<BackgroundJob> {
-    const job: BackgroundJob = {
-      id: `job_${++this.jobIdCounter}_${Date.now()}`,
-      tenantId: ctx.tenantId,
-      type: data.type,
-      payload: data.payload,
-      scheduledAt: data.scheduledAt,
-      priority: data.priority ?? 0,
-      status: 'pending',
-      attempts: 0,
-      maxAttempts: 3,
-      createdAt: new Date(),
-    };
+  ) {
+    const job = await this.prisma.backgroundJob.create({
+      data: {
+        tenantId: ctx.tenantId,
+        type: data.type,
+        payload: data.payload ?? undefined,
+        scheduledAt: data.scheduledAt,
+        priority: data.priority ?? 0,
+        status: 'pending',
+        attempts: 0,
+        maxAttempts: DEFAULT_MAX_ATTEMPTS,
+      },
+    });
 
-    this.jobs.push(job);
     this.logger.debug(`Created job ${job.id} of type ${job.type}`);
-    
     return job;
   }
 
@@ -88,27 +69,28 @@ export class BackgroundJobService {
       page?: number;
     }
   ) {
-    const limit = filters.limit || 50;
+    const limit = Math.min(filters.limit || 50, 500);
     const page = filters.page || 1;
     const offset = (page - 1) * limit;
 
-    let filtered = this.jobs.filter(j => j.tenantId === ctx.tenantId);
-    
+    const where: any = { tenantId: ctx.tenantId };
+
     if (filters.status) {
-      filtered = filtered.filter(j => j.status === filters.status);
+      where.status = filters.status;
     }
     if (filters.type) {
-      filtered = filtered.filter(j => j.type === filters.type);
+      where.type = filters.type;
     }
 
-    // Sort by priority desc, then createdAt desc
-    filtered.sort((a, b) => {
-      if (a.priority !== b.priority) return b.priority - a.priority;
-      return b.createdAt.getTime() - a.createdAt.getTime();
-    });
-
-    const total = filtered.length;
-    const data = filtered.slice(offset, offset + limit);
+    const [data, total] = await Promise.all([
+      this.prisma.backgroundJob.findMany({
+        where,
+        orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
+        take: limit,
+        skip: offset,
+      }),
+      this.prisma.backgroundJob.count({ where }),
+    ]);
 
     return {
       data,
@@ -120,8 +102,10 @@ export class BackgroundJobService {
   /**
    * Get job by ID
    */
-  async findOne(ctx: TenantContext, id: string): Promise<BackgroundJob> {
-    const job = this.jobs.find(j => j.id === id && j.tenantId === ctx.tenantId);
+  async findOne(ctx: TenantContext, id: string) {
+    const job = await this.prisma.backgroundJob.findFirst({
+      where: { id, tenantId: ctx.tenantId },
+    });
 
     if (!job) {
       throw new NotFoundException(`Job '${id}' not found`);
@@ -133,31 +117,37 @@ export class BackgroundJobService {
   /**
    * Cancel a pending job
    */
-  async cancelJob(ctx: TenantContext, id: string): Promise<BackgroundJob> {
+  async cancelJob(ctx: TenantContext, id: string) {
     const job = await this.findOne(ctx, id);
 
     if (job.status !== 'pending') {
       throw new Error(`Cannot cancel job in '${job.status}' status`);
     }
 
-    job.status = 'cancelled';
-    return job;
+    return this.prisma.backgroundJob.update({
+      where: { id },
+      data: { status: 'cancelled' },
+    });
   }
 
   /**
    * Retry a failed job
    */
-  async retryJob(ctx: TenantContext, id: string): Promise<BackgroundJob> {
+  async retryJob(ctx: TenantContext, id: string) {
     const job = await this.findOne(ctx, id);
 
     if (job.status !== 'failed') {
       throw new Error(`Cannot retry job in '${job.status}' status`);
     }
 
-    job.status = 'pending';
-    job.error = undefined;
-    job.attempts = 0;
-    return job;
+    return this.prisma.backgroundJob.update({
+      where: { id },
+      data: {
+        status: 'pending',
+        error: null,
+        attempts: 0,
+      },
+    });
   }
 
   /**
@@ -166,22 +156,21 @@ export class BackgroundJobService {
   async processPendingJobs(batchSize = 10): Promise<number> {
     const now = new Date();
 
-    // Get pending jobs that are ready to run
-    const pendingJobs = this.jobs
-      .filter(j => 
-        j.status === 'pending' && 
-        (!j.scheduledAt || j.scheduledAt <= now)
-      )
-      .sort((a, b) => {
-        if (a.priority !== b.priority) return b.priority - a.priority;
-        return a.createdAt.getTime() - b.createdAt.getTime();
-      })
-      .slice(0, batchSize);
+    const pendingJobs = await this.prisma.backgroundJob.findMany({
+      where: {
+        status: 'pending',
+        OR: [
+          { scheduledAt: null },
+          { scheduledAt: { lte: now } },
+        ],
+      },
+      orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }],
+      take: batchSize,
+    });
 
     let processed = 0;
 
     for (const job of pendingJobs) {
-      // Skip if already being processed
       if (this.processingJobs.has(job.id)) continue;
 
       this.processingJobs.add(job.id);
@@ -202,41 +191,65 @@ export class BackgroundJobService {
   /**
    * Process a single job
    */
-  private async processJob(job: BackgroundJob): Promise<void> {
+  private async processJob(job: any): Promise<void> {
     const handler = this.handlers.get(job.type);
 
     if (!handler) {
       this.logger.warn(`No handler registered for job type: ${job.type}`);
-      job.status = 'failed';
-      job.error = `No handler registered for job type: ${job.type}`;
+      await this.prisma.backgroundJob.update({
+        where: { id: job.id },
+        data: {
+          status: 'failed',
+          error: `No handler registered for job type: ${job.type}`,
+        },
+      });
       return;
     }
 
     // Mark as running
-    job.status = 'running';
-    job.startedAt = new Date();
-    job.attempts++;
+    await this.prisma.backgroundJob.update({
+      where: { id: job.id },
+      data: {
+        status: 'running',
+        startedAt: new Date(),
+        attempts: { increment: 1 },
+      },
+    });
 
     try {
-      const result = await handler(job.tenantId, job.payload || {});
+      const result = await handler(job.tenantId, (job.payload as Record<string, unknown>) || {});
 
-      // Mark as completed
-      job.status = 'completed';
-      job.completedAt = new Date();
-      job.result = result;
+      await this.prisma.backgroundJob.update({
+        where: { id: job.id },
+        data: {
+          status: 'completed',
+          completedAt: new Date(),
+          result: result as any,
+        },
+      });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      const shouldRetry = job.attempts < job.maxAttempts;
-
-      job.error = errorMessage;
+      const currentAttempts = job.attempts + 1;
+      const shouldRetry = currentAttempts < job.maxAttempts;
 
       if (shouldRetry) {
-        job.status = 'pending';
-        // Exponential backoff for retry
-        job.scheduledAt = new Date(Date.now() + Math.pow(2, job.attempts) * 1000 * 60);
+        await this.prisma.backgroundJob.update({
+          where: { id: job.id },
+          data: {
+            status: 'pending',
+            error: errorMessage,
+            scheduledAt: new Date(Date.now() + Math.pow(2, currentAttempts) * 1000 * 60),
+          },
+        });
       } else {
-        job.status = 'failed';
-        this.logger.error(`Job ${job.id} failed after ${job.attempts} attempts: ${errorMessage}`);
+        await this.prisma.backgroundJob.update({
+          where: { id: job.id },
+          data: {
+            status: 'failed',
+            error: errorMessage,
+          },
+        });
+        this.logger.error(`Job ${job.id} failed after ${currentAttempts} attempts: ${errorMessage}`);
       }
     }
   }
@@ -245,56 +258,58 @@ export class BackgroundJobService {
    * Get job statistics
    */
   async getStats(ctx: TenantContext) {
-    const tenantJobs = this.jobs.filter(j => j.tenantId === ctx.tenantId);
+    const where = { tenantId: ctx.tenantId };
 
-    // Status counts
-    const statusCounts: Record<string, number> = {};
-    for (const job of tenantJobs) {
-      statusCounts[job.status] = (statusCounts[job.status] || 0) + 1;
-    }
-
-    // Type counts
-    const typeCounts: Record<string, number> = {};
-    for (const job of tenantJobs) {
-      typeCounts[job.type] = (typeCounts[job.type] || 0) + 1;
-    }
-
-    // Recent failures (last 24 hours)
-    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const recentFailures = tenantJobs
-      .filter(j => j.status === 'failed' && j.createdAt >= oneDayAgo)
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-      .slice(0, 10);
+    const [statusCounts, typeCounts, recentFailures] = await Promise.all([
+      this.prisma.backgroundJob.groupBy({
+        by: ['status'],
+        where,
+        _count: true,
+      }),
+      this.prisma.backgroundJob.groupBy({
+        by: ['type'],
+        where,
+        _count: true,
+      }),
+      this.prisma.backgroundJob.findMany({
+        where: {
+          ...where,
+          status: 'failed',
+          createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+        select: {
+          id: true,
+          type: true,
+          error: true,
+          createdAt: true,
+        },
+      }),
+    ]);
 
     return {
-      byStatus: Object.entries(statusCounts).map(([status, count]) => ({ status, count })),
-      byType: Object.entries(typeCounts).map(([type, count]) => ({ type, count })),
-      recentFailures: recentFailures.map(j => ({
-        id: j.id,
-        type: j.type,
-        error: j.error,
-        createdAt: j.createdAt,
-      })),
+      byStatus: statusCounts.map((s) => ({ status: s.status, count: s._count })),
+      byType: typeCounts.map((t) => ({ type: t.type, count: t._count })),
+      recentFailures,
     };
   }
 
   /**
-   * Cleanup old jobs (for memory management)
+   * Cleanup old jobs
    */
   async cleanup(retentionDays: number): Promise<number> {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
 
-    const initialCount = this.jobs.length;
-    this.jobs = this.jobs.filter(
-      j => !(
-        (j.status === 'completed' || j.status === 'failed' || j.status === 'cancelled') && 
-        j.createdAt < cutoffDate
-      )
-    );
-    
-    const deletedCount = initialCount - this.jobs.length;
-    this.logger.log(`Deleted ${deletedCount} old jobs`);
-    return deletedCount;
+    const result = await this.prisma.backgroundJob.deleteMany({
+      where: {
+        status: { in: ['completed', 'failed', 'cancelled'] },
+        createdAt: { lt: cutoffDate },
+      },
+    });
+
+    this.logger.log(`Deleted ${result.count} old jobs`);
+    return result.count;
   }
 }

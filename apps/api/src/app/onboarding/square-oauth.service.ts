@@ -79,6 +79,16 @@ export class SquareOAuthService {
 
     const { tenantId } = stateData;
 
+    // Validate tenant exists
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+    });
+
+    if (!tenant) {
+      await this.prisma.oAuthState.delete({ where: { id: state } });
+      throw new BadRequestException('Invalid tenant');
+    }
+
     try {
       // Exchange code for tokens
       const tokens = await this.exchangeCodeForTokens(code);
@@ -107,8 +117,7 @@ export class SquareOAuthService {
           squareMerchantId: merchantInfo.merchantId,
           squareLocationId: merchantInfo.locationId,
           paymentProviderStatus: 'active',
-          onboardingStep: 'completed',
-          onboardingCompletedAt: new Date(),
+          onboardingStep: 'payment_complete',
         },
       });
 

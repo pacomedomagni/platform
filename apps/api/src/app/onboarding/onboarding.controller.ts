@@ -9,6 +9,7 @@ import {
   HttpStatus,
   UseGuards,
   ValidationPipe,
+  ForbiddenException,
 } from '@nestjs/common';
 import { AuthGuard, AuthenticatedUser } from '@platform/auth';
 import { OnboardingService } from './onboarding.service';
@@ -38,10 +39,18 @@ export class OnboardingController {
 
   /**
    * GET /api/onboarding/:tenantId/status
-   * Public endpoint — poll for provisioning + onboarding status
+   * Requires authentication — poll for provisioning + onboarding status
    */
   @Get(':tenantId/status')
-  async getStatus(@Param('tenantId') tenantId: string) {
+  @UseGuards(AuthGuard)
+  async getStatus(
+    @Param('tenantId') tenantId: string,
+    @Req() req: RequestWithUser,
+  ) {
+    // Verify user belongs to the requested tenant
+    if (req.user.tenantId !== tenantId) {
+      throw new ForbiddenException('Access denied');
+    }
     return this.onboardingService.getOnboardingStatus(tenantId);
   }
 
@@ -56,6 +65,9 @@ export class OnboardingController {
     @Param('tenantId') tenantId: string,
     @Req() req: RequestWithUser,
   ) {
+    if (req.user.tenantId !== tenantId) {
+      throw new ForbiddenException('Access denied');
+    }
     const userId = req.user.userId;
     return this.onboardingService.initiatePaymentOnboarding(tenantId, userId);
   }
@@ -67,7 +79,13 @@ export class OnboardingController {
   @Post(':tenantId/complete')
   @UseGuards(AuthGuard)
   @HttpCode(HttpStatus.OK)
-  async complete(@Param('tenantId') tenantId: string) {
+  async complete(
+    @Param('tenantId') tenantId: string,
+    @Req() req: RequestWithUser,
+  ) {
+    if (req.user.tenantId !== tenantId) {
+      throw new ForbiddenException('Access denied');
+    }
     return this.onboardingService.completeOnboarding(tenantId);
   }
 
@@ -78,7 +96,13 @@ export class OnboardingController {
    */
   @Get(':tenantId/payment/refresh')
   @UseGuards(AuthGuard)
-  async refreshPaymentStatus(@Param('tenantId') tenantId: string) {
+  async refreshPaymentStatus(
+    @Param('tenantId') tenantId: string,
+    @Req() req: RequestWithUser,
+  ) {
+    if (req.user.tenantId !== tenantId) {
+      throw new ForbiddenException('Access denied');
+    }
     return this.onboardingService.refreshPaymentProviderStatus(tenantId);
   }
 
@@ -88,7 +112,13 @@ export class OnboardingController {
    */
   @Get(':tenantId/stripe/dashboard')
   @UseGuards(AuthGuard)
-  async getStripeDashboard(@Param('tenantId') tenantId: string) {
+  async getStripeDashboard(
+    @Param('tenantId') tenantId: string,
+    @Req() req: RequestWithUser,
+  ) {
+    if (req.user.tenantId !== tenantId) {
+      throw new ForbiddenException('Access denied');
+    }
     return this.onboardingService.getStripeDashboardLink(tenantId);
   }
 }

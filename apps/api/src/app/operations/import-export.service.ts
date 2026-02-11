@@ -1,5 +1,5 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
-import { PrismaService } from '@platform/db';
+import { PrismaService, Prisma } from '@platform/db';
 import { Response } from 'express';
 import { BackgroundJobService } from './background-job.service';
 import { StockMovementService } from '../inventory-management/stock-movement.service';
@@ -81,7 +81,12 @@ export class ImportExportService {
       dryRun?: boolean;
     } = {}
   ): Promise<ImportResult> {
-    const data = JSON.parse(jsonContent);
+    let data: unknown;
+    try {
+      data = JSON.parse(jsonContent);
+    } catch {
+      throw new BadRequestException('Invalid JSON content');
+    }
     const rows = Array.isArray(data) ? data : [data];
 
     if (rows.length === 0) {
@@ -419,7 +424,14 @@ export class ImportExportService {
       const values = headers.map(h => {
         const val = row[h];
         if (val === null || val === undefined) return '""';
-        if (typeof val === 'string') return `"${val.replace(/"/g, '""')}"`;
+        if (typeof val === 'string') {
+          // Sanitize against CSV formula injection
+          let sanitized = val.replace(/"/g, '""');
+          if (/^[=+\-@\t\r]/.test(sanitized)) {
+            sanitized = `'${sanitized}`;
+          }
+          return `"${sanitized}"`;
+        }
         return `"${val}"`;
       });
       csvRows.push(values.join(','));
@@ -572,7 +584,7 @@ export class ImportExportService {
   // ==========================================
 
   private parseCsv(content: string): Record<string, string>[] {
-    const lines = content.trim().split('\n');
+    const lines = content.trim().replace(/\r\n/g, '\n').split('\n');
     if (lines.length < 2) return [];
 
     const headers = this.parseCsvLine(lines[0]);

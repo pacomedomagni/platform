@@ -174,13 +174,13 @@ export class EbayListingsService {
         condition: data.condition,
         categoryId: data.categoryId,
         photos: JSON.stringify(data.photos || []),
-        itemSpecifics: data.itemSpecifics as any,
+        itemSpecifics: data.itemSpecifics ? JSON.stringify(data.itemSpecifics) : null,
         platformData: JSON.stringify({
           format: 'FIXED_PRICE',
           listingDuration: 'GTC',
           ...(data.platformData || {}),
         }),
-        status: ListingStatus.APPROVED, // Direct listings are auto-approved
+        status: ListingStatus.DRAFT, // Direct listings start as draft, require approval
         syncStatus: SyncStatus.PENDING,
       },
     });

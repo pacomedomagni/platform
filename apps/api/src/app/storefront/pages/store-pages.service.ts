@@ -27,12 +27,12 @@ export class StorePagesService {
     return pages;
   }
 
-  async getPage(tenantId: string, slug: string) {
+  async getPage(tenantId: string, slug: string, requirePublished = true) {
     const page = await this.prisma.storePage.findUnique({
       where: { tenantId_slug: { tenantId, slug } },
     });
 
-    if (!page) {
+    if (!page || (requirePublished && !page.isPublished)) {
       throw new NotFoundException(`Page "${slug}" not found`);
     }
 

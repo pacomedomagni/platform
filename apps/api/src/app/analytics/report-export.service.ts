@@ -340,20 +340,29 @@ export class ReportExportService {
       const values = headers.map(h => {
         const val = row[h];
         if (val === null || val === undefined) return '""';
-        if (typeof val === 'string') return `"${val.replace(/"/g, '""')}"`;
+        if (typeof val === 'string') {
+          // Prevent CSV formula injection by prefixing dangerous characters
+          let safe = val.replace(/"/g, '""');
+          if (/^[=+\-@\t\r]/.test(safe)) {
+            safe = `'${safe}`;
+          }
+          return `"${safe}"`;
+        }
         return `"${val}"`;
       });
       csvRows.push(values.join(','));
     }
 
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    const safeFilename = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}"`);
     res.send(csvRows.join('\n'));
   }
 
   private sendJson(res: Response, data: unknown, filename: string): void {
     res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    const safeFilename = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}"`);
     res.send(JSON.stringify(data, null, 2));
   }
 }

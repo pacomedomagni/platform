@@ -25,9 +25,13 @@ export class GiftCardsService {
       throw new NotFoundException('Gift card not found');
     }
 
-    // Verify PIN if set
-    if (giftCard.pin && giftCard.pin !== pin) {
-      throw new BadRequestException('Invalid PIN');
+    // Verify PIN if set (use timing-safe comparison to prevent timing attacks)
+    if (giftCard.pin) {
+      const pinStr = String(pin || '');
+      const storedPin = String(giftCard.pin);
+      if (pinStr.length !== storedPin.length || !crypto.timingSafeEqual(Buffer.from(pinStr), Buffer.from(storedPin))) {
+        throw new BadRequestException('Invalid PIN');
+      }
     }
 
     // Check if expired
@@ -55,63 +59,76 @@ export class GiftCardsService {
     dto: RedeemGiftCardDto,
     amount: number
   ) {
-    const giftCard = await this.prisma.giftCard.findFirst({
-      where: { tenantId, code: dto.code.toUpperCase() },
-    });
+    // Use interactive transaction with row-level locking to prevent race conditions
+    return this.prisma.$transaction(async (tx) => {
+      // Lock the gift card row to prevent concurrent redemptions
+      const lockedCards = await tx.$queryRaw<any[]>`
+        SELECT * FROM gift_cards
+        WHERE "tenantId" = ${tenantId} AND code = ${dto.code.toUpperCase()}
+        FOR UPDATE
+      `;
 
-    if (!giftCard) {
-      throw new NotFoundException('Gift card not found');
-    }
+      if (!lockedCards || lockedCards.length === 0) {
+        throw new NotFoundException('Gift card not found');
+      }
 
-    // Verify PIN if set
-    if (giftCard.pin && giftCard.pin !== dto.pin) {
-      throw new BadRequestException('Invalid PIN');
-    }
+      const giftCard = lockedCards[0];
 
-    // Validate card status
-    if (giftCard.status !== 'active') {
-      throw new BadRequestException(`Gift card is ${giftCard.status}`);
-    }
+      // Verify PIN if set (timing-safe comparison)
+      if (giftCard.pin) {
+        const pinStr = String(dto.pin || '');
+        const storedPin = String(giftCard.pin);
+        if (pinStr.length !== storedPin.length || !crypto.timingSafeEqual(Buffer.from(pinStr), Buffer.from(storedPin))) {
+          throw new BadRequestException('Invalid PIN');
+        }
+      }
 
-    if (giftCard.expiresAt && new Date() > giftCard.expiresAt) {
-      throw new BadRequestException('Gift card has expired');
-    }
+      // Validate card status
+      if (giftCard.status !== 'active') {
+        throw new BadRequestException(`Gift card is ${giftCard.status}`);
+      }
 
-    // Calculate redemption amount
-    const redeemAmount = Math.min(Number(giftCard.currentBalance), amount);
-    if (redeemAmount <= 0) {
-      throw new BadRequestException('Gift card has no balance');
-    }
+      if (giftCard.expiresAt && new Date() > giftCard.expiresAt) {
+        throw new BadRequestException('Gift card has expired');
+      }
 
-    const newBalance = Number(giftCard.currentBalance) - redeemAmount;
+      // Calculate redemption amount
+      const currentBalance = Number(giftCard.currentBalance);
+      const redeemAmount = Math.min(currentBalance, amount);
+      if (redeemAmount <= 0) {
+        throw new BadRequestException('Gift card has no balance');
+      }
 
-    // Create transaction and update balance
-    const [transaction, updatedCard] = await this.prisma.$transaction([
-      this.prisma.giftCardTransaction.create({
+      const newBalance = currentBalance - redeemAmount;
+
+      // Create transaction record
+      const transaction = await tx.giftCardTransaction.create({
         data: {
           tenantId,
           giftCardId: giftCard.id,
           type: 'redemption',
           amount: -redeemAmount,
-          balanceBefore: giftCard.currentBalance,
+          balanceBefore: currentBalance,
           balanceAfter: newBalance,
           orderId,
         },
-      }),
-      this.prisma.giftCard.update({
+      });
+
+      // Update gift card balance
+      await tx.giftCard.update({
         where: { id: giftCard.id },
         data: {
           currentBalance: newBalance,
           status: newBalance <= 0 ? 'depleted' : 'active',
         },
-      }),
-    ]);
+      });
 
-    return {
-      amountRedeemed: redeemAmount,
-      remainingBalance: newBalance,
-      transactionId: transaction.id,
-    };
+      return {
+        amountRedeemed: redeemAmount,
+        remainingBalance: newBalance,
+        transactionId: transaction.id,
+      };
+    });
   }
 
   // ============ ADMIN ENDPOINTS ============

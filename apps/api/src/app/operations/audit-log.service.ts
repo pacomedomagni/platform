@@ -92,7 +92,7 @@ export class AuditLogService {
       this.prisma.auditLog.findMany({
         where,
         orderBy: { createdAt: 'desc' },
-        take: filters.limit || 50,
+        take: Math.min(filters.limit || 50, 500),
         skip: filters.offset || 0,
       }),
       this.prisma.auditLog.count({ where }),
@@ -116,7 +116,7 @@ export class AuditLogService {
   /**
    * Get entity history by document name
    */
-  async getEntityHistory(ctx: TenantContext, docType: string, docName: string) {
+  async getEntityHistory(ctx: TenantContext, docType: string, docName: string, limit = 100) {
     const logs = await this.prisma.auditLog.findMany({
       where: {
         tenantId: ctx.tenantId,
@@ -124,6 +124,7 @@ export class AuditLogService {
         docName,
       },
       orderBy: { createdAt: 'desc' },
+      take: Math.min(limit, 500),
     });
 
     return logs.map(log => ({
@@ -163,31 +164,46 @@ export class AuditLogService {
     if (filters.docType) where.docType = filters.docType;
     if (filters.action) where.action = filters.action;
 
-    const logs = await this.prisma.auditLog.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-    });
+    // Stream results in batches to prevent memory exhaustion on large datasets
+    const BATCH_SIZE = 1000;
+    const MAX_EXPORT_ROWS = 50000;
 
-    const csvRows: string[] = [
-      '"id","action","docType","docName","userId","createdAt"',
-    ];
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="audit-logs.csv"');
+    res.write('"id","action","docType","docName","userId","createdAt"\n');
 
-    for (const log of logs) {
-      csvRows.push(
-        [
+    let offset = 0;
+    let totalWritten = 0;
+
+    while (totalWritten < MAX_EXPORT_ROWS) {
+      const logs = await this.prisma.auditLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: BATCH_SIZE,
+        skip: offset,
+      });
+
+      if (logs.length === 0) break;
+
+      for (const log of logs) {
+        const row = [
           this.escapeCsvField(String(log.id)),
           this.escapeCsvField(String(log.action)),
           this.escapeCsvField(String(log.docType)),
           this.escapeCsvField(String(log.docName)),
           this.escapeCsvField(String(log.userId || '')),
           this.escapeCsvField(log.createdAt.toISOString()),
-        ].join(',')
-      );
+        ].join(',');
+        res.write(row + '\n');
+      }
+
+      totalWritten += logs.length;
+      offset += BATCH_SIZE;
+
+      if (logs.length < BATCH_SIZE) break;
     }
 
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename="audit-logs.csv"');
-    res.send(csvRows.join('\n'));
+    res.end();
   }
 
   /**

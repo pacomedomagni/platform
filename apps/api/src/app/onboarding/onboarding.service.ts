@@ -196,6 +196,7 @@ export class OnboardingService {
 
   /**
    * Mark onboarding as complete
+   * Validates that payment provider is configured before allowing completion
    */
   async completeOnboarding(tenantId: string) {
     const tenant = await this.prisma.tenant.findUnique({
@@ -204,6 +205,16 @@ export class OnboardingService {
 
     if (!tenant) {
       throw new NotFoundException('Tenant not found');
+    }
+
+    // Validate prerequisites before completing onboarding
+    const provisioningStatus = await this.provisioningService.getProvisioningStatus(tenantId);
+    if (provisioningStatus.status !== 'completed') {
+      throw new BadRequestException('Provisioning is not yet complete');
+    }
+
+    if (tenant.paymentProvider && tenant.paymentProviderStatus !== 'active') {
+      throw new BadRequestException('Payment provider must be fully configured before completing onboarding');
     }
 
     await this.prisma.tenant.update({

@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsBoolean, IsArray, ValidateNested, Min, Max } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsBoolean, IsArray, ValidateNested, Min, Max, IsIn } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 
 // ============ VARIANTS ============
@@ -56,11 +56,13 @@ export class CreateVariantDto {
 
   @IsNumber()
   @IsOptional()
+  @Min(0)
   @Transform(({ value }) => value ? parseFloat(value) : undefined)
   price?: number;
 
   @IsNumber()
   @IsOptional()
+  @Min(0)
   @Transform(({ value }) => value ? parseFloat(value) : undefined)
   compareAtPrice?: number;
 
@@ -97,11 +99,13 @@ export class UpdateVariantDto {
 
   @IsNumber()
   @IsOptional()
+  @Min(0)
   @Transform(({ value }) => value !== undefined ? parseFloat(value) : undefined)
   price?: number;
 
   @IsNumber()
   @IsOptional()
+  @Min(0)
   @Transform(({ value }) => value !== undefined ? parseFloat(value) : undefined)
   compareAtPrice?: number;
 
@@ -174,6 +178,7 @@ export class ReviewVoteDto {
 
 export class ModerateReviewDto {
   @IsString()
+  @IsIn(['approved', 'rejected'])
   status: 'approved' | 'rejected';
 
   @IsString()
@@ -198,6 +203,7 @@ export class CreateGiftCardDto {
   currency?: string;
 
   @IsString()
+  @IsIn(['purchased', 'promotional', 'refund', 'manual'])
   sourceType: 'purchased' | 'promotional' | 'refund' | 'manual';
 
   @IsString()
@@ -222,6 +228,7 @@ export class CreateGiftCardDto {
 
   @IsString()
   @IsOptional()
+  @IsIn(['email', 'print', 'physical'])
   deliveryMethod?: 'email' | 'print' | 'physical';
 
   @IsString()
@@ -240,9 +247,11 @@ export class RedeemGiftCardDto {
 
 export class GiftCardTransactionDto {
   @IsString()
+  @IsIn(['redemption', 'refund', 'adjustment'])
   type: 'redemption' | 'refund' | 'adjustment';
 
   @IsNumber()
+  @Min(0.01)
   amount: number;
 
   @IsString()

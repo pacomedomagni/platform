@@ -369,9 +369,9 @@ export class WishlistService {
 
   // ============ PUBLIC SHARED WISHLIST ============
 
-  async getSharedWishlist(shareToken: string) {
+  async getSharedWishlist(tenantId: string, shareToken: string) {
     const wishlist = await this.prisma.wishlist.findFirst({
-      where: { shareToken, isPublic: true },
+      where: { shareToken, isPublic: true, tenantId },
       include: {
         customer: {
           select: { firstName: true },

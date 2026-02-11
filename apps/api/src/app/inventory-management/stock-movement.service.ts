@@ -32,6 +32,27 @@ export class StockMovementService {
       throw new BadRequestException('Posting date cannot be more than 1 year in the past');
     }
 
+    // Validate items array is not empty
+    if (!dto.items || dto.items.length === 0) {
+      throw new BadRequestException('At least one item is required');
+    }
+
+    // Validate quantity signs based on movement type
+    for (const item of dto.items) {
+      if (dto.movementType === MovementType.RECEIPT && item.quantity <= 0) {
+        throw new BadRequestException(`Receipt quantity must be positive for item ${item.itemCode}`);
+      }
+      if (dto.movementType === MovementType.ISSUE && item.quantity <= 0) {
+        throw new BadRequestException(`Issue quantity must be positive for item ${item.itemCode}`);
+      }
+      if (dto.movementType === MovementType.TRANSFER && item.quantity <= 0) {
+        throw new BadRequestException(`Transfer quantity must be positive for item ${item.itemCode}`);
+      }
+      if (dto.movementType === MovementType.ADJUSTMENT && item.quantity === 0) {
+        throw new BadRequestException(`Adjustment quantity cannot be zero for item ${item.itemCode}`);
+      }
+    }
+
     return this.prisma.$transaction(async (tx) => {
       // Validate warehouse
       const warehouse = await tx.warehouse.findFirst({
@@ -39,6 +60,9 @@ export class StockMovementService {
       });
       if (!warehouse) {
         throw new BadRequestException(`Warehouse not found: ${dto.warehouseCode}`);
+      }
+      if (!warehouse.isActive) {
+        throw new BadRequestException(`Warehouse is inactive: ${dto.warehouseCode}`);
       }
 
       // Validate destination warehouse for transfers
@@ -52,6 +76,9 @@ export class StockMovementService {
         });
         if (!toWarehouse) {
           throw new BadRequestException(`Destination warehouse not found: ${dto.toWarehouseCode}`);
+        }
+        if (!toWarehouse.isActive) {
+          throw new BadRequestException(`Destination warehouse is inactive: ${dto.toWarehouseCode}`);
         }
       }
 
@@ -234,10 +261,10 @@ export class StockMovementService {
 
         // Update bin (location) balance if location specified
         if (fromLocation) {
-          await this.updateBinBalance(tx, ctx.tenantId, item.id, warehouse.id, fromLocation.id, qty);
+          await this.updateBinBalance(tx, ctx.tenantId, item.id, warehouse.id, fromLocation.id, qty, batch?.id ?? null);
         }
         if (toLocation && dto.movementType !== MovementType.TRANSFER) {
-          await this.updateBinBalance(tx, ctx.tenantId, item.id, warehouse.id, toLocation.id, qty);
+          await this.updateBinBalance(tx, ctx.tenantId, item.id, warehouse.id, toLocation.id, qty, batch?.id ?? null);
         }
 
         // For transfers, create the receiving entry
@@ -268,7 +295,7 @@ export class StockMovementService {
 
           // Update destination bin balance if location specified
           if (toLocation) {
-            await this.updateBinBalance(tx, ctx.tenantId, item.id, toWarehouse.id, toLocation.id, qty.neg());
+            await this.updateBinBalance(tx, ctx.tenantId, item.id, toWarehouse.id, toLocation.id, qty.neg(), batch?.id ?? null);
           }
         }
 
@@ -523,10 +550,9 @@ export class StockMovementService {
         await tx.stockPosting.create({
           data: {
             tenantId,
-            postingTs: new Date(),
+            postingKey: `${voucherType}:${voucherNo}`,
             voucherType,
             voucherNo,
-            status: 'draft',
           },
         });
         return voucherNo;
@@ -601,17 +627,19 @@ export class StockMovementService {
     itemId: string,
     warehouseId: string,
     locationId: string | null,
-    qty: Prisma.Decimal
+    qty: Prisma.Decimal,
+    batchId: string | null = null,
   ) {
     if (!locationId) return;
 
     await tx.binBalance.upsert({
       where: {
-        tenantId_itemId_warehouseId_locationId: {
+        tenantId_itemId_warehouseId_locationId_batchId: {
           tenantId,
           itemId,
           warehouseId,
           locationId,
+          batchId: batchId ?? null,
         },
       },
       update: {
@@ -622,6 +650,7 @@ export class StockMovementService {
         itemId,
         warehouseId,
         locationId,
+        batchId: batchId ?? null,
         actualQty: qty,
         reservedQty: 0,
       },

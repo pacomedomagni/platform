@@ -238,6 +238,7 @@ export class MonitoringService {
    * Get detailed failed operations report
    */
   async getFailedOperationsReport(limit = 100) {
+    const safedLimit = Math.min(limit, 500);
     const operations = await this.prisma.failedOperation.findMany({
       where: {
         status: {
@@ -245,7 +246,7 @@ export class MonitoringService {
         },
       },
       orderBy: { createdAt: 'desc' },
-      take: limit,
+      take: safedLimit,
       select: {
         id: true,
         tenantId: true,

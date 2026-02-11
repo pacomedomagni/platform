@@ -204,13 +204,15 @@ export class EmailPreferencesService {
       );
       const { data, signature } = decoded;
 
-      // Verify signature
+      // Verify signature using timing-safe comparison
       const expectedSignature = crypto
         .createHmac('sha256', process.env['JWT_SECRET'] || 'dev-secret')
         .update(data)
         .digest('hex');
 
-      if (signature !== expectedSignature) {
+      const sigBuf = Buffer.from(signature, 'utf-8');
+      const expectedBuf = Buffer.from(expectedSignature, 'utf-8');
+      if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
         this.logger.warn('Invalid unsubscribe token signature');
         return null;
       }

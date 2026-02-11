@@ -11,7 +11,7 @@ export class RegisterCustomerDto {
   email: string;
 
   @IsString()
-  @MinLength(8)
+  @MinLength(8, { message: 'Password must be at least 8 characters' })
   password: string;
 
   @IsOptional()
@@ -49,7 +49,7 @@ export class ResetPasswordDto {
   token: string;
 
   @IsString()
-  @MinLength(8)
+  @MinLength(8, { message: 'Password must be at least 8 characters' })
   password: string;
 }
 
@@ -76,7 +76,7 @@ export class ChangePasswordDto {
   currentPassword: string;
 
   @IsString()
-  @MinLength(8)
+  @MinLength(8, { message: 'Password must be at least 8 characters' })
   newPassword: string;
 }
 

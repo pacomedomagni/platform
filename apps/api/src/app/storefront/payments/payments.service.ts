@@ -319,19 +319,26 @@ export class PaymentsService {
   /**
    * Release stock reservations for order items
    * Called after stock movement is created (actualQty already decremented)
+   * Uses raw SQL to prevent reservedQty from going negative
    */
   private async releaseStockReservations(order: any, warehouseId: string) {
     for (const orderItem of order.items) {
-      await this.prisma.warehouseItemBalance.updateMany({
-        where: {
-          tenantId: order.tenantId,
-          itemId: orderItem.product.item.id,
-          warehouseId,
-        },
-        data: {
-          reservedQty: { decrement: orderItem.quantity },
-        },
-      });
+      const itemId = orderItem.product.item.id;
+      const tenantId = order.tenantId;
+      const qty = orderItem.quantity;
+
+      // Acquire advisory lock to prevent concurrent modification
+      const itemKey = `${tenantId}:${warehouseId}:${itemId}`;
+      await this.prisma.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${itemKey}))`;
+
+      // Safe decrement: clamp to 0 to prevent negative reservedQty
+      await this.prisma.$executeRaw`
+        UPDATE warehouse_item_balances
+        SET "reservedQty" = GREATEST("reservedQty" - ${qty}, 0)
+        WHERE "tenantId" = ${tenantId}
+          AND "itemId" = ${itemId}
+          AND "warehouseId" = ${warehouseId}
+      `;
     }
   }
 
@@ -524,6 +531,34 @@ export class PaymentsService {
       }),
     ]);
 
+    // Release stock reservations on payment failure
+    try {
+      const fullOrder = await this.prisma.order.findUnique({
+        where: { id: orderId },
+        include: {
+          items: {
+            include: {
+              product: { include: { item: true } },
+            },
+          },
+        },
+      });
+
+      if (fullOrder) {
+        const warehouse = await this.prisma.warehouse.findFirst({
+          where: { tenantId: order.tenantId, isActive: true },
+          orderBy: { createdAt: 'asc' },
+        });
+
+        if (warehouse) {
+          await this.releaseStockReservations(fullOrder, warehouse.id);
+          this.logger.log(`Stock reservations released for failed payment on order: ${order.orderNumber}`);
+        }
+      }
+    } catch (error) {
+      this.logger.error(`Failed to release stock for failed payment on order ${order.orderNumber}:`, error);
+    }
+
     this.logger.log(`Payment failed for order: ${order.orderNumber}`);
   }
 
@@ -588,14 +623,36 @@ export class PaymentsService {
       throw new BadRequestException('Order has no associated payment');
     }
 
-    if (order.paymentStatus !== 'CAPTURED') {
+    if (!['CAPTURED', 'PARTIALLY_REFUNDED'].includes(order.paymentStatus)) {
       throw new BadRequestException('Order payment must be captured before refunding');
     }
 
-    // PAY-9: Generate unique idempotency key including refund count to prevent collisions
-    const existingRefundCount = await this.prisma.payment.count({
+    // Validate refund amount
+    const orderTotal = Number(order.grandTotal);
+    if (amount !== undefined) {
+      if (amount <= 0) {
+        throw new BadRequestException('Refund amount must be positive');
+      }
+      if (amount > orderTotal) {
+        throw new BadRequestException(`Refund amount (${amount}) exceeds order total (${orderTotal})`);
+      }
+    }
+
+    // Track cumulative refunds to prevent exceeding order total
+    const existingRefunds = await this.prisma.payment.findMany({
       where: { orderId, status: { in: ['REFUNDED', 'PARTIALLY_REFUNDED'] } },
     });
+    const totalRefunded = existingRefunds.reduce((sum, p) => sum + Number(p.amount), 0);
+    const refundAmount = amount ?? orderTotal;
+
+    if (totalRefunded + refundAmount > orderTotal) {
+      throw new BadRequestException(
+        `Refund would exceed order total. Already refunded: ${totalRefunded}, requested: ${refundAmount}, order total: ${orderTotal}`
+      );
+    }
+
+    // PAY-9: Generate unique idempotency key including refund count to prevent collisions
+    const existingRefundCount = existingRefunds.length;
     const idempotencyKey = `refund_${tenantId}_${orderId}_${amount || 'full'}_${existingRefundCount + 1}`;
 
     const refund = await this.stripeService.createRefund(
@@ -689,27 +746,28 @@ export class PaymentsService {
       { orderId, tenantId },
     );
 
-    // Record payment in our DB
-    await this.prisma.payment.create({
-      data: {
-        tenantId,
-        orderId,
-        amount: order.grandTotal,
-        currency: order.currency || 'USD',
-        method: 'card',
-        status: 'CAPTURED',
-        capturedAt: new Date(),
-      },
-    });
-
-    // Update order status
-    await this.prisma.order.update({
-      where: { id: orderId },
-      data: {
-        paymentStatus: 'CAPTURED',
-        status: 'CONFIRMED',
-      },
-    });
+    // Record payment and update order status atomically
+    await this.prisma.$transaction([
+      this.prisma.payment.create({
+        data: {
+          tenantId,
+          orderId,
+          amount: order.grandTotal,
+          currency: order.currency || 'USD',
+          method: 'card',
+          status: 'CAPTURED',
+          capturedAt: new Date(),
+        },
+      }),
+      this.prisma.order.update({
+        where: { id: orderId },
+        data: {
+          paymentStatus: 'CAPTURED',
+          status: 'CONFIRMED',
+          confirmedAt: new Date(),
+        },
+      }),
+    ]);
 
     // CRITICAL: Process stock deduction and coupon tracking (same as Stripe flow)
     const fullOrder = await this.prisma.order.findUnique({

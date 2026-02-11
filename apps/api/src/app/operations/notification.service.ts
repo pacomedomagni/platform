@@ -187,9 +187,10 @@ export class NotificationService {
    * Get a single notification
    */
   async findOne(ctx: TenantContext, id: string): Promise<NotificationRecord> {
-    const notification = await this.prisma.notification.findFirst({
-      where: { id, tenantId: ctx.tenantId },
-    });
+    const where: Prisma.NotificationWhereInput = { id, tenantId: ctx.tenantId };
+    if (ctx.userId) where.userId = ctx.userId;
+
+    const notification = await this.prisma.notification.findFirst({ where });
 
     if (!notification) {
       throw new NotFoundException('Notification not found');
@@ -236,12 +237,15 @@ export class NotificationService {
    * Mark multiple notifications as read
    */
   async markManyAsRead(ctx: TenantContext, ids: string[]): Promise<number> {
+    const where: Prisma.NotificationWhereInput = {
+      id: { in: ids },
+      tenantId: ctx.tenantId,
+      isRead: false,
+    };
+    if (ctx.userId) where.userId = ctx.userId;
+
     const result = await this.prisma.notification.updateMany({
-      where: {
-        id: { in: ids },
-        tenantId: ctx.tenantId,
-        isRead: false,
-      },
+      where,
       data: { isRead: true, readAt: new Date() },
     });
 
@@ -335,7 +339,8 @@ export class NotificationService {
   private notifySubscribers(notification: NotificationRecord): void {
     const callbacks = this.notificationSubscriptions.get(notification.userId);
     if (callbacks) {
-      for (const callback of callbacks) {
+      // Iterate over a copy to avoid issues if callbacks mutate the array
+      for (const callback of [...callbacks]) {
         try {
           callback(notification);
         } catch (error) {

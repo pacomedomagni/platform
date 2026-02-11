@@ -8,7 +8,8 @@ export function initSentry() {
   const dsn = process.env['SENTRY_DSN'];
   
   if (!dsn) {
-    console.log('Sentry DSN not configured, error tracking disabled');
+    // eslint-disable-next-line no-console
+    console.warn('Sentry DSN not configured, error tracking disabled');
     return;
   }
 
@@ -70,7 +71,8 @@ export function initSentry() {
     enabled: process.env['NODE_ENV'] === 'production' || process.env['SENTRY_ENABLED'] === 'true',
   });
 
-  console.log('Sentry initialized for error tracking');
+  // eslint-disable-next-line no-console
+  console.info('Sentry initialized for error tracking');
 }
 
 /**
