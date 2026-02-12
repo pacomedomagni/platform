@@ -202,10 +202,9 @@ export class ProvisioningService {
         create: {
           tenantId,
           currencyCode: baseCurrency,
-          name: baseCurrency,
           symbol: baseCurrency === 'USD' ? '$' : baseCurrency === 'EUR' ? '€' : baseCurrency === 'GBP' ? '£' : baseCurrency,
           exchangeRate: 1,
-          isBase: true,
+          isBaseCurrency: true,
           isEnabled: true,
           decimalPlaces: 2,
         },

@@ -44,7 +44,7 @@ export class BackgroundJobService {
       data: {
         tenantId: ctx.tenantId,
         type: data.type,
-        payload: data.payload ?? undefined,
+        payload: data.payload as object ?? undefined,
         scheduledAt: data.scheduledAt,
         priority: data.priority ?? 0,
         status: 'pending',

@@ -11,9 +11,6 @@ import {
 
 type WishlistWithRelations = Prisma.WishlistGetPayload<{
   include: {
-    customer: {
-      select: { firstName: true };
-    };
     items: {
       include: {
         productListing: {
@@ -34,7 +31,7 @@ type WishlistWithRelations = Prisma.WishlistGetPayload<{
       };
     };
   };
-}>;
+}> & { customer?: { firstName: string | null } | null };
 
 @Injectable()
 export class WishlistService {

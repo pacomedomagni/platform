@@ -209,7 +209,7 @@ export class OnboardingService {
 
     // Validate prerequisites before completing onboarding
     const provisioningStatus = await this.provisioningService.getProvisioningStatus(tenantId);
-    if (provisioningStatus.status !== 'completed') {
+    if (provisioningStatus.status !== 'READY') {
       throw new BadRequestException('Provisioning is not yet complete');
     }
 

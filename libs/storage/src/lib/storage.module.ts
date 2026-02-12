@@ -1,4 +1,4 @@
-import { Module, DynamicModule, Global } from '@nestjs/common';
+import { Module, DynamicModule, Global, InjectionToken, OptionalFactoryDependency, Provider } from '@nestjs/common';
 import { StorageService } from './storage.service';
 import {
   StorageModuleOptions,
@@ -7,6 +7,8 @@ import {
 } from './storage.types';
 import { S3StorageProvider } from './providers/s3.provider';
 import { LocalStorageProvider } from './providers/local.provider';
+
+type InjectArray = (InjectionToken | OptionalFactoryDependency)[];
 
 @Global()
 @Module({})
@@ -38,12 +40,14 @@ export class StorageModule {
   }
 
   static forRootAsync(options: {
-    useFactory: (...args: unknown[]) => Promise<StorageModuleOptions> | StorageModuleOptions;
-    inject?: unknown[];
+    useFactory: (...args: any[]) => Promise<StorageModuleOptions> | StorageModuleOptions;
+    inject?: InjectArray;
   }): DynamicModule {
-    const providerFactory = {
+    const injectTokens: InjectArray = options.inject || [];
+    
+    const providerFactory: Provider = {
       provide: STORAGE_PROVIDER,
-      useFactory: async (...args: unknown[]) => {
+      useFactory: async (...args: any[]) => {
         const config = await options.useFactory(...args);
         if (config.provider.type === 's3') {
           return new S3StorageProvider(config.provider);
@@ -51,7 +55,7 @@ export class StorageModule {
           return new LocalStorageProvider(config.provider);
         }
       },
-      inject: options.inject || [],
+      inject: injectTokens,
     };
 
     return {
@@ -60,7 +64,7 @@ export class StorageModule {
         {
           provide: STORAGE_MODULE_OPTIONS,
           useFactory: options.useFactory,
-          inject: options.inject || [],
+          inject: injectTokens,
         },
         providerFactory,
         StorageService,

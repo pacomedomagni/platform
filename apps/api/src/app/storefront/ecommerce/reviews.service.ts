@@ -1,30 +1,13 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
-import { Prisma } from '@prisma/client';
+import { Prisma, ProductReview } from '@prisma/client';
 import {
   CreateReviewDto,
   ReviewVoteDto,
   ModerateReviewDto,
   AdminRespondDto,
 } from './dto';
-
-type ReviewWithRelations = Prisma.ProductReviewGetPayload<{
-  include: {
-    customer: {
-      select: {
-        firstName: true;
-        lastName: true;
-      };
-    };
-    productListing: {
-      select: {
-        displayName: true;
-        slug: true;
-      };
-    };
-  };
-}>;
 
 @Injectable()
 export class ReviewsService {
@@ -390,7 +373,7 @@ export class ReviewsService {
     });
   }
 
-  private mapReviewToResponse(review: ReviewWithRelations) {
+  private mapReviewToResponse(review: ProductReview) {
     return {
       id: review.id,
       rating: review.rating,

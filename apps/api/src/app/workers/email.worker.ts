@@ -36,11 +36,12 @@ export class EmailWorker implements OnModuleInit {
       // Check bounce suppression before sending
       const tenantId = emailOptions.context?.tenantId as string | undefined;
       if (tenantId) {
-        const recipientEmail = Array.isArray(emailOptions.to)
+        const rawRecipient = Array.isArray(emailOptions.to)
           ? emailOptions.to[0]
-          : typeof emailOptions.to === 'string'
-          ? emailOptions.to
-          : emailOptions.to?.address;
+          : emailOptions.to;
+        const recipientEmail = typeof rawRecipient === 'string'
+          ? rawRecipient
+          : rawRecipient?.address;
 
         if (recipientEmail) {
           const bounce = await this.prisma.emailBounce.findFirst({
@@ -53,7 +54,7 @@ export class EmailWorker implements OnModuleInit {
 
           if (bounce) {
             this.logger.warn(
-              `Skipping email to suppressed address ${recipientEmail} (Job: ${job.id}, Bounce type: ${bounce.bounceType})`,
+              `Skipping email to suppressed address ${recipientEmail} (Job: ${job.id}, Bounce type: ${bounce.type})`,
             );
             await this.logEmailAudit(job, 'success', undefined, 'Skipped: email address suppressed');
             return;

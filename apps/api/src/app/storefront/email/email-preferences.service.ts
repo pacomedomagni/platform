@@ -113,7 +113,7 @@ export class EmailPreferencesService {
     }
 
     // Prepare update data
-    const updateData: Prisma.EmailPreferencesUpdateInput = {};
+    const updateData: Prisma.StoreCustomerPreferencesUpdateInput = {};
 
     if (type === 'all') {
       updateData.marketing = false;

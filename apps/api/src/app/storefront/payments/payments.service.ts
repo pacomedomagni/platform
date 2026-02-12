@@ -55,7 +55,7 @@ export class PaymentsService {
 
     // PAY-8: Atomic webhook deduplication using upsert to prevent race conditions
     // If two webhook deliveries arrive simultaneously, only one will process
-    const dedupeResult = await this.prisma.$queryRaw<[{ already_processed: boolean }]>`
+    const dedupeResult = await this.prisma.$queryRaw<{ already_processed: boolean }[]>`
       INSERT INTO processed_webhook_events (id, "eventId", "eventType", "processedAt")
       VALUES (gen_random_uuid(), ${event.id}, ${event.type}, NOW())
       ON CONFLICT ("eventId") DO NOTHING
