@@ -3,11 +3,15 @@ import { notFound } from 'next/navigation';
 import { Metadata } from 'next';
 import { Badge, Card } from '@platform/ui';
 import { Check, ShieldCheck, Truck } from 'lucide-react';
-import { formatCurrency } from '../../_lib/format';
 import { ProductCard } from '../../_components/product-card';
 import { ProductReviews } from './_components/product-reviews';
+import { ProductPrice } from './_components/product-price';
 import { VariantSelector } from './_components/variant-selector';
 import { AddToCartButton } from './_components/add-to-cart-button';
+import {
+  LocalizedProductName,
+  LocalizedProductDescription,
+} from './_components/localized-product-info';
 import { productsApi } from '@/lib/store-api';
 import {
   generateProductSchema,
@@ -153,14 +157,13 @@ export default async function ProductPage({ params }: ProductPageProps) {
             <Badge variant="outline" className="bg-card text-muted-foreground">
               {categoryName}
             </Badge>
-            <h1 className="text-3xl font-semibold text-foreground">{product.displayName}</h1>
-            <p className="text-muted-foreground">{product.description || product.shortDescription}</p>
-            <div className="flex items-center gap-4">
-              <p className="text-2xl font-semibold text-foreground">{formatCurrency(product.price)}</p>
-              {product.compareAtPrice && (
-                <p className="text-sm text-muted-foreground line-through">{formatCurrency(product.compareAtPrice)}</p>
-              )}
-            </div>
+            <h1 className="text-3xl font-semibold text-foreground">
+              <LocalizedProductName productId={product.id} displayName={product.displayName} />
+            </h1>
+            <p className="text-muted-foreground">
+              <LocalizedProductDescription productId={product.id} description={product.description || product.shortDescription} />
+            </p>
+            <ProductPrice price={product.price} compareAtPrice={product.compareAtPrice} />
           </div>
 
           {/* Variant Selector */}

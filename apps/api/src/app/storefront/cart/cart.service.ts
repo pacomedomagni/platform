@@ -9,6 +9,7 @@ import { PrismaService } from '@platform/db';
 import { Prisma, WarehouseItemBalance } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import { AddToCartDto, UpdateCartItemDto } from './dto';
+import { ShippingService } from '../shipping/shipping.service';
 
 type CartWithRelations = Prisma.CartGetPayload<{
   include: {
@@ -35,7 +36,10 @@ const FREE_SHIPPING_THRESHOLD = 100;
 
 @Injectable()
 export class CartService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly shippingService: ShippingService,
+  ) {}
 
   /**
    * Get or create a cart for customer or anonymous session
@@ -929,6 +933,7 @@ export class CartService {
 
   /**
    * Recalculate cart totals
+   * Issue #6: Uses ShippingService zone/rate system when configured.
    */
   private async recalculateCart(cartId: string) {
     const cart = await this.prisma.cart.findUnique({
@@ -959,8 +964,19 @@ export class CartService {
       subtotalCents += Math.round(Number(item.price) * 100) * item.quantity;
     }
 
-    // Calculate shipping in cents
-    const shippingCents = subtotalCents >= Math.round(freeThreshold * 100) ? 0 : Math.round(shippingRate * 100);
+    // Issue #6: Try ShippingService zone-based rates first, fall back to flat-rate
+    let shippingCents: number;
+    const shippingFromZones = await this.calculateShippingFromZones(
+      cart.tenantId,
+      subtotalCents / 100,
+      cart.shippingAddressId,
+    );
+
+    if (shippingFromZones !== null) {
+      shippingCents = Math.round(shippingFromZones * 100);
+    } else {
+      shippingCents = subtotalCents >= Math.round(freeThreshold * 100) ? 0 : Math.round(shippingRate * 100);
+    }
 
     // Calculate discount in cents
     let discountCents = 0;
@@ -1010,6 +1026,9 @@ export class CartService {
   /**
    * Recalculate cart totals within a transaction
    * Used by transactional methods to avoid nested transactions
+   *
+   * Issue #6: Uses ShippingService zone/rate system when configured,
+   * falls back to tenant flat-rate formula for backward compatibility.
    */
   private async recalculateCartInTx(tx: Prisma.TransactionClient, cartId: string) {
     const cart = await tx.cart.findUnique({
@@ -1040,8 +1059,21 @@ export class CartService {
       subtotalCents += Math.round(Number(item.price) * 100) * item.quantity;
     }
 
-    // Calculate shipping in cents
-    const shippingCents = subtotalCents >= Math.round(freeThreshold * 100) ? 0 : Math.round(shippingRate * 100);
+    // Issue #6: Try ShippingService zone-based rates first, fall back to flat-rate
+    let shippingCents: number;
+    const shippingFromZones = await this.calculateShippingFromZones(
+      cart.tenantId,
+      subtotalCents / 100,
+      cart.shippingAddressId,
+    );
+
+    if (shippingFromZones !== null) {
+      // Shipping zones are configured — use the cheapest applicable rate
+      shippingCents = Math.round(shippingFromZones * 100);
+    } else {
+      // No shipping zones configured — fall back to tenant flat-rate formula
+      shippingCents = subtotalCents >= Math.round(freeThreshold * 100) ? 0 : Math.round(shippingRate * 100);
+    }
 
     // Calculate discount in cents
     let discountCents = 0;
@@ -1086,6 +1118,49 @@ export class CartService {
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
+  }
+
+  /**
+   * Issue #6: Try to calculate shipping using the zone/rate system.
+   * Returns the cheapest applicable rate in dollars, or null if no zones are configured
+   * (indicating the caller should fall back to the flat-rate formula).
+   */
+  private async calculateShippingFromZones(
+    tenantId: string,
+    cartTotal: number,
+    _shippingAddressId?: string | null,
+  ): Promise<number | null> {
+    try {
+      // Check if tenant has any shipping zones configured
+      const zoneCount = await this.prisma.shippingZone.count({
+        where: { tenantId },
+      });
+
+      if (zoneCount === 0) {
+        // No zones configured — signal to use flat-rate fallback
+        return null;
+      }
+
+      // Use ShippingService to calculate rates with a default country.
+      // At cart level we don't have the full address yet, so we use
+      // a broad calculation. The exact rate will be finalized at checkout
+      // when the shipping address is known.
+      const result = await this.shippingService.calculateShipping(tenantId, {
+        country: 'US', // Default; refined at checkout with actual address
+        cartTotal,
+      });
+
+      if (result.rates.length > 0) {
+        // Return the cheapest available rate
+        return result.rates[0].price;
+      }
+
+      // Zones exist but no rates matched — return null to use flat-rate fallback
+      return null;
+    } catch {
+      // If shipping calculation fails, fall back to flat-rate
+      return null;
+    }
   }
 
   private readonly cartInclude = {

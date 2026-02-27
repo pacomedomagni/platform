@@ -6,6 +6,7 @@ import { EmailService } from '@platform/email';
 import { StockMovementService } from '../../inventory-management/stock-movement.service';
 import { FailedOperationsService } from '../../workers/failed-operations.service';
 import { NotificationService, NotificationType } from '../../operations/notification.service';
+import { WebhookService } from '../../operations/webhook.service';
 import { MovementType } from '../../inventory-management/inventory-management.dto';
 import { OperationType } from '@prisma/client';
 import Stripe from 'stripe';
@@ -21,17 +22,47 @@ export class PaymentsService {
     private readonly stockMovementService: StockMovementService,
     private readonly failedOperationsService: FailedOperationsService,
     private readonly notificationService: NotificationService,
+    private readonly webhookService: WebhookService,
     @Optional() @Inject(EmailService) private readonly emailService?: EmailService
   ) {}
 
   /**
-   * Get payment configuration for frontend
+   * Get payment configuration for frontend (tenant-aware)
    */
-  getConfig() {
-    return {
+  async getConfig(tenantId?: string) {
+    const base = {
       publicKey: this.stripeService.getPublicKey(),
       isConfigured: this.stripeService.isConfigured(),
+      paymentProvider: 'stripe' as string,
+      squareApplicationId: null as string | null,
+      squareLocationId: null as string | null,
     };
+
+    if (!tenantId) return base;
+
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: {
+        paymentProvider: true,
+        paymentProviderStatus: true,
+        squareLocationId: true,
+      },
+    });
+
+    if (tenant?.paymentProvider) {
+      base.paymentProvider = tenant.paymentProvider;
+    }
+
+    if (
+      tenant?.paymentProvider === 'square' &&
+      tenant.paymentProviderStatus === 'active'
+    ) {
+      base.squareApplicationId = process.env['SQUARE_APPLICATION_ID'] || null;
+      base.squareLocationId = tenant.squareLocationId || null;
+      base.isConfigured = !!(base.squareApplicationId && tenant.squareLocationId);
+    }
+
+    return base;
   }
 
   /**
@@ -189,6 +220,19 @@ export class PaymentsService {
     ]);
 
     this.logger.log(`Payment succeeded for order: ${order.orderNumber}`);
+
+    // Fire-and-forget: trigger payment.captured webhook
+    this.webhookService.triggerEvent({ tenantId: order.tenantId }, {
+      event: 'payment.captured',
+      payload: {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        amount: Number(order.grandTotal),
+        currency: order.currency,
+        paymentIntentId: paymentIntent.id,
+      },
+      timestamp: new Date(),
+    }).catch(err => this.logger.error(`Webhook payment.captured failed for order ${order.orderNumber}: ${err.message}`));
 
     // Notify merchant admins about new order
     this.notificationService.notifyNewOrder(
@@ -606,6 +650,21 @@ export class PaymentsService {
       },
     ).catch(err => this.logger.error(`Failed to notify merchant of payment failure: ${err.message}`));
 
+    // Fire-and-forget: trigger payment.failed webhook
+    this.webhookService.triggerEvent({ tenantId: order.tenantId }, {
+      event: 'payment.failed',
+      payload: {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        amount: Number(order.grandTotal),
+        currency: order.currency,
+        paymentIntentId: paymentIntent.id,
+        errorCode: lastError?.code || null,
+        errorMessage: lastError?.message || null,
+      },
+      timestamp: new Date(),
+    }).catch(err => this.logger.error(`Webhook payment.failed failed for order ${order.orderNumber}: ${err.message}`));
+
     this.logger.log(`Payment failed for order: ${order.orderNumber}`);
   }
 
@@ -653,7 +712,7 @@ export class PaymentsService {
   }
 
   /**
-   * Create refund for order
+   * Create refund for order (supports both Stripe and Square payments)
    */
   async createRefund(
     tenantId: string,
@@ -670,10 +729,6 @@ export class PaymentsService {
 
     if (!order) {
       throw new NotFoundException('Order not found');
-    }
-
-    if (!order.stripePaymentIntentId) {
-      throw new BadRequestException('Order has no associated payment');
     }
 
     if (!['CAPTURED', 'PARTIALLY_REFUNDED'].includes(order.paymentStatus)) {
@@ -704,6 +759,42 @@ export class PaymentsService {
       );
     }
 
+    // Determine payment provider: Stripe orders have stripePaymentIntentId on the order,
+    // Square orders do not. Fall back to checking the tenant's paymentProvider setting.
+    const isStripeOrder = !!order.stripePaymentIntentId;
+
+    if (isStripeOrder) {
+      return this.createStripeRefund(order, tenantId, orderId, amount, reason, existingRefunds);
+    }
+
+    // Check if this is a Square order by looking at the tenant's payment provider
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { paymentProvider: true },
+    });
+
+    if (tenant?.paymentProvider === 'square') {
+      return this.createSquareRefund(order, tenantId, orderId, amount, reason);
+    }
+
+    throw new BadRequestException('Order has no associated payment or unsupported payment provider');
+  }
+
+  /**
+   * Process a Stripe refund for an order
+   */
+  private async createStripeRefund(
+    order: { stripePaymentIntentId: string | null; grandTotal: any },
+    tenantId: string,
+    orderId: string,
+    amount?: number,
+    reason?: 'duplicate' | 'fraudulent' | 'requested_by_customer',
+    existingRefunds: any[] = []
+  ) {
+    if (!order.stripePaymentIntentId) {
+      throw new BadRequestException('Order has no Stripe payment intent');
+    }
+
     // PAY-9: Generate unique idempotency key including refund count to prevent collisions
     const existingRefundCount = existingRefunds.length;
     const idempotencyKey = `refund_${tenantId}_${orderId}_${amount || 'full'}_${existingRefundCount + 1}`;
@@ -720,6 +811,63 @@ export class PaymentsService {
       refundId: refund.id,
       amount: (refund.amount || 0) / 100,
       status: refund.status,
+    };
+  }
+
+  /**
+   * Process a Square refund for an order
+   */
+  private async createSquareRefund(
+    order: { grandTotal: any; currency?: string },
+    tenantId: string,
+    orderId: string,
+    amount?: number,
+    reason?: string,
+  ) {
+    // Find the captured Payment record that holds the Square payment ID
+    // (stored in stripePaymentIntentId as a provider-agnostic reference)
+    const capturedPayment = await this.prisma.payment.findFirst({
+      where: {
+        orderId,
+        tenantId,
+        status: 'CAPTURED',
+        stripePaymentIntentId: { not: null },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!capturedPayment?.stripePaymentIntentId) {
+      throw new BadRequestException('No Square payment ID found for this order');
+    }
+
+    const squarePaymentId = capturedPayment.stripePaymentIntentId;
+    const currency = order.currency || 'USD';
+
+    const refund = await this.squarePaymentService.refundPayment(
+      tenantId,
+      squarePaymentId,
+      amount,
+      currency,
+      reason || 'Requested by merchant',
+    );
+
+    // Update order payment status since Square doesn't have webhooks configured for refunds
+    const orderTotal = Number(order.grandTotal);
+    const isFullRefund = !amount || amount >= orderTotal;
+
+    await this.prisma.order.update({
+      where: { id: orderId },
+      data: {
+        paymentStatus: isFullRefund ? 'REFUNDED' : 'PARTIALLY_REFUNDED',
+        status: isFullRefund ? 'REFUNDED' : undefined,
+        refundedAt: isFullRefund ? new Date() : undefined,
+      },
+    });
+
+    return {
+      refundId: refund?.id || null,
+      amount: amount ?? orderTotal,
+      status: refund?.status || 'COMPLETED',
     };
   }
 
@@ -809,6 +957,10 @@ export class PaymentsService {
       { orderId, tenantId },
     );
 
+    // Store the Square payment ID so refunds can reference it later.
+    // We reuse the stripePaymentIntentId field as a provider-agnostic payment reference.
+    const squarePaymentId = payment?.id || null;
+
     // Record payment and update order status atomically
     await this.prisma.$transaction([
       this.prisma.payment.create({
@@ -819,6 +971,7 @@ export class PaymentsService {
           currency: order.currency || 'USD',
           method: 'card',
           status: 'CAPTURED',
+          stripePaymentIntentId: squarePaymentId,
           capturedAt: new Date(),
         },
       }),

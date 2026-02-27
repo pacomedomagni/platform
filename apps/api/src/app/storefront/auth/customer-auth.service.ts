@@ -21,6 +21,7 @@ import {
   ChangePasswordDto,
   AddAddressDto,
 } from './dto';
+import { WebhookService } from '../../operations/webhook.service';
 
 // Fail fast if JWT_SECRET is not set outside dev/test
 const JWT_SECRET = process.env['JWT_SECRET'];
@@ -45,6 +46,7 @@ export class CustomerAuthService implements OnModuleInit {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly webhookService: WebhookService,
     @Optional() @Inject(EmailService) private readonly emailService?: EmailService
   ) {}
 
@@ -106,6 +108,18 @@ export class CustomerAuthService implements OnModuleInit {
 
     // Generate token
     const token = this.generateToken(customer.id, tenantId);
+
+    // Fire-and-forget: trigger customer.created webhook
+    this.webhookService.triggerEvent({ tenantId }, {
+      event: 'customer.created',
+      payload: {
+        customerId: customer.id,
+        email: customer.email,
+        firstName: customer.firstName,
+        lastName: customer.lastName,
+      },
+      timestamp: new Date(),
+    }).catch(err => this.logger.error(`Webhook customer.created failed: ${err.message}`));
 
     return {
       customer: this.mapCustomerToResponse(customer),

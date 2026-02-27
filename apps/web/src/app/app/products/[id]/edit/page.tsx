@@ -6,6 +6,13 @@ import Link from 'next/link';
 import { ArrowLeft, Upload, X, Loader2, Save } from 'lucide-react';
 import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
 
+interface Category {
+  id: string;
+  name: string;
+  slug: string;
+  children?: Category[];
+}
+
 interface Product {
   id: string;
   slug: string;
@@ -16,7 +23,11 @@ interface Product {
   images: string[];
   isFeatured: boolean;
   isPublished: boolean;
-  category?: string;
+  category?: {
+    id: string;
+    name: string;
+    slug: string;
+  } | null;
 }
 
 export default function EditProductPage() {
@@ -30,12 +41,14 @@ export default function EditProductPage() {
   const [price, setPrice] = useState('');
   const [compareAtPrice, setCompareAtPrice] = useState('');
   const [description, setDescription] = useState('');
-  const [category, setCategory] = useState('');
+  const [categoryId, setCategoryId] = useState('');
   const [isFeatured, setIsFeatured] = useState(false);
   const [isPublished, setIsPublished] = useState(false);
 
   const [isDirty, setIsDirty] = useState(false);
 
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
   const [images, setImages] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -52,6 +65,22 @@ export default function EditProductPage() {
       'x-tenant-id': tenantId || '',
     };
   }, []);
+
+  const fetchCategories = useCallback(async () => {
+    setCategoriesLoading(true);
+    try {
+      const headers = getHeaders();
+      const res = await fetch('/api/v1/store/categories', { headers });
+      if (res.ok) {
+        const data = await res.json();
+        setCategories(Array.isArray(data) ? data : data.data ?? []);
+      }
+    } catch {
+      // Categories are optional; silently fail
+    } finally {
+      setCategoriesLoading(false);
+    }
+  }, [getHeaders]);
 
   const fetchProduct = useCallback(async () => {
     setLoading(true);
@@ -73,7 +102,7 @@ export default function EditProductPage() {
       setPrice(product.price?.toString() || '');
       setCompareAtPrice(product.compareAtPrice?.toString() || '');
       setDescription(product.shortDescription || '');
-      setCategory(product.category || '');
+      setCategoryId(product.category?.id || '');
       setIsFeatured(product.isFeatured || false);
       setIsPublished(product.isPublished || false);
       setImages(product.images || []);
@@ -88,8 +117,9 @@ export default function EditProductPage() {
   useEffect(() => {
     if (productId) {
       fetchProduct();
+      fetchCategories();
     }
-  }, [productId, fetchProduct]);
+  }, [productId, fetchProduct, fetchCategories]);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -171,8 +201,10 @@ export default function EditProductPage() {
       } else {
         body.compareAtPrice = null;
       }
-      if (category.trim()) {
-        body.category = category.trim();
+      if (categoryId) {
+        body.categoryId = categoryId;
+      } else {
+        body.categoryId = null;
       }
 
       const res = await fetch(`/api/v1/store/admin/products/${productId}`, {
@@ -310,19 +342,32 @@ export default function EditProductPage() {
 
               <div>
                 <label
-                  htmlFor="category"
+                  htmlFor="categoryId"
                   className="block text-sm font-medium text-slate-700 dark:text-slate-300"
                 >
                   Category
                 </label>
-                <input
-                  id="category"
-                  type="text"
-                  value={category}
-                  onChange={(e) => { setCategory(e.target.value); setIsDirty(true); }}
-                  placeholder="e.g. Apparel, Electronics"
-                  className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
-                />
+                <select
+                  id="categoryId"
+                  value={categoryId}
+                  onChange={(e) => { setCategoryId(e.target.value); setIsDirty(true); }}
+                  disabled={categoriesLoading}
+                  className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
+                >
+                  <option value="">
+                    {categoriesLoading ? 'Loading categories...' : 'Select a category'}
+                  </option>
+                  {categories.map((cat) => (
+                    <optgroup key={cat.id} label={cat.name}>
+                      <option value={cat.id}>{cat.name}</option>
+                      {cat.children?.map((child) => (
+                        <option key={child.id} value={child.id}>
+                          {child.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
               </div>
             </div>
           </div>

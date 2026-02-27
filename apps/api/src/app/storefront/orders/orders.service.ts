@@ -3,6 +3,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException, Inject, Opt
 import { PrismaService } from '@platform/db';
 import { EmailService } from '@platform/email';
 import { StockMovementService } from '../../inventory-management/stock-movement.service';
+import { WebhookService } from '../../operations/webhook.service';
 import { MovementType } from '../../inventory-management/inventory-management.dto';
 import { Prisma } from '@prisma/client';
 import { ListOrdersDto } from './dto';
@@ -29,6 +30,7 @@ export class OrdersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly stockMovementService: StockMovementService,
+    private readonly webhookService: WebhookService,
     @Optional() @Inject(EmailService) private readonly emailService?: EmailService,
   ) {}
 
@@ -312,6 +314,39 @@ export class OrdersService {
     } else if (status === 'CANCELLED') {
       this.sendOrderStatusEmailAsync(orderId, 'store-order-cancelled').catch(err =>
         this.logger.error(`Cancelled email failed for order ${orderId}: ${err.message}`));
+    }
+
+    // Fire-and-forget: trigger order webhook based on new status
+    const webhookPayload = {
+      orderId,
+      orderNumber: order.orderNumber,
+      previousStatus: order.status,
+      newStatus: status,
+      grandTotal: Number(order.grandTotal),
+      ...(trackingInfo || {}),
+    };
+
+    // Always trigger order.updated
+    this.webhookService.triggerEvent({ tenantId }, {
+      event: 'order.updated',
+      payload: webhookPayload,
+      timestamp: new Date(),
+    }).catch(err => this.logger.error(`Webhook order.updated failed for order ${orderId}: ${err.message}`));
+
+    // Trigger status-specific event
+    const statusEventMap: Record<string, string> = {
+      CANCELLED: 'order.cancelled',
+      SHIPPED: 'shipment.created',
+      DELIVERED: 'shipment.delivered',
+      COMPLETED: 'order.completed',
+    };
+    const specificEvent = statusEventMap[status];
+    if (specificEvent) {
+      this.webhookService.triggerEvent({ tenantId }, {
+        event: specificEvent,
+        payload: webhookPayload,
+        timestamp: new Date(),
+      }).catch(err => this.logger.error(`Webhook ${specificEvent} failed for order ${orderId}: ${err.message}`));
     }
 
     return this.getOrder(tenantId, orderId);

@@ -187,15 +187,15 @@ export interface UpdateVariantDto {
 
 export const variantsApi = {
   list: (productListingId: string): Promise<ProductVariant[]> => {
-    return apiFetch(`/v1/store/admin/products/${productListingId}/variants`);
+    return apiFetch(`/v1/store/products/${productListingId}/variants`);
   },
 
   get: (id: string): Promise<ProductVariant> => {
-    return apiFetch(`/v1/store/admin/variants/${id}`);
+    return apiFetch(`/v1/store/variants/${id}`);
   },
 
   create: (data: CreateVariantDto): Promise<ProductVariant> => {
-    return apiFetch('/v1/store/admin/variants', {
+    return apiFetch(`/v1/store/admin/products/${data.productListingId}/variants`, {
       method: 'POST',
       body: JSON.stringify(data),
     });
@@ -242,11 +242,11 @@ export const variantsApi = {
 // ==================== PUBLIC VARIANTS API ====================
 
 export const publicVariantsApi = {
-  list: (productSlug: string): Promise<ProductVariant[]> => {
-    return apiFetch(`/v1/store/products/${productSlug}/variants`);
+  list: (productId: string): Promise<ProductVariant[]> => {
+    return apiFetch(`/v1/store/products/${productId}/variants`);
   },
 
-  get: (productSlug: string, variantId: string): Promise<ProductVariant> => {
-    return apiFetch(`/v1/store/products/${productSlug}/variants/${variantId}`);
+  get: (variantId: string): Promise<ProductVariant> => {
+    return apiFetch(`/v1/store/variants/${variantId}`);
   },
 };

@@ -63,7 +63,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
 
   const loadOrder = async () => {
     try {
-      const res = await api.get(`/v1/store/admin/orders/${params.id}`);
+      const res = await api.get(`/v1/store/orders/admin/${params.id}`);
       setOrder(res.data);
       setTrackingInfo({
         carrier: res.data.shippingCarrier || '',
@@ -87,7 +87,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
         body.trackingNumber = trackingInfo.number;
       }
 
-      await api.put(`/v1/store/admin/orders/${order.id}/status`, body);
+      await api.put(`/v1/store/orders/admin/${order.id}/status`, body);
       await loadOrder();
     } catch (error: any) {
       console.error('Failed to update status:', error);
@@ -134,7 +134,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
     if (!order) return;
 
     try {
-      await api.post(`/v1/store/admin/orders/${order.id}/refund`, {
+      await api.post(`/v1/store/orders/admin/${order.id}/refund`, {
         amount,
         reason,
         type,
@@ -148,7 +148,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
   const handleSaveNotes = async () => {
     if (!order) return;
     try {
-      await api.put(`/v1/store/admin/orders/${order.id}/status`, {
+      await api.put(`/v1/store/orders/admin/${order.id}/status`, {
         status: order.status,
         adminNotes,
       });

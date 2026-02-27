@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { Badge, Card } from '@platform/ui';
 import { Check, AlertCircle } from 'lucide-react';
 import { publicVariantsApi, ProductVariant, AttributeType } from '@/lib/variants-api';
-import { formatCurrency } from '../../../_lib/format';
+import { useCurrencyStore } from '@/lib/currency-store';
 
 interface VariantSelectorProps {
   productSlug: string;
@@ -26,6 +26,7 @@ export function VariantSelector({
   basePrice,
   onVariantChange,
 }: VariantSelectorProps) {
+  const { formatPrice } = useCurrencyStore();
   const [variants, setVariants] = useState<ProductVariant[]>([]);
   const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(null);
   const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>({});
@@ -227,12 +228,12 @@ export function VariantSelector({
           {/* Price */}
           <div className="flex items-center gap-3">
             <span className="text-2xl font-semibold text-slate-900">
-              {formatCurrency(currentPrice)}
+              {formatPrice(currentPrice)}
             </span>
             {currentComparePrice && currentComparePrice > currentPrice && (
               <>
                 <span className="text-sm text-slate-400 line-through">
-                  {formatCurrency(currentComparePrice)}
+                  {formatPrice(currentComparePrice)}
                 </span>
                 <Badge variant="success">
                   Save{' '}

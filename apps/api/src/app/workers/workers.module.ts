@@ -3,13 +3,22 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { DbModule } from '@platform/db';
 import { CleanupService } from './cleanup.service';
 import { FailedOperationsService } from './failed-operations.service';
+import { ProductImportWorker } from './product-import.worker';
+import { ProductImportService } from '../storefront/products/product-import.service';
+import { ProductsService } from '../storefront/products/products.service';
 
 @Module({
   imports: [
     ScheduleModule.forRoot(), // Enable cron jobs
     DbModule,
   ],
-  providers: [CleanupService, FailedOperationsService],
+  providers: [
+    CleanupService,
+    FailedOperationsService,
+    ProductImportWorker,
+    ProductImportService,
+    ProductsService,
+  ],
   exports: [CleanupService, FailedOperationsService],
 })
 export class WorkersModule {}

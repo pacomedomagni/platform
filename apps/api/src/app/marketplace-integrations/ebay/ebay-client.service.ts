@@ -118,17 +118,49 @@ export class EbayClientService {
   }
 
   /**
+   * Get a single inventory item by SKU
+   */
+  async getInventoryItem(client: eBayApi, sku: string) {
+    try {
+      const response = await client.sell.inventory.getInventoryItem(sku);
+      this.logger.log(`Fetched inventory item: ${sku}`);
+      return response;
+    } catch (error) {
+      this.logger.error(`Failed to fetch inventory item ${sku}`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Update inventory quantity
+   *
+   * Fetches the existing inventory item first, then merges the quantity update
+   * into the full item payload before writing it back. This preserves the
+   * listing's title, description, images, and all other fields.
+   *
+   * Previously this called createOrReplaceInventoryItem with only the
+   * availability field, which is a full-replace operation that destroyed
+   * all other item data (product title, description, images, etc.).
    */
   async updateInventoryQuantity(client: eBayApi, sku: string, quantity: number) {
     try {
-      await client.sell.inventory.createOrReplaceInventoryItem(sku, {
+      // Fetch the existing inventory item to preserve all current data
+      const existingItem = await this.getInventoryItem(client, sku);
+
+      // Merge the quantity update into the existing item
+      const updatedItem = {
+        ...existingItem,
         availability: {
+          ...existingItem.availability,
           shipToLocationAvailability: {
+            ...existingItem.availability?.shipToLocationAvailability,
             quantity
           }
         }
-      });
+      };
+
+      // Write back the full item with only the quantity changed
+      await client.sell.inventory.createOrReplaceInventoryItem(sku, updatedItem);
       this.logger.log(`Updated quantity for SKU ${sku}: ${quantity}`);
     } catch (error) {
       this.logger.error(`Failed to update quantity for SKU ${sku}`, error);

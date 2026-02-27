@@ -5,6 +5,7 @@ import { Search, User } from 'lucide-react';
 import { StoreProviders } from './_components/store-providers';
 import { CartIcon } from './_components/cart-icon';
 import { CurrencySwitcher } from './_components/currency-switcher';
+import { LanguageSwitcher } from './_components/language-switcher';
 import { generateOrganizationSchema, serializeJsonLd } from '@/lib/seo/schema';
 import { WelcomeWizard } from '../../components/onboarding/welcome-wizard';
 import { ProductTour } from '../../components/onboarding/product-tour';
@@ -132,6 +133,7 @@ export default function StorefrontLayout({ children }: { children: React.ReactNo
                 </label>
                 <StorefrontSearchInput />
               </div>
+              <LanguageSwitcher />
               <CurrencySwitcher />
               <Link
                 href="/storefront/account"
@@ -163,7 +165,7 @@ export default function StorefrontLayout({ children }: { children: React.ReactNo
         <ProductTour />
 
         <footer className="border-t border-border bg-card" role="contentinfo">
-          <div className="mx-auto grid w-full max-w-7xl gap-8 px-6 py-12 md:grid-cols-[1.2fr_1fr_1fr_1fr]">
+          <div className="mx-auto grid w-full max-w-7xl gap-8 px-6 py-12 md:grid-cols-[1.2fr_1fr_1fr_1fr_1fr]">
             <div className="space-y-4">
               <div className="flex items-center gap-3">
                 <div
@@ -228,6 +230,31 @@ export default function StorefrontLayout({ children }: { children: React.ReactNo
                   className="block hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded"
                 >
                   Support
+                </Link>
+              </div>
+            </nav>
+            <nav aria-labelledby="footer-legal-heading">
+              <div className="space-y-3 text-sm text-muted-foreground">
+                <p id="footer-legal-heading" className="font-semibold text-foreground">
+                  Legal
+                </p>
+                <Link
+                  href="/storefront/pages/terms-of-service"
+                  className="block hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded"
+                >
+                  Terms of Service
+                </Link>
+                <Link
+                  href="/storefront/pages/privacy-policy"
+                  className="block hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded"
+                >
+                  Privacy Policy
+                </Link>
+                <Link
+                  href="/storefront/pages/refund-policy"
+                  className="block hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded"
+                >
+                  Refund Policy
                 </Link>
               </div>
             </nav>

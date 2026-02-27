@@ -217,3 +217,55 @@ export class GetListingsQueryDto {
   @Type(() => Number)
   offset?: number;
 }
+
+// ============================================
+// Order Sync DTOs
+// ============================================
+
+export class SyncOrdersDto {
+  @IsUUID()
+  connectionId!: string;
+}
+
+export class GetMarketplaceOrdersQueryDto {
+  @IsOptional()
+  @IsUUID()
+  connectionId?: string;
+
+  @IsOptional()
+  @IsString()
+  fulfillmentStatus?: string;
+
+  @IsOptional()
+  @IsString()
+  paymentStatus?: string;
+
+  @IsOptional()
+  @IsString()
+  syncStatus?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(100)
+  @Type(() => Number)
+  limit?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  offset?: number;
+}
+
+export class FulfillOrderDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(100)
+  trackingNumber!: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(50)
+  carrier!: string;
+}

@@ -36,6 +36,10 @@ import { ProductImportController } from './products/product-import.controller';
 import { ProductImportService } from './products/product-import.service';
 import { ShippingAdminController, ShippingPublicController } from './shipping/shipping.controller';
 import { ShippingService } from './shipping/shipping.service';
+import { AdminCustomersController } from './customers/admin-customers.controller';
+import { AdminCustomersService } from './customers/admin-customers.service';
+import { CouponController } from './coupons/coupon.controller';
+import { CouponService } from './coupons/coupon.service';
 
 @Module({
   imports: [
@@ -80,6 +84,8 @@ import { ShippingService } from './shipping/shipping.service';
     ProductImportController,
     ShippingAdminController,
     ShippingPublicController,
+    AdminCustomersController,
+    CouponController,
   ],
   providers: [
     ProductsService,
@@ -95,6 +101,8 @@ import { ShippingService } from './shipping/shipping.service';
     StorePagesService,
     ProductImportService,
     ShippingService,
+    AdminCustomersService,
+    CouponService,
   ],
   exports: [
     CustomerAuthModule,

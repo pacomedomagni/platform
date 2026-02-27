@@ -9,6 +9,9 @@ import { PrismaService } from '@platform/db';
 import { Prisma } from '@prisma/client';
 import { StripeService } from '../payments/stripe.service';
 import { StripeConnectService } from '../../onboarding/stripe-connect.service';
+import { WebhookService } from '../../operations/webhook.service';
+import { GiftCardsService } from '../ecommerce/gift-cards.service';
+import { ShippingService } from '../shipping/shipping.service';
 import { CreateCheckoutDto, UpdateCheckoutDto } from './dto';
 
 const CHECKOUT_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
@@ -21,6 +24,9 @@ export class CheckoutService {
     private readonly prisma: PrismaService,
     private readonly stripeService: StripeService,
     private readonly stripeConnectService: StripeConnectService,
+    private readonly webhookService: WebhookService,
+    private readonly giftCardsService: GiftCardsService,
+    private readonly shippingService: ShippingService,
   ) {}
 
   /**
@@ -178,6 +184,61 @@ export class CheckoutService {
       // Use billing address or shipping address
       const billingAddress = dto.billingAddress || dto.shippingAddress;
 
+      // Issue #6: Resolve shipping rate from zone/rate system when shippingRateId is provided
+      let finalShippingTotal = cart.shippingTotal;
+      let finalGrandTotal = cart.grandTotal;
+      let shippingMethodName: string | null = null;
+
+      if (dto.shippingRateId) {
+        const selectedRate = await tx.shippingRate.findFirst({
+          where: {
+            id: dto.shippingRateId,
+            tenantId,
+            isEnabled: true,
+          },
+        });
+
+        if (!selectedRate) {
+          throw new BadRequestException('Selected shipping rate not found or is no longer available');
+        }
+
+        // Check free shipping threshold
+        const cartTotal = Number(cart.subtotal);
+        const isFree = selectedRate.freeShippingThreshold
+          && cartTotal >= Number(selectedRate.freeShippingThreshold);
+        const ratePrice = isFree ? 0 : Number(selectedRate.price);
+
+        // Recalculate totals with the selected rate
+        const oldShipping = Number(cart.shippingTotal);
+        const shippingDelta = ratePrice - oldShipping;
+        finalShippingTotal = new Prisma.Decimal(ratePrice);
+        finalGrandTotal = new Prisma.Decimal(Number(cart.grandTotal) + shippingDelta);
+
+        shippingMethodName = selectedRate.name;
+      } else {
+        // Issue #6: Even without a specific rate ID, try zone-based calculation
+        // using the actual shipping address from checkout for more accurate rates
+        try {
+          const shippingResult = await this.shippingService.calculateShipping(tenantId, {
+            country: dto.shippingAddress.country,
+            state: dto.shippingAddress.state,
+            zipCode: dto.shippingAddress.postalCode,
+            cartTotal: Number(cart.subtotal),
+          });
+
+          if (shippingResult.rates.length > 0) {
+            const cheapestRate = shippingResult.rates[0];
+            const oldShipping = Number(cart.shippingTotal);
+            const shippingDelta = cheapestRate.price - oldShipping;
+            finalShippingTotal = new Prisma.Decimal(cheapestRate.price);
+            finalGrandTotal = new Prisma.Decimal(Number(cart.grandTotal) + shippingDelta);
+            shippingMethodName = cheapestRate.name;
+          }
+        } catch {
+          // If shipping calculation fails, use cart's pre-calculated shipping
+        }
+      }
+
       // Create order
       const order = await tx.order.create({
         data: {
@@ -210,12 +271,15 @@ export class CheckoutService {
           billingPostalCode: billingAddress.postalCode,
           billingCountry: billingAddress.country,
 
-          // Totals from cart
+          // Totals — use zone-based shipping when available (Issue #6)
           subtotal: cart.subtotal,
-          shippingTotal: cart.shippingTotal,
+          shippingTotal: finalShippingTotal,
           taxTotal: cart.taxTotal,
           discountTotal: cart.discountAmount,
-          grandTotal: cart.grandTotal,
+          grandTotal: finalGrandTotal,
+
+          // Issue #6: Store the shipping method name on the order
+          shippingMethod: shippingMethodName,
 
           // Notes
           customerNotes: dto.customerNotes,
@@ -253,90 +317,153 @@ export class CheckoutService {
       return order;
     }, { timeout: 30000 });
 
+    // ============ GIFT CARD REDEMPTION ============
+    let giftCardAmountApplied = 0;
+    let giftCardTransactionId: string | null = null;
+    let chargeAmount = Number(result.grandTotal);
+
+    if (dto.giftCardCode) {
+      try {
+        // Validate the gift card balance first
+        const balanceCheck = await this.giftCardsService.checkBalance(
+          tenantId,
+          dto.giftCardCode,
+          dto.giftCardPin,
+        );
+
+        if (balanceCheck.balance > 0) {
+          // Redeem the gift card against this order
+          const redemption = await this.giftCardsService.redeemForOrder(
+            tenantId,
+            result.id,
+            { code: dto.giftCardCode, pin: dto.giftCardPin },
+            chargeAmount,
+          );
+
+          giftCardAmountApplied = redemption.amountRedeemed;
+          giftCardTransactionId = redemption.transactionId;
+          chargeAmount = chargeAmount - giftCardAmountApplied;
+
+          // If gift card covers the full amount, mark as paid — no external payment needed
+          if (chargeAmount <= 0) {
+            chargeAmount = 0;
+            await this.prisma.order.update({
+              where: { id: result.id },
+              data: {
+                paymentStatus: 'CAPTURED',
+                paymentMethod: 'gift_card',
+              },
+            });
+          }
+        }
+      } catch (error) {
+        // If gift card validation/redemption fails, log and continue with full payment
+        this.logger.error(
+          { err: error, orderId: result.id, giftCardCode: dto.giftCardCode },
+          'Gift card redemption failed, proceeding with full payment',
+        );
+        giftCardAmountApplied = 0;
+        giftCardTransactionId = null;
+        chargeAmount = Number(result.grandTotal);
+      }
+    }
+
     // Create payment intent — route through connected account if tenant has one
     let stripeClientSecret: string | null = null;
     let paymentProvider: string = 'stripe';
-    try {
-      const tenant = await this.prisma.tenant.findUnique({
-        where: { id: tenantId },
-        select: {
-          paymentProvider: true,
-          paymentProviderStatus: true,
-          stripeConnectAccountId: true,
-          platformFeePercent: true,
-          platformFeeFixed: true,
-          squareLocationId: true,
-        },
-      });
 
-      const idempotencyKey = `pi_${tenantId}_${result.id}`;
-      const metadata = {
-        orderId: result.id,
-        orderNumber: result.orderNumber,
-        tenantId,
-        customerEmail: dto.email,
-      };
+    // Skip external payment if gift card covered the full amount
+    if (chargeAmount > 0) {
+      try {
+        const tenant = await this.prisma.tenant.findUnique({
+          where: { id: tenantId },
+          select: {
+            paymentProvider: true,
+            paymentProviderStatus: true,
+            stripeConnectAccountId: true,
+            platformFeePercent: true,
+            platformFeeFixed: true,
+            squareLocationId: true,
+          },
+        });
 
-      // Determine currency from tenant configuration
-      const tenantCurrency = (result.currency || 'usd').toLowerCase();
+        const idempotencyKey = `pi_${tenantId}_${result.id}`;
+        const metadata = {
+          orderId: result.id,
+          orderNumber: result.orderNumber,
+          tenantId,
+          customerEmail: dto.email,
+          ...(giftCardAmountApplied > 0 && { giftCardAmountApplied: String(giftCardAmountApplied) }),
+        };
 
-      if (
-        tenant?.paymentProvider === 'stripe' &&
-        tenant.stripeConnectAccountId &&
-        tenant.paymentProviderStatus === 'active'
-      ) {
-        // Stripe Connect — charge on connected account with platform fee
-        const amount = Number(result.grandTotal);
-        const fee =
-          amount * (Number(tenant.platformFeePercent) / 100) +
-          Number(tenant.platformFeeFixed);
+        // Determine currency from tenant configuration
+        const tenantCurrency = (result.currency || 'usd').toLowerCase();
 
-        const paymentIntent =
-          await this.stripeConnectService.createConnectedPaymentIntent(
-            tenant.stripeConnectAccountId,
-            amount,
+        if (
+          tenant?.paymentProvider === 'stripe' &&
+          tenant.stripeConnectAccountId &&
+          tenant.paymentProviderStatus === 'active'
+        ) {
+          // Stripe Connect — charge on connected account with platform fee
+          // Use chargeAmount (may be reduced by gift card partial redemption)
+          const fee =
+            chargeAmount * (Number(tenant.platformFeePercent) / 100) +
+            Number(tenant.platformFeeFixed);
+
+          const paymentIntent =
+            await this.stripeConnectService.createConnectedPaymentIntent(
+              tenant.stripeConnectAccountId,
+              chargeAmount,
+              tenantCurrency,
+              fee,
+              metadata,
+              idempotencyKey,
+            );
+
+          await this.prisma.order.update({
+            where: { id: result.id },
+            data: { stripePaymentIntentId: paymentIntent.id },
+          });
+
+          stripeClientSecret = paymentIntent.client_secret;
+          paymentProvider = 'stripe';
+        } else if (
+          tenant?.paymentProvider === 'square' &&
+          tenant.paymentProviderStatus === 'active'
+        ) {
+          // Square — payment created after frontend card tokenization
+          paymentProvider = 'square';
+        } else {
+          // Fallback: direct Stripe (for tenants without Connect setup)
+          // Use chargeAmount (may be reduced by gift card partial redemption)
+          const paymentIntent = await this.stripeService.createPaymentIntent(
+            chargeAmount,
             tenantCurrency,
-            fee,
             metadata,
             idempotencyKey,
           );
 
-        await this.prisma.order.update({
-          where: { id: result.id },
-          data: { stripePaymentIntentId: paymentIntent.id },
-        });
+          await this.prisma.order.update({
+            where: { id: result.id },
+            data: { stripePaymentIntentId: paymentIntent.id },
+          });
 
-        stripeClientSecret = paymentIntent.client_secret;
-        paymentProvider = 'stripe';
-      } else if (
-        tenant?.paymentProvider === 'square' &&
-        tenant.paymentProviderStatus === 'active'
-      ) {
-        // Square — payment created after frontend card tokenization
-        paymentProvider = 'square';
-      } else {
-        // Fallback: direct Stripe (for tenants without Connect setup)
-        const paymentIntent = await this.stripeService.createPaymentIntent(
-          Number(result.grandTotal),
-          tenantCurrency,
-          metadata,
-          idempotencyKey,
-        );
-
-        await this.prisma.order.update({
-          where: { id: result.id },
-          data: { stripePaymentIntentId: paymentIntent.id },
-        });
-
-        stripeClientSecret = paymentIntent.client_secret;
-        paymentProvider = 'stripe';
+          stripeClientSecret = paymentIntent.client_secret;
+          paymentProvider = 'stripe';
+        }
+      } catch (error) {
+        // Log error but don't fail checkout — payment can be retried via getCheckout or retryPaymentIntent
+        this.logger.error({ err: error, orderId: result.id }, 'Failed to create payment intent');
       }
-    } catch (error) {
-      // Log error but don't fail checkout — payment can be retried via getCheckout or retryPaymentIntent
-      this.logger.error({ err: error, orderId: result.id }, 'Failed to create payment intent');
+    } else {
+      // Gift card covered the full amount — no external payment provider needed
+      paymentProvider = 'gift_card';
     }
 
-    const response = this.mapOrderToCheckoutResponse(result, stripeClientSecret, paymentProvider);
+    const response = this.mapOrderToCheckoutResponse(result, stripeClientSecret, paymentProvider, {
+      giftCardAmountApplied: giftCardAmountApplied > 0 ? giftCardAmountApplied : null,
+      giftCardTransactionId,
+    });
 
     // Include coupon removal notice if coupon was invalidated during checkout
     if ((result as any).couponRemoved) {
@@ -345,6 +472,20 @@ export class CheckoutService {
         reason: (result as any).couponRemoveReason,
       };
     }
+
+    // Fire-and-forget: trigger order.created webhook
+    this.webhookService.triggerEvent({ tenantId }, {
+      event: 'order.created',
+      payload: {
+        orderId: result.id,
+        orderNumber: result.orderNumber,
+        email: result.email,
+        grandTotal: Number(result.grandTotal),
+        status: result.status,
+        itemCount: result.items.length,
+      },
+      timestamp: new Date(),
+    }).catch(err => this.logger.error({ err }, 'Webhook order.created failed'));
 
     return response;
   }
@@ -656,7 +797,12 @@ export class CheckoutService {
     return `${prefix}-${String(seq).padStart(5, '0')}`;
   }
 
-  private mapOrderToCheckoutResponse(order: any, clientSecret: string | null, paymentProvider?: string) {
+  private mapOrderToCheckoutResponse(
+    order: any,
+    clientSecret: string | null,
+    paymentProvider?: string,
+    giftCard?: { giftCardAmountApplied: number | null; giftCardTransactionId: string | null },
+  ) {
     return {
       id: order.id,
       customerId: order.customerId,
@@ -704,8 +850,11 @@ export class CheckoutService {
       taxTotal: Number(order.taxTotal),
       discountTotal: Number(order.discountTotal),
       grandTotal: Number(order.grandTotal),
+      shippingMethod: order.shippingMethod || null,
       stripePaymentIntentId: order.stripePaymentIntentId,
       clientSecret: clientSecret,
+      giftCardAmountApplied: giftCard?.giftCardAmountApplied ?? null,
+      giftCardTransactionId: giftCard?.giftCardTransactionId ?? null,
     };
   }
 }

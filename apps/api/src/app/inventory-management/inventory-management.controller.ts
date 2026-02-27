@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Delete,
   Body,
   Param,
   Query,
@@ -14,6 +15,7 @@ import { AuthGuard, RolesGuard, Roles, AuthenticatedUser } from '@platform/auth'
 import { Tenant } from '../tenant.middleware';
 import { StockMovementService } from './stock-movement.service';
 import { BatchSerialService } from './batch-serial.service';
+import { WarehouseService } from './warehouse.service';
 import {
   CreateStockMovementDto,
   StockMovementQueryDto,
@@ -24,6 +26,10 @@ import {
   CreateSerialBulkDto,
   UpdateSerialDto,
   SerialQueryDto,
+  CreateWarehouseDto,
+  UpdateWarehouseDto,
+  CreateLocationDto,
+  UpdateLocationDto,
 } from './inventory-management.dto';
 
 interface TenantContext {
@@ -41,6 +47,7 @@ export class InventoryManagementController {
   constructor(
     private readonly stockMovement: StockMovementService,
     private readonly batchSerial: BatchSerialService,
+    private readonly warehouseService: WarehouseService,
   ) {}
 
   private getContext(tenantId: string, req: RequestWithUser): TenantContext {
@@ -212,5 +219,95 @@ export class InventoryManagementController {
     @Body() dto: UpdateSerialDto,
   ) {
     return this.batchSerial.updateSerial(this.getContext(tenantId, req), id, dto);
+  }
+
+  // ==========================================
+  // Warehouses
+  // ==========================================
+
+  @Get('warehouses')
+  @Roles('admin', 'Stock Manager', 'user')
+  async listWarehouses(
+    @Tenant() tenantId: string,
+    @Request() req: RequestWithUser,
+  ) {
+    return this.warehouseService.listWarehouses(this.getContext(tenantId, req));
+  }
+
+  @Get('warehouses/:id')
+  @Roles('admin', 'Stock Manager', 'user')
+  async getWarehouse(
+    @Tenant() tenantId: string,
+    @Request() req: RequestWithUser,
+    @Param('id') id: string,
+  ) {
+    return this.warehouseService.getWarehouse(this.getContext(tenantId, req), id);
+  }
+
+  @Post('warehouses')
+  @Roles('admin', 'Stock Manager')
+  async createWarehouse(
+    @Tenant() tenantId: string,
+    @Request() req: RequestWithUser,
+    @Body() dto: CreateWarehouseDto,
+  ) {
+    return this.warehouseService.createWarehouse(this.getContext(tenantId, req), dto);
+  }
+
+  @Put('warehouses/:id')
+  @Roles('admin', 'Stock Manager')
+  async updateWarehouse(
+    @Tenant() tenantId: string,
+    @Request() req: RequestWithUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateWarehouseDto,
+  ) {
+    return this.warehouseService.updateWarehouse(this.getContext(tenantId, req), id, dto);
+  }
+
+  @Delete('warehouses/:id')
+  @Roles('admin', 'Stock Manager')
+  async deleteWarehouse(
+    @Tenant() tenantId: string,
+    @Request() req: RequestWithUser,
+    @Param('id') id: string,
+  ) {
+    return this.warehouseService.deleteWarehouse(this.getContext(tenantId, req), id);
+  }
+
+  // ==========================================
+  // Locations
+  // ==========================================
+
+  @Post('warehouses/:warehouseId/locations')
+  @Roles('admin', 'Stock Manager')
+  async createLocation(
+    @Tenant() tenantId: string,
+    @Request() req: RequestWithUser,
+    @Param('warehouseId') warehouseId: string,
+    @Body() dto: CreateLocationDto,
+  ) {
+    return this.warehouseService.createLocation(this.getContext(tenantId, req), warehouseId, dto);
+  }
+
+  @Put('locations/:id')
+  @Roles('admin', 'Stock Manager')
+  async updateLocation(
+    @Tenant() tenantId: string,
+    @Request() req: RequestWithUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateLocationDto,
+  ) {
+    return this.warehouseService.updateLocation(this.getContext(tenantId, req), id, dto);
+  }
+
+  @Delete('locations/:id')
+  @Roles('admin', 'Stock Manager')
+  async deleteLocation(
+    @Tenant() tenantId: string,
+    @Request() req: RequestWithUser,
+    @Param('id') id: string,
+  ) {
+    return this.warehouseService.deleteLocation(this.getContext(tenantId, req), id);
   }
 }

@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 
 interface TenantContext {
@@ -7,18 +7,81 @@ interface TenantContext {
 
 type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 const DEFAULT_MAX_ATTEMPTS = 3;
+const JOB_PROCESSING_INTERVAL_MS = 30_000; // 30 seconds
+const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+const CLEANUP_RETENTION_DAYS = 30;
 
 interface JobHandler {
   (tenantId: string, payload: Record<string, unknown>): Promise<unknown>;
 }
 
 @Injectable()
-export class BackgroundJobService {
+export class BackgroundJobService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(BackgroundJobService.name);
   private handlers = new Map<string, JobHandler>();
   private processingJobs = new Set<string>();
+  private isProcessing = false;
+  private jobProcessingInterval: ReturnType<typeof setInterval> | null = null;
+  private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly prisma: PrismaService) {}
+
+  onModuleInit(): void {
+    this.logger.log(
+      `Starting job processing scheduler (every ${JOB_PROCESSING_INTERVAL_MS / 1000}s)`
+    );
+    this.jobProcessingInterval = setInterval(async () => {
+      try {
+        await this.scheduledProcessPendingJobs();
+      } catch (error) {
+        this.logger.error(`Scheduled job processing failed: ${error}`);
+      }
+    }, JOB_PROCESSING_INTERVAL_MS);
+
+    this.logger.log(
+      `Starting cleanup scheduler (every ${CLEANUP_INTERVAL_MS / 1000 / 60} minutes)`
+    );
+    this.cleanupInterval = setInterval(async () => {
+      try {
+        await this.cleanup(CLEANUP_RETENTION_DAYS);
+      } catch (error) {
+        this.logger.error(`Scheduled cleanup failed: ${error}`);
+      }
+    }, CLEANUP_INTERVAL_MS);
+  }
+
+  onModuleDestroy(): void {
+    if (this.jobProcessingInterval) {
+      clearInterval(this.jobProcessingInterval);
+      this.jobProcessingInterval = null;
+      this.logger.log('Stopped job processing scheduler');
+    }
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+      this.logger.log('Stopped cleanup scheduler');
+    }
+  }
+
+  /**
+   * Guard wrapper around processPendingJobs to prevent concurrent execution
+   */
+  private async scheduledProcessPendingJobs(): Promise<void> {
+    if (this.isProcessing) {
+      this.logger.debug('Skipping scheduled run — previous processing still in progress');
+      return;
+    }
+
+    this.isProcessing = true;
+    try {
+      const processed = await this.processPendingJobs();
+      if (processed > 0) {
+        this.logger.log(`Scheduled run processed ${processed} job(s)`);
+      }
+    } finally {
+      this.isProcessing = false;
+    }
+  }
 
   /**
    * Register a job handler

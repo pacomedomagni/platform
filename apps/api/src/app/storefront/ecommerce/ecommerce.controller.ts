@@ -115,6 +115,27 @@ export class EcommerceController {
     return this.variantsService.createAttributeValue(tenantId, dto);
   }
 
+  @Put('admin/attribute-values/:id')
+  @UseGuards(StoreAdminGuard)
+  async updateAttributeValue(
+    @Headers('x-tenant-id') tenantId: string,
+    @Param('id') id: string,
+    @Body() dto: Partial<CreateAttributeValueDto>
+  ) {
+    if (!tenantId) throw new BadRequestException('Tenant ID required');
+    return this.variantsService.updateAttributeValue(tenantId, id, dto);
+  }
+
+  @Delete('admin/attribute-values/:id')
+  @UseGuards(StoreAdminGuard)
+  async deleteAttributeValue(
+    @Headers('x-tenant-id') tenantId: string,
+    @Param('id') id: string
+  ) {
+    if (!tenantId) throw new BadRequestException('Tenant ID required');
+    return this.variantsService.deleteAttributeValue(tenantId, id);
+  }
+
   @Post('admin/products/:productId/variants')
   @UseGuards(StoreAdminGuard)
   async createVariant(
@@ -146,6 +167,42 @@ export class EcommerceController {
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
     return this.variantsService.deleteVariant(tenantId, id);
+  }
+
+  @Post('admin/products/:productId/variants/bulk')
+  @UseGuards(StoreAdminGuard)
+  async bulkCreateVariants(
+    @Headers('x-tenant-id') tenantId: string,
+    @Param('productId') productId: string,
+    @Body() body: { variants: CreateVariantDto[] }
+  ) {
+    if (!tenantId) throw new BadRequestException('Tenant ID required');
+    if (!body.variants?.length) throw new BadRequestException('Variants array required');
+    return this.variantsService.bulkCreateVariants(tenantId, productId, body.variants);
+  }
+
+  @Put('admin/variants/:id/stock')
+  @UseGuards(StoreAdminGuard)
+  async updateVariantStock(
+    @Headers('x-tenant-id') tenantId: string,
+    @Param('id') id: string,
+    @Body() body: { quantity: number }
+  ) {
+    if (!tenantId) throw new BadRequestException('Tenant ID required');
+    if (body.quantity === undefined) throw new BadRequestException('Quantity required');
+    return this.variantsService.updateVariantStock(tenantId, id, body.quantity);
+  }
+
+  @Post('admin/variants/:id/stock/adjust')
+  @UseGuards(StoreAdminGuard)
+  async adjustVariantStock(
+    @Headers('x-tenant-id') tenantId: string,
+    @Param('id') id: string,
+    @Body() body: { adjustment: number }
+  ) {
+    if (!tenantId) throw new BadRequestException('Tenant ID required');
+    if (body.adjustment === undefined) throw new BadRequestException('Adjustment required');
+    return this.variantsService.adjustVariantStock(tenantId, id, body.adjustment);
   }
 
   // ============ REVIEWS - PUBLIC ============

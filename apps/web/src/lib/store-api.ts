@@ -294,6 +294,7 @@ export interface CheckoutResponse {
   email: string;
   status: string;
   paymentStatus: string;
+  paymentProvider?: string;
   shippingAddress: Address;
   billingAddress: Address | null;
   items: Array<{
@@ -550,15 +551,117 @@ export const ordersApi = {
   },
 };
 
+// ==================== PAGES API ====================
+
+export interface StorePage {
+  slug: string;
+  title: string;
+  content: string;
+  isPublished: boolean;
+  updatedAt: string;
+}
+
+export const pagesApi = {
+  getBySlug: (slug: string): Promise<StorePage> => {
+    return apiFetch(`/v1/store/pages/${slug}`);
+  },
+
+  list: (): Promise<StorePage[]> => {
+    return apiFetch('/v1/store/pages');
+  },
+};
+
 // ==================== PAYMENTS API ====================
 
 export interface PaymentConfig {
   publicKey: string | null;
   isConfigured: boolean;
+  paymentProvider: string;
+  squareApplicationId: string | null;
+  squareLocationId: string | null;
+}
+
+export interface SquarePaymentResponse {
+  success: boolean;
+  paymentId: string | null;
+  orderId: string;
 }
 
 export const paymentsApi = {
   getConfig: (): Promise<PaymentConfig> => {
     return apiFetch('/v1/store/payments/config');
+  },
+
+  processSquarePayment: (orderId: string, sourceId: string): Promise<SquarePaymentResponse> => {
+    return apiFetch('/v1/store/payments/square', {
+      method: 'POST',
+      body: JSON.stringify({ orderId, sourceId }),
+    });
+  },
+};
+
+// ==================== I18N API ====================
+
+export interface StoreLanguage {
+  id: string;
+  languageCode: string;
+  countryCode: string | null;
+  name: string;
+  nativeName: string;
+  isDefault: boolean;
+  isEnabled: boolean;
+  sortOrder: number;
+}
+
+export interface LocalizedProduct extends Product {
+  _translation: {
+    languageCode: string;
+    translatedAt: string;
+  } | null;
+}
+
+/**
+ * I18n API client
+ * Uses the storefront/:storeId/i18n/... route prefix.
+ * The storeId is the resolved tenant UUID.
+ */
+async function i18nFetch<T>(
+  path: string,
+  options: RequestInit = {}
+): Promise<T> {
+  const tenantId = await resolveTenantId();
+  return apiFetch(`/storefront/${tenantId}/i18n${path}`, options);
+}
+
+export const i18nApi = {
+  /** Get all enabled languages for the storefront */
+  getLanguages: (): Promise<StoreLanguage[]> => {
+    return i18nFetch('/languages');
+  },
+
+  /** Get the default language */
+  getDefaultLanguage: (): Promise<StoreLanguage | null> => {
+    return i18nFetch('/languages/default');
+  },
+
+  /** Get content translations for given keys in a language */
+  getContents: (keys: string[], lang: string): Promise<Record<string, string>> => {
+    const keysParam = encodeURIComponent(keys.join(','));
+    return i18nFetch(`/content?keys=${keysParam}&lang=${encodeURIComponent(lang)}`);
+  },
+
+  /** Get a single content translation */
+  getContent: (contentKey: string, lang: string): Promise<{ key: string; languageCode: string; content: string }> => {
+    return i18nFetch(`/content/${encodeURIComponent(contentKey)}?lang=${encodeURIComponent(lang)}`);
+  },
+
+  /** Get a product with translations applied */
+  getLocalizedProduct: (productId: string, lang: string): Promise<LocalizedProduct> => {
+    return i18nFetch(`/products/${productId}?lang=${encodeURIComponent(lang)}`);
+  },
+
+  /** Get a category with translations applied */
+  getLocalizedCategory: (categoryId: string, lang: string): Promise<Category & { _translation: { languageCode: string; translatedAt: string } | null }> => {
+    return i18nFetch(`/categories/${categoryId}?lang=${encodeURIComponent(lang)}`);
   },
 };

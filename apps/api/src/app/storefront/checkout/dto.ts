@@ -62,6 +62,23 @@ export class CreateCheckoutDto {
   @IsOptional()
   @IsString()
   customerNotes?: string;
+
+  @IsOptional()
+  @IsString()
+  giftCardCode?: string;
+
+  @IsOptional()
+  @IsString()
+  giftCardPin?: string;
+
+  /**
+   * Issue #6: Optional shipping rate ID from the zone/rate system.
+   * When provided, the selected rate's price and name are used for shipping
+   * instead of the cart's pre-calculated flat-rate amount.
+   */
+  @IsOptional()
+  @IsString()
+  shippingRateId?: string;
 }
 
 export class UpdateCheckoutDto {
@@ -111,4 +128,6 @@ export class CheckoutResponseDto {
   grandTotal: number;
   stripePaymentIntentId: string | null;
   stripeClientSecret: string | null;
+  giftCardAmountApplied: number | null;
+  giftCardTransactionId: string | null;
 }

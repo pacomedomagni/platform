@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { OrdersService } from './orders.service';
+import { PaymentsService } from '../payments/payments.service';
 import { CustomerAuthService } from '../auth/customer-auth.service';
 import { ListOrdersDto } from './dto';
 import { StoreAdminGuard } from '@platform/auth';
@@ -21,6 +22,7 @@ import { StoreAdminGuard } from '@platform/auth';
 export class OrdersController {
   constructor(
     private readonly ordersService: OrdersService,
+    private readonly paymentsService: PaymentsService,
     private readonly authService: CustomerAuthService
   ) {}
 
@@ -104,7 +106,7 @@ export class OrdersController {
 
   /**
    * List all orders (admin)
-   * GET /api/v1/store/admin/orders
+   * GET /api/v1/store/orders/admin/all
    */
   @Get('admin/all')
   @UseGuards(StoreAdminGuard)
@@ -120,7 +122,7 @@ export class OrdersController {
 
   /**
    * Get order detail (admin)
-   * GET /api/v1/store/admin/orders/:id
+   * GET /api/v1/store/orders/admin/:id
    */
   @Get('admin/:id')
   @UseGuards(StoreAdminGuard)
@@ -136,7 +138,7 @@ export class OrdersController {
 
   /**
    * Update order status (admin)
-   * PUT /api/v1/store/admin/orders/:id/status
+   * PUT /api/v1/store/orders/admin/:id/status
    */
   @Put('admin/:id/status')
   @UseGuards(StoreAdminGuard)
@@ -152,6 +154,34 @@ export class OrdersController {
       carrier: body.carrier,
       trackingNumber: body.trackingNumber,
     });
+  }
+
+  /**
+   * Process refund for order (admin)
+   * POST /api/v1/store/orders/admin/:id/refund
+   */
+  @Post('admin/:id/refund')
+  @UseGuards(StoreAdminGuard)
+  async refundOrder(
+    @Headers('x-tenant-id') tenantId: string,
+    @Param('id') orderId: string,
+    @Body() body: { amount?: number; reason?: string }
+  ) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID required');
+    }
+
+    // Map free-text reason to Stripe's accepted reason enum, defaulting to 'requested_by_customer'
+    const reasonMap: Record<string, 'duplicate' | 'fraudulent' | 'requested_by_customer'> = {
+      duplicate: 'duplicate',
+      fraudulent: 'fraudulent',
+      requested_by_customer: 'requested_by_customer',
+    };
+    const stripeReason = body.reason
+      ? reasonMap[body.reason] || 'requested_by_customer'
+      : 'requested_by_customer';
+
+    return this.paymentsService.createRefund(tenantId, orderId, body.amount, stripeReason);
   }
 
   // ============ HELPERS ============

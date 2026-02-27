@@ -40,12 +40,12 @@ export class PaymentsController {
   ) {}
 
   /**
-   * Get payment configuration (public key)
+   * Get payment configuration (public key, provider info)
    * GET /api/v1/store/payments/config
    */
   @Get('config')
-  async getConfig() {
-    return this.paymentsService.getConfig();
+  async getConfig(@Headers('x-tenant-id') tenantId: string) {
+    return this.paymentsService.getConfig(tenantId);
   }
 
   /**

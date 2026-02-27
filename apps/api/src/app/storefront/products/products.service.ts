@@ -10,10 +10,14 @@ import {
   CreateCategoryDto,
 } from './dto';
 import { CreateSimpleProductDto } from './simple-product.dto';
+import { WebhookService } from '../../operations/webhook.service';
 
 @Injectable()
 export class ProductsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly webhookService: WebhookService,
+  ) {}
 
   /**
    * List published products with filtering, sorting, and pagination
@@ -425,6 +429,19 @@ export class ProductsService {
       });
     });
 
+    // Fire-and-forget: trigger product.created webhook
+    this.webhookService.triggerEvent({ tenantId }, {
+      event: 'product.created',
+      payload: {
+        productId: product.id,
+        slug: product.slug,
+        displayName: product.displayName,
+        price: product.price ? Number(product.price) : null,
+        isPublished: product.isPublished,
+      },
+      timestamp: new Date(),
+    }).catch(() => { /* silent */ });
+
     return this.mapProductToDetailResponse(product);
   }
 
@@ -506,6 +523,19 @@ export class ProductsService {
         },
       },
     });
+
+    // Fire-and-forget: trigger product.updated webhook
+    this.webhookService.triggerEvent({ tenantId }, {
+      event: 'product.updated',
+      payload: {
+        productId: product.id,
+        slug: product.slug,
+        displayName: product.displayName,
+        price: product.price ? Number(product.price) : null,
+        isPublished: product.isPublished,
+      },
+      timestamp: new Date(),
+    }).catch(() => { /* silent */ });
 
     return this.mapProductToDetailResponse(product);
   }

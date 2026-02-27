@@ -9,6 +9,8 @@ import { EbayAuthService } from './ebay-auth.service';
 import { EbayAuthController } from './ebay-auth.controller';
 import { EbayListingsService } from './ebay-listings.service';
 import { EbayListingsController } from './ebay-listings.controller';
+import { EbayOrderSyncService } from './ebay-order-sync.service';
+import { EbayOrdersController } from './ebay-orders.controller';
 
 /**
  * eBay Integration Module
@@ -16,7 +18,7 @@ import { EbayListingsController } from './ebay-listings.controller';
  */
 @Module({
   imports: [DbModule, OperationsModule],
-  controllers: [EbayAuthController, EbayListingsController],
+  controllers: [EbayAuthController, EbayListingsController, EbayOrdersController],
   providers: [
     EncryptionService,
     MarketplaceAuditService,
@@ -24,12 +26,14 @@ import { EbayListingsController } from './ebay-listings.controller';
     EbayStoreService,
     EbayAuthService,
     EbayListingsService,
+    EbayOrderSyncService,
   ],
   exports: [
     EbayClientService,
     EbayStoreService,
     EbayAuthService,
     EbayListingsService,
+    EbayOrderSyncService,
   ],
 })
 export class EbayModule {}

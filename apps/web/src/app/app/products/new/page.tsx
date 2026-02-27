@@ -1,10 +1,17 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Upload, X, Loader2, Image as ImageIcon, Sparkles, Package, Shirt, Coffee, Gift } from 'lucide-react';
 import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
+
+interface Category {
+  id: string;
+  name: string;
+  slug: string;
+  children?: Category[];
+}
 
 // Product templates for quick start
 const PRODUCT_TEMPLATES = [
@@ -15,7 +22,6 @@ const PRODUCT_TEMPLATES = [
     displayName: 'Classic T-Shirt',
     price: '29.99',
     description: 'Premium quality cotton t-shirt. Comfortable fit for everyday wear. Available in multiple sizes.',
-    category: 'Apparel',
   },
   {
     id: 'beverage',
@@ -24,7 +30,6 @@ const PRODUCT_TEMPLATES = [
     displayName: 'Artisan Coffee Blend',
     price: '18.99',
     description: 'Hand-roasted specialty coffee beans. Rich flavor with notes of chocolate and caramel. 12oz bag.',
-    category: 'Food & Beverage',
   },
   {
     id: 'gift',
@@ -33,7 +38,6 @@ const PRODUCT_TEMPLATES = [
     displayName: 'Premium Gift Box',
     price: '49.99',
     description: 'Beautifully curated gift set. Perfect for any occasion. Includes premium packaging.',
-    category: 'Gifts',
   },
   {
     id: 'general',
@@ -42,7 +46,6 @@ const PRODUCT_TEMPLATES = [
     displayName: '',
     price: '',
     description: '',
-    category: '',
   },
 ];
 
@@ -54,26 +57,19 @@ export default function NewProductPage() {
   const [price, setPrice] = useState('');
   const [compareAtPrice, setCompareAtPrice] = useState('');
   const [description, setDescription] = useState('');
-  const [category, setCategory] = useState('');
+  const [categoryId, setCategoryId] = useState('');
   const [isFeatured, setIsFeatured] = useState(false);
 
   const [isDirty, setIsDirty] = useState(false);
 
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
   const [images, setImages] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useUnsavedChanges(isDirty);
-
-  const applyTemplate = (template: typeof PRODUCT_TEMPLATES[0]) => {
-    if (template.displayName) setDisplayName(template.displayName);
-    if (template.price) setPrice(template.price);
-    if (template.description) setDescription(template.description);
-    if (template.category) setCategory(template.category);
-    setShowTemplates(false);
-    if (template.displayName) setIsDirty(true);
-  };
 
   const getHeaders = useCallback(() => {
     const token = localStorage.getItem('access_token');
@@ -83,6 +79,33 @@ export default function NewProductPage() {
       'x-tenant-id': tenantId || '',
     };
   }, []);
+
+  useEffect(() => {
+    const fetchCategories = async () => {
+      setCategoriesLoading(true);
+      try {
+        const headers = getHeaders();
+        const res = await fetch('/api/v1/store/categories', { headers });
+        if (res.ok) {
+          const data = await res.json();
+          setCategories(Array.isArray(data) ? data : data.data ?? []);
+        }
+      } catch {
+        // Categories are optional; silently fail
+      } finally {
+        setCategoriesLoading(false);
+      }
+    };
+    fetchCategories();
+  }, [getHeaders]);
+
+  const applyTemplate = (template: typeof PRODUCT_TEMPLATES[0]) => {
+    if (template.displayName) setDisplayName(template.displayName);
+    if (template.price) setPrice(template.price);
+    if (template.description) setDescription(template.description);
+    setShowTemplates(false);
+    if (template.displayName) setIsDirty(true);
+  };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -161,8 +184,8 @@ export default function NewProductPage() {
       if (images.length > 0) {
         body.images = images;
       }
-      if (category.trim()) {
-        body.category = category.trim();
+      if (categoryId) {
+        body.categoryId = categoryId;
       }
 
       const res = await fetch('/api/v1/store/admin/products/simple', {
@@ -297,19 +320,32 @@ export default function NewProductPage() {
 
               <div>
                 <label
-                  htmlFor="category"
+                  htmlFor="categoryId"
                   className="block text-sm font-medium text-slate-700 dark:text-slate-300"
                 >
                   Category
                 </label>
-                <input
-                  id="category"
-                  type="text"
-                  value={category}
-                  onChange={(e) => { setCategory(e.target.value); setIsDirty(true); }}
-                  placeholder="e.g. Apparel, Electronics"
-                  className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
-                />
+                <select
+                  id="categoryId"
+                  value={categoryId}
+                  onChange={(e) => { setCategoryId(e.target.value); setIsDirty(true); }}
+                  disabled={categoriesLoading}
+                  className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
+                >
+                  <option value="">
+                    {categoriesLoading ? 'Loading categories...' : 'Select a category'}
+                  </option>
+                  {categories.map((cat) => (
+                    <optgroup key={cat.id} label={cat.name}>
+                      <option value={cat.id}>{cat.name}</option>
+                      {cat.children?.map((child) => (
+                        <option key={child.id} value={child.id}>
+                          {child.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
               </div>
             </div>
           </div>

@@ -13,6 +13,7 @@ import { useAuthStore } from '@/lib/auth-store';
 import { checkoutApi, paymentsApi } from '@/lib/store-api';
 import { formatCurrency } from '../_lib/format';
 import { StripePayment } from '../_components/stripe-payment';
+import { SquarePayment } from '../_components/square-payment';
 import { FormField } from '@/components/forms';
 import { CheckoutProgress } from './_components/checkout-progress';
 import { TrustBadges } from './_components/trust-badges';
@@ -39,6 +40,9 @@ export default function CheckoutPage() {
   const [orderNumber, setOrderNumber] = useState<string | null>(null);
   const [stripeClientSecret, setStripeClientSecret] = useState<string | null>(null);
   const [stripePublicKey, setStripePublicKey] = useState<string | null>(null);
+  const [paymentProvider, setPaymentProvider] = useState<string>('stripe');
+  const [squareApplicationId, setSquareApplicationId] = useState<string | null>(null);
+  const [squareLocationId, setSquareLocationId] = useState<string | null>(null);
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState<'info' | 'payment'>('info');
@@ -70,13 +74,17 @@ export default function CheckoutPage() {
 
   const formValues = watch();
 
-  // Initialize cart and load Stripe config
+  // Initialize cart and load payment config
   useEffect(() => {
     initializeCart();
 
-    // Load Stripe config
+    // Load payment config (Stripe or Square depending on tenant)
     paymentsApi.getConfig().then(config => {
-      if (config.publicKey) {
+      setPaymentProvider(config.paymentProvider || 'stripe');
+      if (config.paymentProvider === 'square') {
+        setSquareApplicationId(config.squareApplicationId);
+        setSquareLocationId(config.squareLocationId);
+      } else if (config.publicKey) {
         setStripePublicKey(config.publicKey);
       }
     }).catch(console.error);
@@ -135,7 +143,14 @@ export default function CheckoutPage() {
       setOrderId(checkout.id);
       setOrderNumber(checkout.orderNumber);
 
-      if (checkout.clientSecret) {
+      // Determine provider from checkout response (backend is authoritative)
+      const provider = checkout.paymentProvider || paymentProvider;
+      setPaymentProvider(provider);
+
+      if (provider === 'square') {
+        // Square: no clientSecret needed -- card tokenization happens on frontend
+        setStep('payment');
+      } else if (checkout.clientSecret) {
         setStripeClientSecret(checkout.clientSecret);
         setStep('payment');
       } else {
@@ -460,7 +475,9 @@ export default function CheckoutPage() {
                   </h2>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Your payment is secured by Stripe. We never store your card details.
+                  {paymentProvider === 'square'
+                    ? 'Your payment is secured by Square. We never store your card details.'
+                    : 'Your payment is secured by Stripe. We never store your card details.'}
                 </p>
               </div>
 
@@ -481,7 +498,26 @@ export default function CheckoutPage() {
                 </address>
               </div>
 
-              {stripePublicKey && stripeClientSecret ? (
+              {paymentProvider === 'square' ? (
+                squareApplicationId && squareLocationId && orderId ? (
+                  <SquarePayment
+                    orderId={orderId}
+                    applicationId={squareApplicationId}
+                    locationId={squareLocationId}
+                    onSuccess={handlePaymentSuccess}
+                    onError={handlePaymentError}
+                  />
+                ) : (
+                  <div
+                    className="flex items-center justify-center py-10"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <Spinner className="h-8 w-8" aria-hidden="true" />
+                    <span className="ml-3 text-muted-foreground">Loading payment form...</span>
+                  </div>
+                )
+              ) : stripePublicKey && stripeClientSecret ? (
                 <StripePayment
                   clientSecret={stripeClientSecret}
                   orderId={orderId || undefined}

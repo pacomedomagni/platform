@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import Image from 'next/image';
 import { Badge, Card } from '@platform/ui';
-import { formatCurrency } from '../_lib/format';
+import { Price } from './currency-switcher';
 import { AddToCartButton } from './add-to-cart-button';
 
 type ProductCardProduct = {
@@ -89,10 +89,7 @@ export const ProductCard = ({ product, compact }: ProductCardProps) => {
         </div>
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-lg font-semibold text-slate-900">{formatCurrency(product.price)}</p>
-            {compareAt && (
-              <p className="text-xs text-slate-400 line-through">{formatCurrency(compareAt)}</p>
-            )}
+            <Price amount={product.price} compareAt={compareAt} className="text-lg text-slate-900" />
           </div>
           {product.rating !== undefined && product.reviews !== undefined && (
             <span className="text-xs text-slate-500">

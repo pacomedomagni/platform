@@ -49,7 +49,7 @@ export default function OrdersPage() {
       if (status) params.status = status;
       if (paymentStatus) params.paymentStatus = paymentStatus;
 
-      const res = await api.get('/v1/store/admin/orders/all', { params });
+      const res = await api.get('/v1/store/orders/admin/all', { params });
       setOrders(res.data.data || []);
 
       // Calculate stats

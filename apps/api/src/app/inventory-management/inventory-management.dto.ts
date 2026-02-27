@@ -280,6 +280,16 @@ export class CreateWarehouseDto {
   isActive?: boolean;
 }
 
+export class UpdateWarehouseDto {
+  @IsString()
+  @IsOptional()
+  name?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  isActive?: boolean;
+}
+
 export class CreateLocationDto {
   @IsString()
   warehouseCode!: string;
@@ -306,4 +316,26 @@ export class CreateLocationDto {
   @IsBoolean()
   @IsOptional()
   isStaging?: boolean;
+}
+
+export class UpdateLocationDto {
+  @IsString()
+  @IsOptional()
+  name?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  isPickable?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  isPutaway?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  isStaging?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  isActive?: boolean;
 }
