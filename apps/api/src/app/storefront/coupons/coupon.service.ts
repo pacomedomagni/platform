@@ -237,14 +237,16 @@ export class CouponService {
 
     if (coupon.timesUsed > 0) {
       // Soft delete - deactivate to preserve order history references
-      await this.prisma.coupon.update({
-        where: { id },
+      // Use updateMany with tenantId for defense in depth
+      await this.prisma.coupon.updateMany({
+        where: { id, tenantId },
         data: { isActive: false },
       });
       return { message: 'Coupon deactivated (has existing usage history)' };
     }
 
-    await this.prisma.coupon.delete({ where: { id } });
+    // Use deleteMany with tenantId for defense in depth
+    await this.prisma.coupon.deleteMany({ where: { id, tenantId } });
     return { message: 'Coupon deleted' };
   }
 

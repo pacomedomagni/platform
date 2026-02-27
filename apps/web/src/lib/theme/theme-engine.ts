@@ -284,6 +284,43 @@ export function injectThemeCSS(css: string): void {
 }
 
 /**
+ * Sanitize custom CSS to prevent injection of dangerous patterns.
+ * Strips expressions, JS URLs, imports, and other XSS vectors.
+ */
+export function sanitizeCSS(css: string): string {
+  let sanitized = css;
+
+  // Remove expression() - IE CSS expression attack vector
+  sanitized = sanitized.replace(/expression\s*\([^)]*\)/gi, '/* removed:expression */');
+
+  // Remove javascript: URLs
+  sanitized = sanitized.replace(/javascript\s*:/gi, '/* removed:js */');
+
+  // Remove @import rules (can load external resources)
+  sanitized = sanitized.replace(/@import\s+[^;]+;?/gi, '/* removed:import */');
+
+  // Remove url() with data: or javascript: schemes (allow http/https and relative)
+  sanitized = sanitized.replace(
+    /url\s*\(\s*(['"]?)\s*(data\s*:|javascript\s*:)[^)]*\1\s*\)/gi,
+    '/* removed:url */'
+  );
+
+  // Remove -moz-binding (Firefox XBL binding attack vector)
+  sanitized = sanitized.replace(/-moz-binding\s*:[^;]+;?/gi, '/* removed:binding */');
+
+  // Remove behavior: (IE .htc behavior files)
+  sanitized = sanitized.replace(/behavior\s*:[^;]+;?/gi, '/* removed:behavior */');
+
+  // Remove <script and </script tags if somehow embedded
+  sanitized = sanitized.replace(/<\/?script[^>]*>/gi, '/* removed:script */');
+
+  // Remove HTML event handler patterns (onclick, onerror, etc.)
+  sanitized = sanitized.replace(/\bon\w+\s*=/gi, '/* removed:handler */');
+
+  return sanitized;
+}
+
+/**
  * Apply custom CSS
  */
 export function applyCustomCSS(customCSS?: string): void {
@@ -298,7 +335,7 @@ export function applyCustomCSS(customCSS?: string): void {
     document.head.appendChild(styleElement);
   }
 
-  styleElement.textContent = customCSS;
+  styleElement.textContent = sanitizeCSS(customCSS);
 }
 
 /**

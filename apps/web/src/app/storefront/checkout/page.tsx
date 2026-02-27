@@ -10,7 +10,8 @@ import { AlertCircle, Lock, ShoppingBag, Check } from 'lucide-react';
 import { checkoutSchema, type CheckoutInput } from '@platform/validation';
 import { useCartStore } from '@/lib/cart-store';
 import { useAuthStore } from '@/lib/auth-store';
-import { checkoutApi, paymentsApi } from '@/lib/store-api';
+import { checkoutApi, paymentsApi, shippingApi, giftCardApi } from '@/lib/store-api';
+import type { ShippingRate, GiftCardBalance } from '@/lib/store-api';
 import { formatCurrency } from '../_lib/format';
 import { StripePayment } from '../_components/stripe-payment';
 import { SquarePayment } from '../_components/square-payment';
@@ -46,6 +47,19 @@ export default function CheckoutPage() {
   const [isCreatingOrder, setIsCreatingOrder] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState<'info' | 'payment'>('info');
+
+  // Gift card state
+  const [giftCardCode, setGiftCardCode] = useState('');
+  const [giftCardPin, setGiftCardPin] = useState('');
+  const [giftCardApplied, setGiftCardApplied] = useState<GiftCardBalance | null>(null);
+  const [giftCardError, setGiftCardError] = useState<string | null>(null);
+  const [isCheckingGiftCard, setIsCheckingGiftCard] = useState(false);
+
+  // Shipping method state
+  const [shippingRates, setShippingRates] = useState<ShippingRate[]>([]);
+  const [selectedShippingRateId, setSelectedShippingRateId] = useState<string | null>(null);
+  const [isLoadingShippingRates, setIsLoadingShippingRates] = useState(false);
+  const [shippingRatesError, setShippingRatesError] = useState<string | null>(null);
 
   const {
     register,
@@ -112,6 +126,69 @@ export default function CheckoutPage() {
     }
   }, [customer, setValue]);
 
+  // Fetch shipping rates when address country/state/postalCode changes
+  const fetchShippingRates = async (country: string, state?: string, postalCode?: string) => {
+    if (!country) return;
+    setIsLoadingShippingRates(true);
+    setShippingRatesError(null);
+    try {
+      const result = await shippingApi.getRates({
+        country,
+        state,
+        zipCode: postalCode,
+        cartTotal: subtotal,
+      });
+      setShippingRates(result.rates || []);
+      // Auto-select the first rate if none selected
+      if (result.rates?.length > 0 && !selectedShippingRateId) {
+        setSelectedShippingRateId(result.rates[0].id);
+      }
+    } catch {
+      setShippingRates([]);
+      setShippingRatesError('Could not load shipping rates. Default shipping will be applied.');
+    } finally {
+      setIsLoadingShippingRates(false);
+    }
+  };
+
+  const watchedCountry = watch('country');
+  const watchedState = watch('state');
+  const watchedPostalCode = watch('postalCode');
+
+  useEffect(() => {
+    if (watchedCountry && items.length > 0) {
+      fetchShippingRates(watchedCountry, watchedState, watchedPostalCode);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedCountry, watchedState, watchedPostalCode, subtotal]);
+
+  // Gift card handlers
+  const handleApplyGiftCard = async () => {
+    if (!giftCardCode.trim()) return;
+    setIsCheckingGiftCard(true);
+    setGiftCardError(null);
+    try {
+      const balance = await giftCardApi.checkBalance(giftCardCode.trim(), giftCardPin || undefined);
+      if (balance.balance <= 0) {
+        setGiftCardError('This gift card has no remaining balance.');
+        return;
+      }
+      setGiftCardApplied(balance);
+    } catch (err) {
+      setGiftCardError(err instanceof Error ? err.message : 'Invalid gift card.');
+      setGiftCardApplied(null);
+    } finally {
+      setIsCheckingGiftCard(false);
+    }
+  };
+
+  const handleRemoveGiftCard = () => {
+    setGiftCardApplied(null);
+    setGiftCardCode('');
+    setGiftCardPin('');
+    setGiftCardError(null);
+  };
+
   const onSubmit = async (data: CheckoutInput) => {
     if (!cartId) {
       setError('No cart found. Please add items to your cart.');
@@ -138,6 +215,13 @@ export default function CheckoutPage() {
           country: data.country,
         },
         customerNotes: data.customerNotes || undefined,
+        ...(giftCardApplied && {
+          giftCardCode: giftCardCode.trim(),
+          giftCardPin: giftCardPin || undefined,
+        }),
+        ...(selectedShippingRateId && {
+          shippingRateId: selectedShippingRateId,
+        }),
       });
 
       setOrderId(checkout.id);
@@ -442,6 +526,56 @@ export default function CheckoutPage() {
                   </div>
                 </section>
 
+                {/* Shipping Method Selection */}
+                <section className="space-y-4 mt-8" aria-labelledby="shipping-method-heading">
+                  <h3 id="shipping-method-heading" className="text-lg font-semibold text-foreground">
+                    Shipping Method
+                  </h3>
+                  {isLoadingShippingRates ? (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Spinner className="h-4 w-4" aria-hidden="true" />
+                      Loading shipping rates...
+                    </div>
+                  ) : shippingRates.length > 0 ? (
+                    <div className="space-y-2">
+                      {shippingRates.map((rate) => (
+                        <label
+                          key={rate.id}
+                          className={`flex items-center justify-between rounded-lg border p-3 cursor-pointer transition-colors ${
+                            selectedShippingRateId === rate.id
+                              ? 'border-primary bg-primary/5'
+                              : 'border-border hover:border-primary/50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <input
+                              type="radio"
+                              name="shippingRate"
+                              value={rate.id}
+                              checked={selectedShippingRateId === rate.id}
+                              onChange={() => setSelectedShippingRateId(rate.id)}
+                              className="h-4 w-4 text-primary"
+                            />
+                            <div>
+                              <p className="text-sm font-medium text-foreground">{rate.name}</p>
+                              {rate.estimatedDays && (
+                                <p className="text-xs text-muted-foreground">{rate.estimatedDays}</p>
+                              )}
+                            </div>
+                          </div>
+                          <span className="text-sm font-semibold text-foreground">
+                            {rate.isFree ? 'Free' : formatCurrency(rate.price)}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      {shippingRatesError || 'Enter your shipping address to see available rates.'}
+                    </p>
+                  )}
+                </section>
+
                 <Button
                   type="submit"
                   className="w-full mt-8 bg-gradient-to-r from-primary via-secondary to-accent text-primary-foreground shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
@@ -576,6 +710,71 @@ export default function CheckoutPage() {
               </div>
             )}
 
+            {/* Gift Card Section */}
+            {step === 'info' && (
+              <div className="border-t border-border pt-4 space-y-3">
+                <h3 className="text-sm font-semibold text-foreground">Gift Card</h3>
+                {giftCardApplied ? (
+                  <div className="flex items-center justify-between rounded-lg bg-green-50 border border-green-200 p-3">
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <Check className="h-4 w-4 text-green-600" aria-hidden="true" />
+                        <span className="text-sm font-medium text-green-700">
+                          Gift card applied
+                        </span>
+                      </div>
+                      <p className="text-xs text-green-600 mt-0.5">
+                        Balance: {formatCurrency(giftCardApplied.balance)}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleRemoveGiftCard}
+                      className="text-xs text-red-600 hover:underline"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex gap-2">
+                      <Input
+                        className="h-9 text-sm"
+                        placeholder="Gift card code"
+                        value={giftCardCode}
+                        onChange={(e) => setGiftCardCode(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <Input
+                        className="h-9 text-sm"
+                        placeholder="PIN (if required)"
+                        value={giftCardPin}
+                        onChange={(e) => setGiftCardPin(e.target.value)}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-9 shrink-0"
+                        onClick={handleApplyGiftCard}
+                        disabled={!giftCardCode.trim() || isCheckingGiftCard}
+                      >
+                        {isCheckingGiftCard ? (
+                          <Spinner className="h-3 w-3" aria-hidden="true" />
+                        ) : (
+                          'Apply'
+                        )}
+                      </Button>
+                    </div>
+                    {giftCardError && (
+                      <p className="text-xs text-red-600">{giftCardError}</p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
             <div className="space-y-3 text-sm text-muted-foreground border-t border-border pt-4">
               <div className="flex items-center justify-between">
                 <span>Subtotal</span>
@@ -599,9 +798,21 @@ export default function CheckoutPage() {
                   <span className="font-semibold">-{formatCurrency(discount)}</span>
                 </div>
               )}
+              {giftCardApplied && (
+                <div className="flex items-center justify-between text-green-600">
+                  <span>Gift Card</span>
+                  <span className="font-semibold">
+                    -{formatCurrency(Math.min(giftCardApplied.balance, total))}
+                  </span>
+                </div>
+              )}
               <div className="flex items-center justify-between border-t border-border pt-3 text-base font-semibold text-foreground">
                 <span>Total</span>
-                <span>{formatCurrency(total)}</span>
+                <span>
+                  {giftCardApplied
+                    ? formatCurrency(Math.max(0, total - Math.min(giftCardApplied.balance, total)))
+                    : formatCurrency(total)}
+                </span>
               </div>
             </div>
             <p className="text-xs text-muted-foreground">

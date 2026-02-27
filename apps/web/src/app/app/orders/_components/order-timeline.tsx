@@ -22,7 +22,7 @@ export function OrderTimeline({
 }: OrderTimelineProps) {
   const formatDate = (date?: string | Date | null) => {
     if (!date) return null;
-    return new Date(date).toLocaleString('en-US', {
+    return new Date(date).toLocaleString(undefined, {
       month: 'short',
       day: 'numeric',
       year: 'numeric',

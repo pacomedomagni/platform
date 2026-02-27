@@ -81,12 +81,12 @@ export class SalesAnalyticsService {
       revenue: number;
       order_count: number;
     }>>`
-      SELECT 
+      SELECT
         oi."productId" as product_id,
-        oi."productName" as product_name,
-        oi."productCode" as product_code,
+        oi."name" as product_name,
+        oi."sku" as product_code,
         COALESCE(SUM(oi."quantity")::int, 0) as quantity_sold,
-        COALESCE(SUM(oi."lineTotal")::float, 0) as revenue,
+        COALESCE(SUM(oi."totalPrice")::float, 0) as revenue,
         COUNT(DISTINCT oi."orderId")::int as order_count
       FROM order_items oi
       INNER JOIN orders o ON o.id = oi."orderId"
@@ -94,7 +94,7 @@ export class SalesAnalyticsService {
         AND o."paymentStatus" = 'CAPTURED'
         AND o."createdAt" >= ${startDate}
         AND o."createdAt" <= ${endDate}
-      GROUP BY oi."productId", oi."productName", oi."productCode"
+      GROUP BY oi."productId", oi."name", oi."sku"
       ORDER BY revenue DESC
       LIMIT ${limit}
     `;
@@ -138,7 +138,7 @@ export class SalesAnalyticsService {
       SELECT 
         pc.id as category_id,
         pc.name as category_name,
-        COALESCE(SUM(oi."lineTotal")::float, 0) as revenue,
+        COALESCE(SUM(oi."totalPrice")::float, 0) as revenue,
         COUNT(DISTINCT oi."orderId")::int as order_count,
         COALESCE(SUM(oi."quantity")::int, 0) as items_sold
       FROM order_items oi
@@ -200,6 +200,7 @@ export class SalesAnalyticsService {
         FROM customer_first_order cfo
         INNER JOIN orders o ON o."customerId" = cfo."customerId"
           AND o."paymentStatus" = 'CAPTURED'
+          AND o."tenantId" = ${ctx.tenantId}
         INNER JOIN (
           SELECT "customerId", COUNT(*) as order_count
           FROM orders
@@ -215,16 +216,78 @@ export class SalesAnalyticsService {
       SELECT * FROM cohort_stats
     `;
 
-    return cohorts.map(c => ({
-      cohortMonth: c.cohort_month,
-      customersAcquired: Number(c.customers_acquired),
-      totalRevenue: Number(c.total_revenue),
-      averageOrderValue: Number(c.avg_order_value),
-      repeatPurchaseRate: c.customers_acquired > 0 
-        ? (Number(c.repeat_customers) / Number(c.customers_acquired)) * 100 
-        : 0,
-      retentionByMonth: {}, // Would need more complex query for monthly retention
-    }));
+    // Compute monthly retention for each cohort
+    const retentionData = await this.prisma.$queryRaw<Array<{
+      cohort_month: string;
+      months_after: number;
+      retained_customers: number;
+    }>>`
+      WITH customer_first_order AS (
+        SELECT
+          "customerId",
+          TO_CHAR(MIN("createdAt"), 'YYYY-MM') as cohort_month
+        FROM orders
+        WHERE "tenantId" = ${ctx.tenantId}
+          AND "paymentStatus" = 'CAPTURED'
+          AND "customerId" IS NOT NULL
+        GROUP BY "customerId"
+      ),
+      customer_activity AS (
+        SELECT
+          cfo."customerId",
+          cfo.cohort_month,
+          (EXTRACT(YEAR FROM o."createdAt") - EXTRACT(YEAR FROM MIN(o2."createdAt"))) * 12
+            + EXTRACT(MONTH FROM o."createdAt") - EXTRACT(MONTH FROM MIN(o2."createdAt")) as months_after
+        FROM customer_first_order cfo
+        INNER JOIN orders o ON o."customerId" = cfo."customerId"
+          AND o."paymentStatus" = 'CAPTURED'
+          AND o."tenantId" = ${ctx.tenantId}
+        INNER JOIN orders o2 ON o2."customerId" = cfo."customerId"
+          AND o2."paymentStatus" = 'CAPTURED'
+          AND o2."tenantId" = ${ctx.tenantId}
+        WHERE cfo.cohort_month >= TO_CHAR(${startDate}, 'YYYY-MM')
+          AND cfo.cohort_month <= TO_CHAR(${endDate}, 'YYYY-MM')
+        GROUP BY cfo."customerId", cfo.cohort_month, EXTRACT(YEAR FROM o."createdAt"), EXTRACT(MONTH FROM o."createdAt")
+      )
+      SELECT
+        cohort_month,
+        months_after::int,
+        COUNT(DISTINCT "customerId")::int as retained_customers
+      FROM customer_activity
+      WHERE months_after > 0 AND months_after <= 12
+      GROUP BY cohort_month, months_after
+      ORDER BY cohort_month, months_after
+    `;
+
+    // Build a lookup map: cohortMonth -> { "1": count, "2": count, ... }
+    const retentionMap: Record<string, Record<string, number>> = {};
+    for (const r of retentionData) {
+      if (!retentionMap[r.cohort_month]) {
+        retentionMap[r.cohort_month] = {};
+      }
+      retentionMap[r.cohort_month][String(r.months_after)] = Number(r.retained_customers);
+    }
+
+    return cohorts.map(c => {
+      const acquired = Number(c.customers_acquired);
+      const rawRetention = retentionMap[c.cohort_month] || {};
+      // Convert retained counts to percentages
+      const retentionByMonth: Record<string, number> = {};
+      for (const [month, count] of Object.entries(rawRetention)) {
+        retentionByMonth[month] = acquired > 0 ? Math.round((count / acquired) * 10000) / 100 : 0;
+      }
+
+      return {
+        cohortMonth: c.cohort_month,
+        customersAcquired: acquired,
+        totalRevenue: Number(c.total_revenue),
+        averageOrderValue: Number(c.avg_order_value),
+        repeatPurchaseRate: acquired > 0
+          ? (Number(c.repeat_customers) / acquired) * 100
+          : 0,
+        retentionByMonth,
+      };
+    });
   }
 
   /**
@@ -256,6 +319,7 @@ export class SalesAnalyticsService {
         AND o."paymentStatus" = 'CAPTURED'
       GROUP BY sc.id, sc.email
       ORDER BY total_spent DESC
+      LIMIT ${limit}
     `;
 
     if (ltvStats.length === 0) {
@@ -301,16 +365,17 @@ export class SalesAnalyticsService {
       revenue: number;
       count: number;
     }>>`
-      SELECT 
-        COALESCE(o."paymentMethod", 'unknown') as payment_method,
+      SELECT
+        COALESCE(p."method", 'unknown') as payment_method,
         COALESCE(SUM(o."grandTotal")::float, 0) as revenue,
         COUNT(*)::int as count
       FROM orders o
+      JOIN payments p ON p."orderId" = o.id
       WHERE o."tenantId" = ${ctx.tenantId}
         AND o."paymentStatus" = 'CAPTURED'
         AND o."createdAt" >= ${startDate}
         AND o."createdAt" <= ${endDate}
-      GROUP BY o."paymentMethod"
+      GROUP BY p."method"
       ORDER BY revenue DESC
     `;
 

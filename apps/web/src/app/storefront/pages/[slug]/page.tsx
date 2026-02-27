@@ -3,6 +3,30 @@ import { notFound } from 'next/navigation';
 import { Metadata } from 'next';
 import { pagesApi } from '@/lib/store-api';
 
+/**
+ * Sanitize HTML content to prevent XSS attacks.
+ * Strips script tags, event handlers, and javascript: URLs.
+ */
+function sanitizeHtml(html: string): string {
+  return html
+    // Remove <script>...</script> blocks (including multiline)
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    // Remove event handler attributes (onclick, onerror, onload, etc.)
+    .replace(/\son\w+\s*=/gi, ' data-removed=')
+    // Remove javascript: URLs
+    .replace(/javascript\s*:/gi, 'removed:')
+    // Remove vbscript: URLs
+    .replace(/vbscript\s*:/gi, 'removed:')
+    // Remove data: URLs in href/src attributes (potential XSS via data:text/html)
+    .replace(/(href|src)\s*=\s*(['"])\s*data\s*:/gi, '$1=$2removed:')
+    // Remove <iframe> tags
+    .replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, '')
+    // Remove <object> tags
+    .replace(/<object\b[^>]*>[\s\S]*?<\/object>/gi, '')
+    // Remove <embed> tags
+    .replace(/<embed\b[^>]*\/?>/gi, '');
+}
+
 type PageProps = {
   params: { slug: string };
 };
@@ -63,23 +87,17 @@ export default async function StorePage({ params }: PageProps) {
       </h1>
 
       {/* Page Content */}
-      {/*
-        NOTE: The HTML content comes from the store admin CMS and is
-        rendered via dangerouslySetInnerHTML. In a production hardened
-        setup, sanitize with DOMPurify (server-side: isomorphic-dompurify)
-        before rendering. The admin-only authoring surface limits the
-        attack vector, but sanitization is still recommended.
-      */}
+      {/* HTML content from the store admin CMS, sanitized before rendering */}
       <article
         className="prose prose-neutral max-w-none dark:prose-invert"
-        dangerouslySetInnerHTML={{ __html: page.content }}
+        dangerouslySetInnerHTML={{ __html: sanitizeHtml(page.content) }}
       />
 
       {/* Last updated */}
       {page.updatedAt && (
         <p className="mt-12 text-xs text-muted-foreground">
           Last updated:{' '}
-          {new Date(page.updatedAt).toLocaleDateString('en-US', {
+          {new Date(page.updatedAt).toLocaleDateString(undefined, {
             year: 'numeric',
             month: 'long',
             day: 'numeric',

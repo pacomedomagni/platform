@@ -45,7 +45,7 @@ import { MerchantVerificationController } from './merchant-verification.controll
     OnboardingService,
     StripeConnectService,
     SquareOAuthService,
-    SquareOAuthController,
+    // L-TP-8: Removed SquareOAuthController from providers - it belongs only in controllers array
     SquarePaymentService,
     EncryptionService,
     MerchantVerificationService,

@@ -32,11 +32,31 @@ export class AnalyticsController {
     return { tenantId };
   }
 
+  /**
+   * Parse and validate a numeric string parameter.
+   * Returns the parsed integer or the provided default if the value is missing or NaN. (M3)
+   */
+  private safeParseInt(value: string | undefined, defaultValue: number): number {
+    if (!value) return defaultValue;
+    const parsed = parseInt(value, 10);
+    return isNaN(parsed) ? defaultValue : parsed;
+  }
+
   private parseDateRange(startDate?: string, endDate?: string) {
     const end = endDate ? new Date(endDate) : new Date();
-    const start = startDate 
-      ? new Date(startDate) 
+    const start = startDate
+      ? new Date(startDate)
       : new Date(end.getTime() - 30 * 24 * 60 * 60 * 1000); // Default 30 days
+
+    // Validate date ranges (M2): endDate must be >= startDate
+    if (start > end) {
+      throw new BadRequestException('startDate must be before or equal to endDate');
+    }
+
+    // Validate dates are actually valid
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      throw new BadRequestException('Invalid date format. Use YYYY-MM-DD.');
+    }
 
     return { start, end };
   }
@@ -66,16 +86,17 @@ export class AnalyticsController {
   @Get('sales/trends')
   async getSalesTrends(
     @Tenant() tenantId: string,
-    @Query('startDate') startDate?: string,
-    @Query('endDate') endDate?: string,
-    @Query('groupBy') groupBy?: 'day' | 'week' | 'month',
+    @Query() query: SalesReportDto,
   ) {
-    const { start, end } = this.parseDateRange(startDate, endDate);
+    const { start, end } = this.parseDateRange(query.startDate, query.endDate);
+    const validGroupBy = ['day', 'week', 'month'].includes(query.groupBy || '')
+      ? (query.groupBy as 'day' | 'week' | 'month')
+      : 'day';
     return this.salesAnalytics.getSalesTrends(
       this.getContext(tenantId),
       start,
       end,
-      groupBy || 'day',
+      validGroupBy,
     );
   }
 
@@ -91,7 +112,7 @@ export class AnalyticsController {
       this.getContext(tenantId),
       start,
       end,
-      limit ? parseInt(limit, 10) : 10,
+      this.safeParseInt(limit, 10),
     );
   }
 
@@ -130,16 +151,14 @@ export class AnalyticsController {
   @Get('customers/cohorts')
   async getCustomerCohorts(
     @Tenant() tenantId: string,
-    @Query('startDate') startDate?: string,
-    @Query('endDate') endDate?: string,
-    @Query('cohortMonths') cohortMonths?: string,
+    @Query() query: CustomerAnalyticsDto,
   ) {
-    const { start, end } = this.parseDateRange(startDate, endDate);
+    const { start, end } = this.parseDateRange(query.startDate, query.endDate);
     return this.salesAnalytics.getCustomerCohorts(
       this.getContext(tenantId),
       start,
       end,
-      cohortMonths ? parseInt(cohortMonths, 10) : 6,
+      query.cohortMonths ?? 6,
     );
   }
 
@@ -150,7 +169,7 @@ export class AnalyticsController {
   ) {
     return this.salesAnalytics.getCustomerLifetimeValue(
       this.getContext(tenantId),
-      limit ? parseInt(limit, 10) : 20,
+      this.safeParseInt(limit, 20),
     );
   }
 
@@ -170,7 +189,7 @@ export class AnalyticsController {
       this.getContext(tenantId),
       start,
       end,
-      limit ? parseInt(limit, 10) : 50,
+      this.safeParseInt(limit, 50),
     );
   }
 
@@ -181,7 +200,7 @@ export class AnalyticsController {
   ) {
     return this.inventoryAnalytics.getDeadStock(
       this.getContext(tenantId),
-      days ? parseInt(days, 10) : 90,
+      this.safeParseInt(days, 90),
     );
   }
 
@@ -192,7 +211,7 @@ export class AnalyticsController {
   ) {
     return this.inventoryAnalytics.getLowStockItems(
       this.getContext(tenantId),
-      threshold ? parseInt(threshold, 10) : undefined,
+      threshold ? this.safeParseInt(threshold, 10) : undefined,
     );
   }
 
@@ -215,7 +234,7 @@ export class AnalyticsController {
     return this.inventoryAnalytics.getSalesForecast(
       this.getContext(tenantId),
       productId,
-      days ? parseInt(days, 10) : 30,
+      this.safeParseInt(days, 30),
     );
   }
 

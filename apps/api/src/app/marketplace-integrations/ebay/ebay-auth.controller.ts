@@ -61,7 +61,10 @@ export class EbayAuthController {
         `/app/marketplace/connections?success=true&connectionId=${result.connectionId}`
       );
     } catch (error) {
-      const errorMessage = encodeURIComponent(error.message || 'OAuth failed');
+      // Sanitize error message: truncate to max 100 chars and strip URL-like characters
+      const rawMessage = (error.message || 'OAuth failed').slice(0, 100);
+      const sanitizedMessage = rawMessage.replace(/[<>"'`\\:\/\/]/g, '');
+      const errorMessage = encodeURIComponent(sanitizedMessage);
       return res.redirect(`/app/marketplace/connections?error=${errorMessage}`);
     }
   }

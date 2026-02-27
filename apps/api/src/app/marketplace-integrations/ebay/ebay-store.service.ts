@@ -96,11 +96,13 @@ export class EbayStoreService {
 
   /**
    * Get connection by ID
+   * When tenantId is provided explicitly, it is used directly (e.g. OAuth callback, scheduled jobs).
+   * When omitted, the tenant is read from CLS context.
    */
-  async getConnection(connectionId: string) {
-    const tenantId = this.cls.get('tenantId');
+  async getConnection(connectionId: string, tenantId?: string) {
+    const resolvedTenantId = tenantId ?? this.cls.get('tenantId');
     const connection = await this.prisma.marketplaceConnection.findFirst({
-      where: { id: connectionId, tenantId, platform: 'EBAY' },
+      where: { id: connectionId, tenantId: resolvedTenantId, platform: 'EBAY' },
     });
 
     if (!connection) {
@@ -150,8 +152,8 @@ export class EbayStoreService {
   /**
    * Initialize eBay client for a connection
    */
-  private async initClient(connectionId: string): Promise<eBayApi> {
-    const connection = await this.getConnection(connectionId);
+  private async initClient(connectionId: string, tenantId?: string): Promise<eBayApi> {
+    const connection = await this.getConnection(connectionId, tenantId);
     const { appId, certId, devId, ruName } = this.getEbayCredentials();
 
     if (!appId || !certId || !ruName) {
@@ -163,30 +165,31 @@ export class EbayStoreService {
       certId,
       devId: devId || undefined,
       ruName,
-      sandbox: false,
+      sandbox: process.env.EBAY_SANDBOX === 'true',
       siteId: connection.siteId || 0,
     });
   }
 
   /**
    * Get authenticated eBay client for a connection
-   * Handles token refresh automatically
+   * Handles token refresh automatically.
+   * When tenantId is provided explicitly, it is used directly instead of CLS.
    */
-  async getClient(connectionId: string): Promise<eBayApi> {
+  async getClient(connectionId: string, tenantId?: string): Promise<eBayApi> {
     // Check cache
     const cached = this.clientCache.get(connectionId);
     if (cached && Date.now() < cached.expiry) {
       return cached.client;
     }
 
-    const connection = await this.getConnection(connectionId);
+    const connection = await this.getConnection(connectionId, tenantId);
 
     if (!connection.refreshToken) {
       throw new Error(`Connection ${connection.name} is not authenticated. Please complete OAuth flow.`);
     }
 
     const refreshToken = this.encryption.decrypt(connection.refreshToken);
-    const client = await this.initClient(connectionId);
+    const client = await this.initClient(connectionId, tenantId);
 
     // Check if we have a valid cached access token
     if (
@@ -282,11 +285,13 @@ export class EbayStoreService {
   }
 
   /**
-   * Fetch and save business policies after OAuth
+   * Fetch and save business policies after OAuth.
+   * When tenantId is provided explicitly (e.g. from OAuth callback), it is passed
+   * through to getClient/getConnection instead of relying on CLS.
    */
-  async fetchAndSaveBusinessPolicies(connectionId: string) {
-    const client = await this.getClient(connectionId);
-    const connection = await this.getConnection(connectionId);
+  async fetchAndSaveBusinessPolicies(connectionId: string, tenantId?: string) {
+    const connection = await this.getConnection(connectionId, tenantId);
+    const client = await this.getClient(connectionId, tenantId);
 
     try {
       // Fetch policies

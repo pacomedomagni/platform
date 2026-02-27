@@ -1180,8 +1180,16 @@ export class CartService {
     },
   };
 
-  private mapCartToResponse(cart: CartWithRelations) {
+  private async mapCartToResponse(cart: CartWithRelations) {
     const subtotal = Number(cart.subtotal);
+
+    // Fetch tenant-specific free shipping threshold (fall back to default constant)
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: cart.tenantId },
+      select: { freeShippingThreshold: true },
+    });
+    const freeThreshold = tenant ? Number(tenant.freeShippingThreshold) : FREE_SHIPPING_THRESHOLD;
+
     return {
       id: cart.id,
       customerId: cart.customerId,
@@ -1232,10 +1240,10 @@ export class CartService {
       discountAmount: Number(cart.discountAmount),
       grandTotal: Number(cart.grandTotal),
       couponCode: cart.couponCode,
-      // Help frontend show "Add $X more for free shipping!"
-      freeShippingThreshold: Number(cart.shippingTotal) > 0 ? FREE_SHIPPING_THRESHOLD : null,
+      // Help frontend show "Add $X more for free shipping!" using tenant-configured threshold
+      freeShippingThreshold: Number(cart.shippingTotal) > 0 ? freeThreshold : null,
       freeShippingRemaining: Number(cart.shippingTotal) > 0
-        ? Math.max(0, FREE_SHIPPING_THRESHOLD - subtotal)
+        ? Math.max(0, freeThreshold - subtotal)
         : null,
     };
   }

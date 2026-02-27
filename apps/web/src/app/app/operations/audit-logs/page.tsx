@@ -94,7 +94,7 @@ export default function AuditLogsPage() {
   }, [filters.startDate, filters.endDate, filters.action, filters.docType]);
 
   const formatDate = (date: string) => {
-    return new Date(date).toLocaleString('en-US', {
+    return new Date(date).toLocaleString(undefined, {
       month: 'short',
       day: 'numeric',
       year: 'numeric',

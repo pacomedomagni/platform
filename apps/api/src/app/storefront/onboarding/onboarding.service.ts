@@ -117,6 +117,18 @@ export class OnboardingService {
       throw new NotFoundException('Customer not found');
     }
 
+    // L-TP-7: Idempotency check - if step is already completed, return current status
+    // without performing a redundant write.
+    const alreadyCompleted =
+      (step === 'tour' && customer.hasViewedProductTour) ||
+      (step === 'cart' && customer.hasAddedToCart) ||
+      (step === 'purchase' && customer.hasCompletedFirstPurchase) ||
+      (step === 'address' && customer.hasAddedShippingAddress);
+
+    if (alreadyCompleted) {
+      return this.getOnboardingStatus(tenantId, customerId);
+    }
+
     const updateData: Prisma.StoreCustomerUpdateInput = {
       lastOnboardingInteraction: new Date(),
     };

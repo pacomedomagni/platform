@@ -69,8 +69,8 @@ export interface WishlistItem {
     price: number | null;
     imageUrl: string | null;
     attributes: Array<{
-      attributeType: { name: string; displayName: string };
-      attributeValue: { value: string; displayValue: string; colorHex: string | null };
+      type: string;
+      value: string;
     }>;
   } | null;
   priceWhenAdded: number | null;

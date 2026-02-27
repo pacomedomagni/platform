@@ -10,38 +10,41 @@ import {
   ArrowLeftRight,
   RefreshCw,
   Plus,
-  Filter,
-  Download,
 } from 'lucide-react';
 
+// Matches backend queryMovements response shape
 type MovementRecord = {
   id: string;
-  movementType: 'receipt' | 'issue' | 'transfer' | 'adjustment';
+  postingDate: string;
+  postingTs: string;
+  voucherType: string;
+  voucherNo: string;
   itemCode: string;
+  itemName: string;
   warehouseCode: string;
-  fromLocationCode?: string;
-  toLocationCode?: string;
-  quantity: number;
-  referenceNumber?: string;
-  reason?: string;
-  createdAt: string;
-  createdBy?: string;
+  fromLocation?: string;
+  toLocation?: string;
+  batchNo?: string;
+  qty: number;
+  rate: number;
+  value: number;
 };
 
-type MovementSummary = {
-  totalReceipts: number;
-  totalIssues: number;
-  totalTransfers: number;
-  totalAdjustments: number;
-  netMovement: number;
+// Matches backend getMovementSummary response shape
+type MovementSummary = Record<string, {
+  count: number;
+  totalQty: number;
+  totalValue: number;
+}>;
+
+const voucherTypeConfig: Record<string, { icon: typeof ArrowDownCircle; color: string; label: string }> = {
+  'Stock Receipt': { icon: ArrowDownCircle, color: 'text-green-600 bg-green-50', label: 'Receipt' },
+  'Stock Issue': { icon: ArrowUpCircle, color: 'text-red-600 bg-red-50', label: 'Issue' },
+  'Stock Transfer': { icon: ArrowLeftRight, color: 'text-blue-600 bg-blue-50', label: 'Transfer' },
+  'Stock Adjustment': { icon: RefreshCw, color: 'text-amber-600 bg-amber-50', label: 'Adjustment' },
 };
 
-const movementTypeConfig = {
-  receipt: { icon: ArrowDownCircle, color: 'text-green-600 bg-green-50', label: 'Receipt' },
-  issue: { icon: ArrowUpCircle, color: 'text-red-600 bg-red-50', label: 'Issue' },
-  transfer: { icon: ArrowLeftRight, color: 'text-blue-600 bg-blue-50', label: 'Transfer' },
-  adjustment: { icon: RefreshCw, color: 'text-amber-600 bg-amber-50', label: 'Adjustment' },
-};
+const defaultConfig = { icon: RefreshCw, color: 'text-slate-600 bg-slate-50', label: 'Unknown' };
 
 export default function StockMovementsPage() {
   const [movements, setMovements] = useState<MovementRecord[]>([]);
@@ -58,6 +61,7 @@ export default function StockMovementsPage() {
   const [toDate, setToDate] = useState('');
 
   // Form state for creating movement
+  // Backend DTO uses `items[]` array with `reference` and `remarks` fields
   const [formData, setFormData] = useState({
     movementType: 'receipt' as 'receipt' | 'issue' | 'transfer' | 'adjustment',
     itemCode: '',
@@ -65,27 +69,37 @@ export default function StockMovementsPage() {
     fromLocationCode: '',
     toLocationCode: '',
     quantity: 1,
-    referenceNumber: '',
-    reason: '',
+    reference: '',
+    remarks: '',
   });
 
   const loadMovements = async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await api.get('/v1/inventory-management/movements', {
-        params: {
-          warehouseCode: warehouseCode || undefined,
-          itemCode: itemCode || undefined,
-          movementType: movementType || undefined,
-          fromDate: fromDate || undefined,
-          toDate: toDate || undefined,
-        },
-      });
-      setMovements(res.data.movements || []);
-      setSummary(res.data.summary || null);
-    } catch (e: any) {
-      setError(e?.response?.data?.message || 'Failed to load stock movements');
+      const [movementsRes, summaryRes] = await Promise.all([
+        api.get('/v1/inventory-management/movements', {
+          params: {
+            warehouseCode: warehouseCode || undefined,
+            itemCode: itemCode || undefined,
+            movementType: movementType || undefined,
+            fromDate: fromDate || undefined,
+            toDate: toDate || undefined,
+          },
+        }),
+        api.get('/v1/inventory-management/movements/summary', {
+          params: {
+            startDate: fromDate || undefined,
+            endDate: toDate || undefined,
+          },
+        }),
+      ]);
+      // Backend returns { data: [...], total, limit, offset }
+      setMovements(movementsRes.data.data || []);
+      setSummary(summaryRes.data || null);
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      setError(err?.response?.data?.message || 'Failed to load stock movements');
     } finally {
       setLoading(false);
     }
@@ -94,7 +108,23 @@ export default function StockMovementsPage() {
   const createMovement = async () => {
     setError(null);
     try {
-      await api.post('/v1/inventory-management/movements', formData);
+      // Map frontend form to backend CreateStockMovementDto shape
+      const payload = {
+        movementType: formData.movementType,
+        warehouseCode: formData.warehouseCode,
+        toWarehouseCode: formData.movementType === 'transfer' ? formData.warehouseCode : undefined,
+        reference: formData.reference || undefined,
+        remarks: formData.remarks || undefined,
+        items: [
+          {
+            itemCode: formData.itemCode,
+            quantity: formData.quantity,
+            locationCode: formData.fromLocationCode || formData.toLocationCode || undefined,
+            toLocationCode: formData.movementType === 'transfer' ? formData.toLocationCode || undefined : undefined,
+          },
+        ],
+      };
+      await api.post('/v1/inventory-management/movements', payload);
       setShowCreateModal(false);
       setFormData({
         movementType: 'receipt',
@@ -103,12 +133,13 @@ export default function StockMovementsPage() {
         fromLocationCode: '',
         toLocationCode: '',
         quantity: 1,
-        referenceNumber: '',
-        reason: '',
+        reference: '',
+        remarks: '',
       });
       loadMovements();
-    } catch (e: any) {
-      setError(e?.response?.data?.message || 'Failed to create movement');
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      setError(err?.response?.data?.message || 'Failed to create movement');
     }
   };
 
@@ -128,29 +159,27 @@ export default function StockMovementsPage() {
       }
     >
       {/* Summary Cards */}
-      {summary && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      {summary && Object.keys(summary).length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Card className="p-4 bg-green-50/50 border-green-200">
             <div className="text-sm text-green-600 font-medium">Receipts</div>
-            <div className="text-2xl font-bold text-green-700">{summary.totalReceipts}</div>
+            <div className="text-2xl font-bold text-green-700">{summary['Stock Receipt']?.count || 0}</div>
+            <div className="text-xs text-green-600">Qty: {summary['Stock Receipt']?.totalQty || 0}</div>
           </Card>
           <Card className="p-4 bg-red-50/50 border-red-200">
             <div className="text-sm text-red-600 font-medium">Issues</div>
-            <div className="text-2xl font-bold text-red-700">{summary.totalIssues}</div>
+            <div className="text-2xl font-bold text-red-700">{summary['Stock Issue']?.count || 0}</div>
+            <div className="text-xs text-red-600">Qty: {summary['Stock Issue']?.totalQty || 0}</div>
           </Card>
           <Card className="p-4 bg-blue-50/50 border-blue-200">
             <div className="text-sm text-blue-600 font-medium">Transfers</div>
-            <div className="text-2xl font-bold text-blue-700">{summary.totalTransfers}</div>
+            <div className="text-2xl font-bold text-blue-700">{summary['Stock Transfer']?.count || 0}</div>
+            <div className="text-xs text-blue-600">Qty: {summary['Stock Transfer']?.totalQty || 0}</div>
           </Card>
           <Card className="p-4 bg-amber-50/50 border-amber-200">
             <div className="text-sm text-amber-600 font-medium">Adjustments</div>
-            <div className="text-2xl font-bold text-amber-700">{summary.totalAdjustments}</div>
-          </Card>
-          <Card className="p-4 bg-slate-50/50 border-slate-200">
-            <div className="text-sm text-slate-600 font-medium">Net Movement</div>
-            <div className={`text-2xl font-bold ${summary.netMovement >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-              {summary.netMovement >= 0 ? '+' : ''}{summary.netMovement}
-            </div>
+            <div className="text-2xl font-bold text-amber-700">{summary['Stock Adjustment']?.count || 0}</div>
+            <div className="text-xs text-amber-600">Qty: {summary['Stock Adjustment']?.totalQty || 0}</div>
           </Card>
         </div>
       )}
@@ -203,18 +232,19 @@ export default function StockMovementsPage() {
           <thead className="bg-muted/60 text-muted-foreground">
             <tr>
               <th className="text-left p-3">Type</th>
+              <th className="text-left p-3">Voucher</th>
               <th className="text-left p-3">Item</th>
               <th className="text-left p-3">Warehouse</th>
               <th className="text-left p-3">Location</th>
               <th className="text-right p-3">Quantity</th>
-              <th className="text-left p-3">Reference</th>
+              <th className="text-right p-3">Rate</th>
               <th className="text-left p-3">Date</th>
             </tr>
           </thead>
           <tbody>
-            {movements.length === 0 && <ReportEmpty colSpan={7} />}
+            {movements.length === 0 && <ReportEmpty colSpan={8} />}
             {movements.map((movement) => {
-              const config = movementTypeConfig[movement.movementType];
+              const config = voucherTypeConfig[movement.voucherType] || defaultConfig;
               const Icon = config.icon;
               return (
                 <tr key={movement.id} className="border-b last:border-0 hover:bg-muted/30">
@@ -224,21 +254,22 @@ export default function StockMovementsPage() {
                       {config.label}
                     </span>
                   </td>
+                  <td className="p-3 font-mono text-xs">{movement.voucherNo}</td>
                   <td className="p-3 font-mono text-sm">{movement.itemCode}</td>
                   <td className="p-3">{movement.warehouseCode}</td>
                   <td className="p-3 text-sm text-muted-foreground">
-                    {movement.movementType === 'transfer'
-                      ? `${movement.fromLocationCode || '-'} → ${movement.toLocationCode || '-'}`
-                      : movement.toLocationCode || '-'}
+                    {movement.voucherType === 'Stock Transfer'
+                      ? `${movement.fromLocation || '-'} -> ${movement.toLocation || '-'}`
+                      : movement.fromLocation || movement.toLocation || '-'}
                   </td>
                   <td className="p-3 text-right font-mono">
-                    <span className={movement.movementType === 'issue' ? 'text-red-600' : ''}>
-                      {movement.movementType === 'issue' ? '-' : '+'}{movement.quantity}
+                    <span className={movement.qty < 0 ? 'text-red-600' : ''}>
+                      {movement.qty > 0 ? '+' : ''}{movement.qty}
                     </span>
                   </td>
-                  <td className="p-3 text-sm">{movement.referenceNumber || '-'}</td>
+                  <td className="p-3 text-right font-mono text-sm">{movement.rate.toFixed(2)}</td>
                   <td className="p-3 text-sm text-muted-foreground">
-                    {new Date(movement.createdAt).toLocaleDateString()}
+                    {movement.postingDate}
                   </td>
                 </tr>
               );
@@ -259,7 +290,7 @@ export default function StockMovementsPage() {
                 <select
                   className="flex h-9 w-full mt-1 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
                   value={formData.movementType}
-                  onChange={(e) => setFormData({ ...formData, movementType: e.target.value as any })}
+                  onChange={(e) => setFormData({ ...formData, movementType: e.target.value as 'receipt' | 'issue' | 'transfer' | 'adjustment' })}
                 >
                   <option value="receipt">Receipt</option>
                   <option value="issue">Issue</option>
@@ -334,8 +365,8 @@ export default function StockMovementsPage() {
               <label className="text-sm font-medium text-muted-foreground">Reference Number</label>
               <Input
                 className="mt-1"
-                value={formData.referenceNumber}
-                onChange={(e) => setFormData({ ...formData, referenceNumber: e.target.value })}
+                value={formData.reference}
+                onChange={(e) => setFormData({ ...formData, reference: e.target.value })}
                 placeholder="PO-001, SO-001, etc."
               />
             </div>
@@ -344,8 +375,8 @@ export default function StockMovementsPage() {
               <label className="text-sm font-medium text-muted-foreground">Reason / Notes</label>
               <Input
                 className="mt-1"
-                value={formData.reason}
-                onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
+                value={formData.remarks}
+                onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
               />
             </div>
 

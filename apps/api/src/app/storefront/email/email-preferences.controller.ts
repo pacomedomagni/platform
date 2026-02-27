@@ -1,8 +1,17 @@
-import { Controller, Get, Put, Post, Query, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Put, Post, Query, Body, Param, UseGuards, BadRequestException } from '@nestjs/common';
+import { IsEmail } from 'class-validator';
 import { EmailPreferencesService, UpdatePreferencesDto } from './email-preferences.service';
 import { CustomerAuthGuard } from '../auth/customer-auth.guard';
 import { CurrentCustomer } from '../auth/current-customer.decorator';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
+
+const VALID_UNSUBSCRIBE_TYPES = ['marketing', 'orderUpdates', 'promotions', 'newsletter', 'all'] as const;
+type UnsubscribeType = typeof VALID_UNSUBSCRIBE_TYPES[number];
+
+class NewsletterSubscribeDto {
+  @IsEmail()
+  email: string;
+}
 
 @Controller('storefront/email-preferences')
 export class EmailPreferencesController {
@@ -41,9 +50,14 @@ export class EmailPreferencesController {
   async unsubscribe(
     @CurrentTenant() tenantId: string,
     @CurrentCustomer() customerId: string,
-    @Param('type') type: 'marketing' | 'orderUpdates' | 'promotions' | 'newsletter' | 'all',
+    @Param('type') type: string,
   ) {
-    return this.preferencesService.unsubscribe(tenantId, customerId, type);
+    if (!VALID_UNSUBSCRIBE_TYPES.includes(type as UnsubscribeType)) {
+      throw new BadRequestException(
+        `Invalid unsubscribe type "${type}". Must be one of: ${VALID_UNSUBSCRIBE_TYPES.join(', ')}`
+      );
+    }
+    return this.preferencesService.unsubscribe(tenantId, customerId, type as UnsubscribeType);
   }
 
   /**
@@ -66,5 +80,16 @@ export class EmailPreferencesController {
     @Body('type') type?: 'marketing' | 'all',
   ) {
     return this.preferencesService.unsubscribeByToken(token, type || 'all');
+  }
+
+  /**
+   * Subscribe to newsletter (public, no auth required)
+   */
+  @Post('newsletter/subscribe')
+  async subscribeToNewsletter(
+    @CurrentTenant() tenantId: string,
+    @Body() dto: NewsletterSubscribeDto,
+  ) {
+    return this.preferencesService.subscribeToNewsletter(tenantId, dto.email);
   }
 }

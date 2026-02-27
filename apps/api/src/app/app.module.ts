@@ -24,7 +24,6 @@ import { LoggerModule } from './common/logger';
 import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
 import { SentryInterceptor } from './sentry/sentry.interceptor';
 import { EmailWorker } from './workers/email.worker';
-import { ProductImportWorker } from './workers/product-import.worker';
 import { WorkersModule } from './workers/workers.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
@@ -79,7 +78,6 @@ import { DomainResolverModule } from './storefront/domain-resolver/domain-resolv
   providers: [
     AppService,
     EmailWorker,
-    ProductImportWorker,
     // Global rate limiting guard
     {
       provide: APP_GUARD,

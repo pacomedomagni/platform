@@ -40,8 +40,10 @@ interface EarningsData {
   message?: string;
 }
 
+const _locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
+
 function formatCurrency(amount: number, currency = 'usd'): string {
-  return new Intl.NumberFormat('en-US', {
+  return new Intl.NumberFormat(_locale, {
     style: 'currency',
     currency: currency.toUpperCase(),
     minimumFractionDigits: 2,
@@ -52,7 +54,7 @@ function formatDate(dateStr: string): string {
   try {
     const date = new Date(dateStr);
     if (isNaN(date.getTime())) return 'N/A';
-    return date.toLocaleDateString('en-US', {
+    return date.toLocaleDateString(_locale, {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
@@ -66,7 +68,7 @@ function formatDateTime(dateStr: string): string {
   try {
     const date = new Date(dateStr);
     if (isNaN(date.getTime())) return 'N/A';
-    return date.toLocaleDateString('en-US', {
+    return date.toLocaleDateString(_locale, {
       month: 'short',
       day: 'numeric',
       year: 'numeric',

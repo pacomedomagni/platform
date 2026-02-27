@@ -54,7 +54,39 @@ export class StockMovementService {
       }
     }
 
+    // Retry logic for FIFO layer lock contention (max 3 attempts)
+    const MAX_RETRIES = 3;
+    let lastError: Error | null = null;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        return await this._executeMovementTransaction(ctx, dto, postingDate, postingTs);
+      } catch (error) {
+        lastError = error as Error;
+        // Only retry on FIFO layer contention errors
+        if (error instanceof BadRequestException &&
+            (error as BadRequestException).message.includes('Insufficient FIFO layers') &&
+            attempt < MAX_RETRIES - 1) {
+          this.logger.warn(`FIFO layer contention on attempt ${attempt + 1}, retrying...`);
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw lastError;
+  }
+
+  /**
+   * Internal: Execute the movement transaction
+   */
+  private async _executeMovementTransaction(
+    ctx: TenantContext,
+    dto: CreateStockMovementDto,
+    postingDate: Date,
+    postingTs: Date,
+  ) {
     return this.prisma.$transaction(async (tx) => {
+      // Set RLS tenant context
+      await tx.$executeRaw`SELECT set_config('app.tenant', ${ctx.tenantId}, true)`;
       // Validate warehouse
       const warehouse = await tx.warehouse.findFirst({
         where: { tenantId: ctx.tenantId, code: dto.warehouseCode },
@@ -84,8 +116,8 @@ export class StockMovementService {
       }
 
       const voucherNo = await this.generateVoucherNo(tx, ctx.tenantId, dto.movementType);
-      const ledgerEntries: any[] = [];
-      const processedItems: any[] = [];
+      const ledgerEntries: Array<{ id: string; voucherNo: string; voucherType: string }> = [];
+      const processedItems: Array<{ itemCode: string; itemName: string; quantity: number; batch?: string; rate: number }> = [];
 
       for (const itemDto of dto.items) {
         // Validate item
@@ -182,7 +214,16 @@ export class StockMovementService {
         const stockValueDiff = qty.mul(rate);
 
         // Acquire advisory lock to prevent race conditions
-        await this.lockStock(tx, ctx.tenantId, warehouse.id, item.id);
+        // For transfers, acquire locks in deterministic order to prevent deadlocks
+        if (dto.movementType === MovementType.TRANSFER && toWarehouse) {
+          const [firstWh, secondWh] = [warehouse.id, toWarehouse.id].sort();
+          await this.lockStock(tx, ctx.tenantId, firstWh, item.id);
+          if (firstWh !== secondWh) {
+            await this.lockStock(tx, ctx.tenantId, secondWh, item.id);
+          }
+        } else {
+          await this.lockStock(tx, ctx.tenantId, warehouse.id, item.id);
+        }
 
         // Validate negative stock before processing negative movements
         if (qty.lessThan(0)) {
@@ -309,8 +350,22 @@ export class StockMovementService {
             strategy,
           });
 
-          // Link the ledger entry to the first consumed layer
-          if (consumption.legs.length > 0) {
+          // For ISSUE movements, derive the rate from consumed FIFO layers
+          // instead of using user-supplied rate
+          if (dto.movementType === MovementType.ISSUE && consumption.legs.length > 0) {
+            const fifoRate = consumption.totalCost.div(qty.abs());
+            const fifoValueDiff = qty.mul(fifoRate);
+            // Update the ledger entry with the FIFO-derived rate
+            await tx.stockLedgerEntry.update({
+              where: { id: entry.id },
+              data: {
+                valuationRate: fifoRate,
+                stockValueDifference: fifoValueDiff,
+                fifoLayerId: consumption.legs[0].layerId,
+              },
+            });
+          } else if (consumption.legs.length > 0) {
+            // Link the ledger entry to the first consumed layer
             await tx.stockLedgerEntry.update({
               where: { id: entry.id },
               data: { fifoLayerId: consumption.legs[0].layerId },
@@ -325,8 +380,9 @@ export class StockMovementService {
 
           for (const sn of serialNos) {
             // Upsert serial: create on RECEIPT if it doesn't exist, otherwise require it to exist
+            // Filter by itemId to prevent cross-item serial linking
             let serial = await tx.serial.findFirst({
-              where: { tenantId: ctx.tenantId, serialNo: sn },
+              where: { tenantId: ctx.tenantId, serialNo: sn, itemId: item.id },
             });
 
             if (!serial && dto.movementType === MovementType.RECEIPT) {
@@ -356,7 +412,7 @@ export class StockMovementService {
             });
 
             // Update serial status and location based on movement type
-            const serialUpdate: any = {};
+            const serialUpdate: Record<string, unknown> = {};
             switch (dto.movementType) {
               case MovementType.RECEIPT:
                 serialUpdate.status = SerialStatus.AVAILABLE;
@@ -406,8 +462,7 @@ export class StockMovementService {
 
         // For transfers, create the receiving entry
         if (dto.movementType === MovementType.TRANSFER && toWarehouse) {
-          // Acquire lock for destination warehouse
-          await this.lockStock(tx, ctx.tenantId, toWarehouse.id, item.id);
+          // Lock already acquired above in deterministic order
 
           const receiveEntry = await tx.stockLedgerEntry.create({
             data: {
@@ -433,7 +488,7 @@ export class StockMovementService {
 
             for (const sn of serialNos) {
               const serial = await tx.serial.findFirst({
-                where: { tenantId: ctx.tenantId, serialNo: sn },
+                where: { tenantId: ctx.tenantId, serialNo: sn, itemId: item.id },
               });
 
               if (serial) {
@@ -581,7 +636,7 @@ export class StockMovementService {
       const limit = query.limit || 50;
       const offset = query.offset || 0;
 
-      const where: any = { tenantId: ctx.tenantId };
+      const where: Prisma.StockLedgerEntryWhereInput = { tenantId: ctx.tenantId };
 
       if (query.movementType) {
         where.voucherType = this.getVoucherType(query.movementType);
@@ -606,9 +661,10 @@ export class StockMovementService {
       }
 
       if (query.fromDate || query.toDate) {
-        where.postingDate = {};
-        if (query.fromDate) where.postingDate.gte = new Date(query.fromDate);
-        if (query.toDate) where.postingDate.lte = new Date(query.toDate);
+        const dateFilter: { gte?: Date; lte?: Date } = {};
+        if (query.fromDate) dateFilter.gte = new Date(query.fromDate);
+        if (query.toDate) dateFilter.lte = new Date(query.toDate);
+        where.postingDate = dateFilter;
       }
 
       const [entries, total] = await Promise.all([
@@ -659,11 +715,12 @@ export class StockMovementService {
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.tenant', ${ctx.tenantId}, true)`;
 
-      const where: any = { tenantId: ctx.tenantId };
+      const where: Prisma.StockLedgerEntryWhereInput = { tenantId: ctx.tenantId };
       if (startDate || endDate) {
-        where.postingDate = {};
-        if (startDate) where.postingDate.gte = startDate;
-        if (endDate) where.postingDate.lte = endDate;
+        const dateFilter: { gte?: Date; lte?: Date } = {};
+        if (startDate) dateFilter.gte = startDate;
+        if (endDate) dateFilter.lte = endDate;
+        where.postingDate = dateFilter;
       }
 
       const entries = await tx.stockLedgerEntry.findMany({
@@ -744,7 +801,7 @@ export class StockMovementService {
    * Generate voucher number using posting markers for idempotency
    * Prevents duplicate voucher numbers in concurrent transactions
    */
-  private async generateVoucherNo(tx: any, tenantId: string, type: MovementType): Promise<string> {
+  private async generateVoucherNo(tx: Prisma.TransactionClient, tenantId: string, type: MovementType): Promise<string> {
     const prefix = {
       [MovementType.RECEIPT]: 'SR',
       [MovementType.ISSUE]: 'SI',
@@ -787,9 +844,10 @@ export class StockMovementService {
           },
         });
         return voucherNo;
-      } catch (error: any) {
+      } catch (error: unknown) {
         // If unique constraint violated, retry with next number
-        if (error.code === 'P2002' && attempt < maxRetries - 1) {
+        const prismaError = error as { code?: string };
+        if (prismaError.code === 'P2002' && attempt < maxRetries - 1) {
           continue;
         }
         throw error;
@@ -812,7 +870,7 @@ export class StockMovementService {
    * Acquire PostgreSQL advisory lock for stock operations
    * Prevents race conditions in concurrent stock movements
    */
-  private async lockStock(tx: any, tenantId: string, warehouseId: string, itemId: string) {
+  private async lockStock(tx: Prisma.TransactionClient, tenantId: string, warehouseId: string, itemId: string) {
     const key = `${tenantId}:${warehouseId}:${itemId}`;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
   }
@@ -822,7 +880,7 @@ export class StockMovementService {
    * Prevents race conditions during concurrent updates
    */
   private async updateWarehouseBalance(
-    tx: any,
+    tx: Prisma.TransactionClient,
     tenantId: string,
     itemId: string,
     warehouseId: string,
@@ -853,7 +911,7 @@ export class StockMovementService {
    * Update bin (location) balance atomically
    */
   private async updateBinBalance(
-    tx: any,
+    tx: Prisma.TransactionClient,
     tenantId: string,
     itemId: string,
     warehouseId: string,
@@ -896,7 +954,7 @@ export class StockMovementService {
    * 3. If neither is available, throw an error
    */
   private async resolveLayerLocationId(
-    tx: any,
+    tx: Prisma.TransactionClient,
     tenantId: string,
     warehouseId: string,
     explicitLocationId: string | null | undefined,
@@ -932,7 +990,7 @@ export class StockMovementService {
    * Returns the consumption legs with layerId, locationId, batchId, qty, and rate.
    */
   private async consumeFifoLayers(
-    tx: any,
+    tx: Prisma.TransactionClient,
     input: {
       tenantId: string;
       itemId: string;
@@ -1000,26 +1058,9 @@ export class StockMovementService {
       `;
 
       if (layers.length === 0) {
-        // Check if any layers exist at all (they might be locked by another transaction)
-        const anyLayers = await tx.stockFifoLayer.findFirst({
-          where: {
-            tenantId: input.tenantId,
-            itemId: input.itemId,
-            warehouseId: input.warehouseId,
-            ...(input.locationId ? { locationId: input.locationId } : {}),
-            ...(input.batchId ? { batchId: input.batchId } : {}),
-            qtyRemaining: { gt: 0 },
-            isCancelled: false,
-          },
-        });
-
-        if (anyLayers) {
-          // Layers exist but are locked -- retry after a brief pause
-          await new Promise(resolve => setTimeout(resolve, 50));
-          continue;
-        }
-
-        // No layers at all -- insufficient stock
+        // No unlocked layers available -- insufficient stock
+        // With FOR UPDATE SKIP LOCKED, if layers exist but are all locked by
+        // concurrent transactions, we cannot proceed within this transaction.
         throw new BadRequestException(
           'Insufficient FIFO layers to satisfy the issued quantity',
         );

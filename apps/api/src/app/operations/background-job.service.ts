@@ -21,6 +21,7 @@ export class BackgroundJobService implements OnModuleInit, OnModuleDestroy {
   private handlers = new Map<string, JobHandler>();
   private processingJobs = new Set<string>();
   private isProcessing = false;
+  private isShuttingDown = false;
   private jobProcessingInterval: ReturnType<typeof setInterval> | null = null;
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -50,7 +51,9 @@ export class BackgroundJobService implements OnModuleInit, OnModuleDestroy {
     }, CLEANUP_INTERVAL_MS);
   }
 
-  onModuleDestroy(): void {
+  async onModuleDestroy(): Promise<void> {
+    this.isShuttingDown = true;
+
     if (this.jobProcessingInterval) {
       clearInterval(this.jobProcessingInterval);
       this.jobProcessingInterval = null;
@@ -60,6 +63,27 @@ export class BackgroundJobService implements OnModuleInit, OnModuleDestroy {
       clearInterval(this.cleanupInterval);
       this.cleanupInterval = null;
       this.logger.log('Stopped cleanup scheduler');
+    }
+
+    // Wait for in-flight jobs to complete (with a 30-second timeout)
+    if (this.processingJobs.size > 0) {
+      this.logger.log(`Waiting for ${this.processingJobs.size} in-flight job(s) to complete...`);
+      const shutdownDeadline = Date.now() + 30_000;
+      while (this.processingJobs.size > 0 && Date.now() < shutdownDeadline) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+
+      // Reset any still-running jobs back to pending so they can be picked up after restart
+      if (this.processingJobs.size > 0) {
+        this.logger.warn(
+          `${this.processingJobs.size} job(s) still running after shutdown timeout. Resetting to pending.`,
+        );
+        const jobIds = Array.from(this.processingJobs);
+        await this.prisma.backgroundJob.updateMany({
+          where: { id: { in: jobIds }, status: 'running' },
+          data: { status: 'pending' },
+        });
+      }
     }
   }
 
@@ -103,6 +127,14 @@ export class BackgroundJobService implements OnModuleInit, OnModuleDestroy {
       priority?: number;
     }
   ) {
+    // L-BJ-6: Warn if no handler is registered for this job type
+    if (!this.handlers.has(data.type)) {
+      this.logger.warn(
+        `Creating job of type '${data.type}' but no handler is registered. ` +
+        `The job will fail at processing time unless a handler is registered before then.`,
+      );
+    }
+
     const job = await this.prisma.backgroundJob.create({
       data: {
         tenantId: ctx.tenantId,
@@ -203,43 +235,50 @@ export class BackgroundJobService implements OnModuleInit, OnModuleDestroy {
       throw new Error(`Cannot retry job in '${job.status}' status`);
     }
 
+    // H-BJ-3: Don't reset attempts to 0. Instead, keep the current attempt count
+    // and allow one more attempt by incrementing maxAttempts.
     return this.prisma.backgroundJob.update({
       where: { id },
       data: {
         status: 'pending',
         error: null,
-        attempts: 0,
+        maxAttempts: { increment: 1 },
       },
     });
   }
 
   /**
-   * Process pending jobs (called by a scheduler/cron)
+   * Process pending jobs using SELECT FOR UPDATE SKIP LOCKED for safe
+   * concurrent claiming across multiple workers (H-BJ-1 + H-BJ-2).
    */
-  async processPendingJobs(batchSize = 10): Promise<number> {
-    const now = new Date();
+  async processPendingJobs(batchSize = 5): Promise<number> {
+    if (this.isShuttingDown) return 0;
 
-    const pendingJobs = await this.prisma.backgroundJob.findMany({
-      where: {
-        status: 'pending',
-        OR: [
-          { scheduledAt: null },
-          { scheduledAt: { lte: now } },
-        ],
-      },
-      orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }],
-      take: batchSize,
-    });
+    // Atomically claim jobs using SELECT FOR UPDATE SKIP LOCKED
+    const claimedJobs = await this.prisma.$queryRawUnsafe<any[]>(`
+      UPDATE background_jobs
+      SET status = 'running', "startedAt" = NOW(), attempts = attempts + 1
+      WHERE id IN (
+        SELECT id FROM background_jobs
+        WHERE status = 'pending'
+          AND ("scheduledAt" IS NULL OR "scheduledAt" <= NOW())
+        ORDER BY priority DESC, "createdAt" ASC
+        LIMIT ${batchSize}
+        FOR UPDATE SKIP LOCKED
+      )
+      RETURNING *
+    `);
 
     let processed = 0;
 
-    for (const job of pendingJobs) {
+    for (const job of claimedJobs) {
+      if (this.isShuttingDown) break;
       if (this.processingJobs.has(job.id)) continue;
 
       this.processingJobs.add(job.id);
 
       try {
-        await this.processJob(job);
+        await this.processClaimedJob(job);
         processed++;
       } catch (error) {
         this.logger.error(`Error processing job ${job.id}: ${error}`);
@@ -252,9 +291,9 @@ export class BackgroundJobService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Process a single job
+   * Process a single job that has already been claimed (status = 'running', attempts incremented).
    */
-  private async processJob(job: any): Promise<void> {
+  private async processClaimedJob(job: any): Promise<void> {
     const handler = this.handlers.get(job.type);
 
     if (!handler) {
@@ -269,16 +308,6 @@ export class BackgroundJobService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // Mark as running
-    await this.prisma.backgroundJob.update({
-      where: { id: job.id },
-      data: {
-        status: 'running',
-        startedAt: new Date(),
-        attempts: { increment: 1 },
-      },
-    });
-
     try {
       const result = await handler(job.tenantId, (job.payload as Record<string, unknown>) || {});
 
@@ -292,7 +321,9 @@ export class BackgroundJobService implements OnModuleInit, OnModuleDestroy {
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      const currentAttempts = job.attempts + 1;
+      // H-BJ-3: Don't reset attempts - the attempt was already incremented during claim.
+      // Allow retry if current attempts < maxAttempts.
+      const currentAttempts = Number(job.attempts);
       const shouldRetry = currentAttempts < job.maxAttempts;
 
       if (shouldRetry) {
@@ -359,7 +390,13 @@ export class BackgroundJobService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Cleanup old jobs
+   * Cleanup old jobs.
+   *
+   * Design note: This cleanup is intentionally global (not scoped per tenant).
+   * Scoping by tenantId would require iterating all tenants. Since the retention
+   * policy (delete completed/failed/cancelled jobs older than N days) applies
+   * uniformly regardless of tenant, a single global delete is both simpler and
+   * more efficient.
    */
   async cleanup(retentionDays: number): Promise<number> {
     const cutoffDate = new Date();

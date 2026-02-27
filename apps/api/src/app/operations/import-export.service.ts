@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, NotImplementedException } from '@nestjs/common';
 import { PrismaService, Prisma } from '@platform/db';
 import { Response } from 'express';
 import { BackgroundJobService } from './background-job.service';
@@ -40,6 +40,18 @@ export class ImportExportService {
   /**
    * Import data from CSV
    */
+  // M-IE-4: Maximum import content size (10MB)
+  private static readonly MAX_IMPORT_SIZE_BYTES = 10 * 1024 * 1024;
+
+  private validateImportSize(content: string): void {
+    const sizeBytes = Buffer.byteLength(content, 'utf-8');
+    if (sizeBytes > ImportExportService.MAX_IMPORT_SIZE_BYTES) {
+      throw new BadRequestException(
+        `Import content exceeds maximum size of 10MB (received ${(sizeBytes / (1024 * 1024)).toFixed(1)}MB)`,
+      );
+    }
+  }
+
   async importCsv(
     ctx: TenantContext,
     entityType: ImportEntityType,
@@ -50,6 +62,7 @@ export class ImportExportService {
       dryRun?: boolean;
     } = {}
   ): Promise<ImportResult> {
+    this.validateImportSize(csvContent);
     const rows = this.parseCsv(csvContent);
 
     if (rows.length === 0) {
@@ -81,6 +94,7 @@ export class ImportExportService {
       dryRun?: boolean;
     } = {}
   ): Promise<ImportResult> {
+    this.validateImportSize(jsonContent);
     let data: unknown;
     try {
       data = JSON.parse(jsonContent);
@@ -118,6 +132,34 @@ export class ImportExportService {
       updateExisting?: boolean;
     } = {}
   ) {
+    this.validateImportSize(content);
+
+    // M-IE-5: For large imports (>1MB), store content in a temporary file
+    // instead of embedding it in the job payload to avoid bloating the jobs table.
+    const sizeBytes = Buffer.byteLength(content, 'utf-8');
+    const LARGE_IMPORT_THRESHOLD = 1 * 1024 * 1024; // 1MB
+
+    if (sizeBytes > LARGE_IMPORT_THRESHOLD) {
+      const fs = await import('fs/promises');
+      const path = await import('path');
+      const os = await import('os');
+      const tempDir = path.join(os.tmpdir(), 'platform-imports');
+      await fs.mkdir(tempDir, { recursive: true });
+      const tempFile = path.join(tempDir, `import-${Date.now()}-${Math.random().toString(36).slice(2)}.${format}`);
+      await fs.writeFile(tempFile, content, 'utf-8');
+
+      return this.jobService.createJob(ctx, {
+        type: `import.${entityType}`,
+        payload: {
+          format,
+          tempFilePath: tempFile,
+          options,
+          userId: ctx.userId,
+        },
+        priority: 5,
+      });
+    }
+
     return this.jobService.createJob(ctx, {
       type: `import.${entityType}`,
       payload: {
@@ -297,87 +339,86 @@ export class ImportExportService {
     rows: Record<string, unknown>[],
     options: { skipDuplicates?: boolean; updateExisting?: boolean; dryRun?: boolean }
   ): Promise<ImportResult> {
-    const result = await this.prisma.$transaction(async (tx) => {
-      const result: ImportResult = { total: rows.length, created: 0, updated: 0, skipped: 0, errors: [] };
+    const result: ImportResult = { total: rows.length, created: 0, updated: 0, skipped: 0, errors: [] };
 
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
-        const rowNum = i + 2;
+    // M-IE-6: Process each row individually without wrapping stockMovementService.createMovement
+    // in a $transaction. StockMovementService manages its own transactions internally, and
+    // nesting it inside another transaction can cause deadlocks and unexpected behavior.
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const rowNum = i + 2;
 
-        try {
-          const code = String(row['code'] || row['sku'] || '').trim();
-          if (!code) {
-            result.errors.push({ row: rowNum, error: 'Missing product code' });
-            continue;
-          }
+      try {
+        const code = String(row['code'] || row['sku'] || '').trim();
+        if (!code) {
+          result.errors.push({ row: rowNum, error: 'Missing product code' });
+          continue;
+        }
 
-          const item = await tx.item.findFirst({
-            where: { tenantId: ctx.tenantId, code },
+        const item = await this.prisma.item.findFirst({
+          where: { tenantId: ctx.tenantId, code },
+        });
+
+        if (!item) {
+          result.errors.push({ row: rowNum, error: `Product not found: ${code}` });
+          continue;
+        }
+
+        const quantity = parseFloat(String(row['quantity'] || row['qty'] || 0));
+        const warehouseCode = String(row['warehouse'] || 'MAIN').trim();
+
+        if (!options.dryRun) {
+          // Find or create the warehouse
+          let warehouse = await this.prisma.warehouse.findFirst({
+            where: { tenantId: ctx.tenantId, code: warehouseCode },
           });
 
-          if (!item) {
-            result.errors.push({ row: rowNum, error: `Product not found: ${code}` });
-            continue;
-          }
-
-          const quantity = parseFloat(String(row['quantity'] || row['qty'] || 0));
-          const warehouseCode = String(row['warehouse'] || 'MAIN').trim();
-
-          if (!options.dryRun) {
-            // Find or create the warehouse
-            let warehouse = await tx.warehouse.findFirst({
-              where: { tenantId: ctx.tenantId, code: warehouseCode },
-            });
-
-            if (!warehouse) {
-              warehouse = await tx.warehouse.create({
-                data: {
-                  tenantId: ctx.tenantId,
-                  code: warehouseCode,
-                  name: warehouseCode,
-                  isActive: true,
-                },
-              });
-            }
-
-            // Calculate delta between target quantity and current balance,
-            // then use StockMovementService to create a proper ledger entry
-            const existingBalance = await tx.warehouseItemBalance.findFirst({
-              where: {
+          if (!warehouse) {
+            warehouse = await this.prisma.warehouse.create({
+              data: {
                 tenantId: ctx.tenantId,
-                warehouseId: warehouse.id,
-                itemId: item.id,
+                code: warehouseCode,
+                name: warehouseCode,
+                isActive: true,
               },
             });
-
-            const currentQty = existingBalance ? Number(existingBalance.actualQty) : 0;
-            const delta = quantity - currentQty;
-
-            if (delta !== 0) {
-              await this.stockMovementService.createMovement(ctx, {
-                movementType: MovementType.ADJUSTMENT,
-                warehouseCode,
-                items: [{
-                  itemCode: code,
-                  quantity: delta,
-                  rate: 0,
-                }],
-                remarks: `Inventory import adjustment for ${code}`,
-                reference: 'IMPORT',
-              });
-            }
           }
-          result.updated++;
-        } catch (error) {
-          result.errors.push({
-            row: rowNum,
-            error: error instanceof Error ? error.message : 'Unknown error',
-          });
-        }
-      }
 
-      return result;
-    }, { timeout: 60000 });
+          // Calculate delta between target quantity and current balance
+          const existingBalance = await this.prisma.warehouseItemBalance.findFirst({
+            where: {
+              tenantId: ctx.tenantId,
+              warehouseId: warehouse.id,
+              itemId: item.id,
+            },
+          });
+
+          const currentQty = existingBalance ? Number(existingBalance.actualQty) : 0;
+          const delta = quantity - currentQty;
+
+          if (delta !== 0) {
+            // Call outside any wrapping transaction - StockMovementService manages its own
+            await this.stockMovementService.createMovement(ctx, {
+              movementType: MovementType.ADJUSTMENT,
+              warehouseCode,
+              items: [{
+                itemCode: code,
+                quantity: delta,
+                rate: 0,
+              }],
+              remarks: `Inventory import adjustment for ${code}`,
+              reference: 'IMPORT',
+            });
+          }
+        }
+        result.updated++;
+      } catch (error) {
+        result.errors.push({
+          row: rowNum,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
 
     await this.auditLogService.log(ctx, {
       action: 'IMPORT_INVENTORY',
@@ -477,43 +518,80 @@ export class ImportExportService {
       case 'orders':
         return this.exportOrders(ctx, filters);
       case 'transactions':
-        // Transactions export not yet implemented
-        return [];
+        throw new NotImplementedException(
+          'Transactions export is not yet implemented. Query GlEntry/Payment records directly.',
+        );
       default:
         throw new BadRequestException(`Unknown entity type: ${entityType}`);
     }
   }
 
   private async exportProducts(ctx: TenantContext): Promise<Record<string, unknown>[]> {
-    const items = await this.prisma.item.findMany({
-      where: { tenantId: ctx.tenantId, isActive: true },
-      include: { productListing: true },
-      orderBy: { code: 'asc' },
-    });
+    // M-IE-3: Stream in chunks of 1000 to avoid loading all records into memory
+    const CHUNK_SIZE = 1000;
+    const results: Record<string, unknown>[] = [];
+    let skip = 0;
 
-    return items.map(i => ({
-      code: i.code,
-      name: i.name,
-      price: i.productListing ? Number(i.productListing.price) : 0,
-      cost: i.productListing?.costPrice ? Number(i.productListing.costPrice) : 0,
-      reorderLevel: i.reorderLevel ? Number(i.reorderLevel) : 0,
-      createdAt: i.createdAt.toISOString(),
-    }));
+    while (true) {
+      const items = await this.prisma.item.findMany({
+        where: { tenantId: ctx.tenantId, isActive: true },
+        include: { productListing: true },
+        orderBy: { code: 'asc' },
+        take: CHUNK_SIZE,
+        skip,
+      });
+
+      if (items.length === 0) break;
+
+      for (const i of items) {
+        results.push({
+          code: i.code,
+          name: i.name,
+          price: i.productListing ? Number(i.productListing.price) : 0,
+          cost: i.productListing?.costPrice ? Number(i.productListing.costPrice) : 0,
+          reorderLevel: i.reorderLevel ? Number(i.reorderLevel) : 0,
+          createdAt: i.createdAt.toISOString(),
+        });
+      }
+
+      skip += CHUNK_SIZE;
+      if (items.length < CHUNK_SIZE) break;
+    }
+
+    return results;
   }
 
   private async exportCustomers(ctx: TenantContext): Promise<Record<string, unknown>[]> {
-    const customers = await this.prisma.storeCustomer.findMany({
-      where: { tenantId: ctx.tenantId },
-      orderBy: { email: 'asc' },
-    });
+    // M-IE-3: Stream in chunks of 1000 to avoid loading all records into memory
+    const CHUNK_SIZE = 1000;
+    const results: Record<string, unknown>[] = [];
+    let skip = 0;
 
-    return customers.map(c => ({
-      email: c.email,
-      firstName: c.firstName || '',
-      lastName: c.lastName || '',
-      phone: c.phone || '',
-      createdAt: c.createdAt.toISOString(),
-    }));
+    while (true) {
+      const customers = await this.prisma.storeCustomer.findMany({
+        where: { tenantId: ctx.tenantId },
+        orderBy: { email: 'asc' },
+        take: CHUNK_SIZE,
+        skip,
+      });
+
+      if (customers.length === 0) break;
+
+      for (const c of customers) {
+        results.push({
+          email: c.email,
+          firstName: c.firstName || '',
+          lastName: c.lastName || '',
+          phone: c.phone || '',
+          createdAt: c.createdAt.toISOString(),
+        });
+      }
+
+      skip += CHUNK_SIZE;
+      if (customers.length < CHUNK_SIZE) break;
+    }
+
+    return results;
   }
 
   private async exportInventory(ctx: TenantContext): Promise<Record<string, unknown>[]> {

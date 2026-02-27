@@ -176,20 +176,27 @@ export class PaymentsService {
     }
 
     // Get charge details for card info
-    const charges = paymentIntent.latest_charge;
+    let charge: Stripe.Charge | null = null;
     let cardBrand: string | null = null;
     let cardLast4: string | null = null;
 
-    if (typeof charges === 'string') {
-      // charges is a string ID, we don't have the full charge object
-      // In a real scenario, we might fetch the charge
-    } else if (charges) {
-      const paymentMethod = charges.payment_method_details;
-      if (paymentMethod?.card) {
-        cardBrand = paymentMethod.card.brand || null;
-        cardLast4 = paymentMethod.card.last4 || null;
+    if (typeof paymentIntent.latest_charge === 'string') {
+      // latest_charge is a string ID — fetch the full charge object to get card details
+      try {
+        charge = await this.stripeService.retrieveCharge(paymentIntent.latest_charge);
+      } catch (err) {
+        this.logger.warn(`Failed to retrieve charge ${paymentIntent.latest_charge}: ${err}`);
       }
+    } else if (paymentIntent.latest_charge) {
+      charge = paymentIntent.latest_charge as Stripe.Charge;
     }
+
+    if (charge?.payment_method_details?.card) {
+      cardBrand = charge.payment_method_details.card.brand || null;
+      cardLast4 = charge.payment_method_details.card.last4 || null;
+    }
+
+    const charges = charge || paymentIntent.latest_charge;
 
     // Update order and create payment record
     await this.prisma.$transaction([
@@ -699,14 +706,33 @@ export class PaymentsService {
     const refundAmount = (charge.amount_refunded || 0) / 100;
     const isFullRefund = charge.refunded;
 
-    await this.prisma.order.update({
-      where: { id: order.id },
-      data: {
-        paymentStatus: isFullRefund ? 'REFUNDED' : 'PARTIALLY_REFUNDED',
-        status: isFullRefund ? 'REFUNDED' : order.status,
-        refundedAt: isFullRefund ? new Date() : undefined,
-      },
-    });
+    // Create a Payment record for the refund and update order status atomically
+    await this.prisma.$transaction([
+      this.prisma.order.update({
+        where: { id: order.id },
+        data: {
+          paymentStatus: isFullRefund ? 'REFUNDED' : 'PARTIALLY_REFUNDED',
+          status: isFullRefund ? 'REFUNDED' : order.status,
+          refundedAt: isFullRefund ? new Date() : undefined,
+        },
+      }),
+      this.prisma.payment.create({
+        data: {
+          tenantId: order.tenantId,
+          orderId: order.id,
+          amount: refundAmount,
+          currency: order.currency,
+          method: 'card',
+          type: 'REFUND',
+          status: 'REFUNDED',
+          stripePaymentIntentId: typeof charge.payment_intent === 'string'
+            ? charge.payment_intent
+            : charge.payment_intent?.id,
+          stripeChargeId: charge.id,
+          refundedAt: new Date(),
+        },
+      }),
+    ]);
 
     this.logger.log(`Refund processed for order: ${order.orderNumber}, amount: ${refundAmount}`);
   }
@@ -747,8 +773,15 @@ export class PaymentsService {
     }
 
     // Track cumulative refunds to prevent exceeding order total
+    // Query by type='REFUND' OR status='REFUNDED' to catch all refund records
     const existingRefunds = await this.prisma.payment.findMany({
-      where: { orderId, status: { in: ['REFUNDED', 'PARTIALLY_REFUNDED'] } },
+      where: {
+        orderId,
+        OR: [
+          { type: 'REFUND' },
+          { status: 'REFUNDED' },
+        ],
+      },
     });
     const totalRefunded = existingRefunds.reduce((sum, p) => sum + Number(p.amount), 0);
     const refundAmount = amount ?? orderTotal;
@@ -853,20 +886,37 @@ export class PaymentsService {
 
     // Update order payment status since Square doesn't have webhooks configured for refunds
     const orderTotal = Number(order.grandTotal);
+    const refundAmount = amount ?? orderTotal;
     const isFullRefund = !amount || amount >= orderTotal;
 
-    await this.prisma.order.update({
-      where: { id: orderId },
-      data: {
-        paymentStatus: isFullRefund ? 'REFUNDED' : 'PARTIALLY_REFUNDED',
-        status: isFullRefund ? 'REFUNDED' : undefined,
-        refundedAt: isFullRefund ? new Date() : undefined,
-      },
-    });
+    // Create a Payment record for the Square refund (enables cumulative refund tracking)
+    await this.prisma.$transaction([
+      this.prisma.order.update({
+        where: { id: orderId },
+        data: {
+          paymentStatus: isFullRefund ? 'REFUNDED' : 'PARTIALLY_REFUNDED',
+          status: isFullRefund ? 'REFUNDED' : undefined,
+          refundedAt: isFullRefund ? new Date() : undefined,
+        },
+      }),
+      this.prisma.payment.create({
+        data: {
+          tenantId,
+          orderId,
+          amount: refundAmount,
+          currency: currency,
+          method: 'card',
+          type: 'REFUND',
+          status: 'REFUNDED',
+          stripePaymentIntentId: squarePaymentId,
+          refundedAt: new Date(),
+        },
+      }),
+    ]);
 
     return {
       refundId: refund?.id || null,
-      amount: amount ?? orderTotal,
+      amount: refundAmount,
       status: refund?.status || 'COMPLETED',
     };
   }

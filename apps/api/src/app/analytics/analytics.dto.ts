@@ -1,6 +1,24 @@
 import { IsString, IsOptional, IsDateString, IsEnum, IsInt, Min, IsArray } from 'class-validator';
 
 // ==========================================
+// Enums for validation
+// ==========================================
+
+export enum AnalyticsPeriodEnum {
+  DAY = 'day',
+  WEEK = 'week',
+  MONTH = 'month',
+  QUARTER = 'quarter',
+  YEAR = 'year',
+}
+
+export enum GroupByEnum {
+  DAY = 'day',
+  WEEK = 'week',
+  MONTH = 'month',
+}
+
+// ==========================================
 // Analytics Query DTOs
 // ==========================================
 
@@ -13,9 +31,9 @@ export class DateRangeDto {
 }
 
 export class AnalyticsPeriodDto {
-  @IsEnum(['day', 'week', 'month', 'quarter', 'year'])
+  @IsEnum(AnalyticsPeriodEnum)
   @IsOptional()
-  period?: 'day' | 'week' | 'month' | 'quarter' | 'year';
+  period?: AnalyticsPeriodEnum;
 
   @IsDateString()
   @IsOptional()
@@ -32,7 +50,7 @@ export class AnalyticsPeriodDto {
 }
 
 export class SalesReportDto extends DateRangeDto {
-  @IsEnum(['day', 'week', 'month'])
+  @IsEnum(GroupByEnum)
   @IsOptional()
   groupBy?: 'day' | 'week' | 'month';
 
@@ -68,8 +86,14 @@ export class InventoryReportDto {
   categoryId?: string;
 }
 
+export enum ExportFormatEnum {
+  CSV = 'csv',
+  JSON = 'json',
+  PDF = 'pdf',
+}
+
 export class ExportReportDto {
-  @IsEnum(['csv', 'json', 'pdf'])
+  @IsEnum(ExportFormatEnum)
   format!: 'csv' | 'json' | 'pdf';
 
   @IsString()

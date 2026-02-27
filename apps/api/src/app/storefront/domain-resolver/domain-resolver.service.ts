@@ -36,7 +36,10 @@ export class DomainResolverService {
 
     // Check cache first
     const cached = await this.redis.get(`${CACHE_PREFIX}${normalized}`);
-    if (cached) {
+    if (cached !== null) {
+      // M-TP-6: Empty string is the sentinel for negative cache (domain not found).
+      // Non-empty strings are valid JSON payloads.
+      if (cached === '') return null;
       return JSON.parse(cached);
     }
 
@@ -69,12 +72,13 @@ export class DomainResolverService {
       }
     }
 
-    // Cache the result (even null to avoid repeated DB lookups for invalid domains)
+    // Cache the result (even negative lookups to avoid repeated DB queries for invalid domains)
     if (result) {
       await this.redis.setex(`${CACHE_PREFIX}${normalized}`, CACHE_TTL, JSON.stringify(result));
     } else {
-      // Cache negative lookups for a shorter time (60s)
-      await this.redis.setex(`${CACHE_PREFIX}${normalized}`, 60, 'null');
+      // M-TP-6: Use empty string as sentinel value for negative cache entries
+      // instead of the string 'null' which could be confused with valid JSON.
+      await this.redis.setex(`${CACHE_PREFIX}${normalized}`, 60, '');
     }
 
     return result;

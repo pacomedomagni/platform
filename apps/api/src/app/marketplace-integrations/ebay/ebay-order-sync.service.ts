@@ -10,6 +10,7 @@ import { PrismaService } from '@platform/db';
 import { ClsService } from 'nestjs-cls';
 import { EbayStoreService } from './ebay-store.service';
 import { EbayClientService } from './ebay-client.service';
+import { MarketplaceAuditService } from '../shared/marketplace-audit.service';
 import { SyncType, SyncDirection, SyncLogStatus, SyncStatus } from '../shared/marketplace.types';
 import { Prisma } from '@prisma/client';
 const Decimal = Prisma.Decimal;
@@ -17,30 +18,45 @@ const Decimal = Prisma.Decimal;
 /**
  * eBay Order Sync Service
  * Handles syncing orders from eBay, querying synced orders, and pushing fulfillments back to eBay.
+ *
+ * TODO: Implement eBay Platform Notifications (webhook/push-based order sync)
+ * instead of relying solely on polling. This would reduce latency and API calls.
+ * See: https://developer.ebay.com/marketplace-account-deletion
  */
 @Injectable()
 export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EbayOrderSyncService.name);
   private syncInterval: ReturnType<typeof setInterval> | null = null;
+  private inventorySyncInterval: ReturnType<typeof setInterval> | null = null;
   private readonly SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
+  private readonly INVENTORY_SYNC_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 
   constructor(
     private prisma: PrismaService,
     private cls: ClsService,
     private ebayStore: EbayStoreService,
-    private ebayClient: EbayClientService
+    private ebayClient: EbayClientService,
+    private audit: MarketplaceAuditService
   ) {}
 
   onModuleInit() {
     // Start scheduled sync for all active connections with autoSyncOrders enabled
     this.syncInterval = setInterval(() => this.syncAllActiveConnections(), this.SYNC_INTERVAL_MS);
     this.logger.log('eBay order sync scheduler started (every 15 minutes)');
+
+    // Start scheduled inventory sync for connections with autoSyncInventory enabled
+    this.inventorySyncInterval = setInterval(() => this.syncAllActiveInventory(), this.INVENTORY_SYNC_INTERVAL_MS);
+    this.logger.log('eBay inventory sync scheduler started (every 30 minutes)');
   }
 
   onModuleDestroy() {
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
       this.syncInterval = null;
+    }
+    if (this.inventorySyncInterval) {
+      clearInterval(this.inventorySyncInterval);
+      this.inventorySyncInterval = null;
     }
   }
 
@@ -127,7 +143,8 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Sync orders from eBay for a specific connection.
-   * Fetches orders from eBay Fulfillment API, upserts them into MarketplaceOrder records.
+   * Fetches orders from eBay Fulfillment API with pagination, upserts them into MarketplaceOrder records.
+   * tenantId is passed explicitly so this works both from CLS-based requests and scheduled jobs.
    */
   async syncOrders(tenantId: string, connectionId: string) {
     const startedAt = new Date();
@@ -148,23 +165,38 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
     });
 
     try {
-      // Get authenticated eBay client
-      const client = await this.ebayStore.getClient(connectionId);
+      // Get authenticated eBay client (pass tenantId explicitly to avoid CLS dependency)
+      const client = await this.ebayStore.getClient(connectionId, tenantId);
 
-      // Fetch orders from eBay (last 30 days by default)
-      // Using creationdate filter to get recent orders
+      // Fetch orders from eBay (last 30 days by default) with pagination
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
       const filterDate = thirtyDaysAgo.toISOString();
 
-      const ebayOrders = await this.ebayClient.getOrders(client, {
-        filter: `creationdate:[${filterDate}..],orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS}`,
-        limit: 50,
-      });
+      const PAGE_SIZE = 50;
+      let offset = 0;
+      let allEbayOrders: any[] = [];
 
-      itemsTotal = ebayOrders.length;
+      // Paginate through all orders
+      while (true) {
+        const pageOrders = await this.ebayClient.getOrders(client, {
+          filter: `creationdate:[${filterDate}..],orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS}`,
+          limit: PAGE_SIZE,
+          offset,
+        });
 
-      for (const ebayOrder of ebayOrders) {
+        allEbayOrders = allEbayOrders.concat(pageOrders);
+
+        if (pageOrders.length < PAGE_SIZE) {
+          break; // No more pages
+        }
+
+        offset += PAGE_SIZE;
+      }
+
+      itemsTotal = allEbayOrders.length;
+
+      for (const ebayOrder of allEbayOrders) {
         try {
           const externalOrderId = ebayOrder.orderId;
           if (!externalOrderId) {
@@ -205,6 +237,10 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
               paymentDate,
               itemsData: lineItems,
               syncStatus: SyncStatus.SYNCED,
+              // TODO (L6): Map eBay orders to local Order records.
+              // When a marketplace order is created, a corresponding local Order should be
+              // created (or linked) so that fulfillment, invoicing, and reporting workflows
+              // can operate on marketplace orders seamlessly.
             },
             update: {
               externalStatus,
@@ -358,8 +394,8 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('Order is already fulfilled');
     }
 
-    // Get eBay client for this connection
-    const client = await this.ebayStore.getClient(order.connectionId);
+    // Get eBay client for this connection (pass tenantId explicitly)
+    const client = await this.ebayStore.getClient(order.connectionId, tenantId);
 
     // Build line items for fulfillment (all items in the order)
     const lineItems = (order.itemsData as any[]).map((item: any) => ({
@@ -449,6 +485,96 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
       }
     } catch (error) {
       this.logger.error('Scheduled order sync global error', error);
+    }
+  }
+
+  /**
+   * Scheduled inventory sync: sync inventory for all active connections with autoSyncInventory=true.
+   * Runs outside of CLS context, so tenantId is read from each connection record.
+   */
+  private async syncAllActiveInventory() {
+    try {
+      const connections = await this.prisma.marketplaceConnection.findMany({
+        where: {
+          platform: 'EBAY',
+          isActive: true,
+          isConnected: true,
+          autoSyncInventory: true,
+        },
+      });
+
+      this.logger.log(
+        `Scheduled inventory sync: found ${connections.length} active connection(s)`
+      );
+
+      for (const connection of connections) {
+        try {
+          // Find all published listings for this connection
+          const listings = await this.prisma.marketplaceListing.findMany({
+            where: {
+              connectionId: connection.id,
+              tenantId: connection.tenantId,
+              status: 'published',
+              externalOfferId: { not: null },
+              warehouseId: { not: null },
+            },
+            include: {
+              productListing: { select: { itemId: true } },
+            },
+          });
+
+          for (const listing of listings) {
+            try {
+              if (!listing.warehouseId || !listing.productListing) continue;
+
+              const balance = await this.prisma.warehouseItemBalance.findUnique({
+                where: {
+                  tenantId_itemId_warehouseId: {
+                    tenantId: connection.tenantId,
+                    itemId: listing.productListing.itemId,
+                    warehouseId: listing.warehouseId,
+                  },
+                },
+              });
+
+              const availableQty = balance
+                ? Math.max(0, balance.actualQty.toNumber() - balance.reservedQty.toNumber())
+                : 0;
+
+              // Update eBay
+              const client = await this.ebayStore.getClient(connection.id, connection.tenantId);
+              await this.ebayClient.updateInventoryQuantity(client, listing.sku, availableQty);
+
+              // Update local listing
+              await this.prisma.marketplaceListing.update({
+                where: { id: listing.id },
+                data: {
+                  quantity: availableQty,
+                  syncStatus: SyncStatus.SYNCED,
+                  errorMessage: null,
+                },
+              });
+
+              this.logger.log(
+                `Scheduled inventory sync: updated listing ${listing.id} to qty ${availableQty}`
+              );
+            } catch (listingError) {
+              this.logger.error(
+                `Scheduled inventory sync failed for listing ${listing.id}`,
+                listingError
+              );
+            }
+          }
+        } catch (error) {
+          this.logger.error(
+            `Scheduled inventory sync failed for connection ${connection.id} (tenant ${connection.tenantId})`,
+            error
+          );
+          // Continue to next connection on failure
+        }
+      }
+    } catch (error) {
+      this.logger.error('Scheduled inventory sync global error', error);
     }
   }
 }

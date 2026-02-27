@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsBoolean, IsArray, ValidateNested, Min, Max, IsIn } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsBoolean, IsArray, ValidateNested, Min, Max, MaxLength, IsIn, IsNotEmpty, ArrayMaxSize } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 
 // ============ VARIANTS ============
@@ -147,27 +147,33 @@ export class CreateReviewDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(200)
   title?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(5000)
   content?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(1000)
   pros?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(1000)
   cons?: string;
 
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   reviewerName?: string;
 
   @IsArray()
   @IsString({ each: true })
   @IsOptional()
+  @ArrayMaxSize(10)
   images?: string[];
 }
 
@@ -247,11 +253,10 @@ export class RedeemGiftCardDto {
 
 export class GiftCardTransactionDto {
   @IsString()
-  @IsIn(['redemption', 'refund', 'adjustment'])
-  type: 'redemption' | 'refund' | 'adjustment';
+  @IsIn(['redemption', 'refund', 'adjustment', 'deduction'])
+  type: 'redemption' | 'refund' | 'adjustment' | 'deduction';
 
   @IsNumber()
-  @Min(0.01)
   amount: number;
 
   @IsString()
@@ -268,6 +273,7 @@ export class GiftCardTransactionDto {
 export class CreateWishlistDto {
   @IsString()
   @IsOptional()
+  @IsNotEmpty({ message: 'Wishlist name must not be empty if provided' })
   name?: string;
 
   @IsBoolean()

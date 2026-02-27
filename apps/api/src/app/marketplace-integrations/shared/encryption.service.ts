@@ -19,7 +19,8 @@ export class EncryptionService {
   private getKey(salt: Buffer): Buffer {
     const secret = process.env['ENCRYPTION_KEY'] || process.env['JWT_SECRET'] || 'default-dev-key-change-in-production';
 
-    if (process.env.NODE_ENV === 'production' && secret === 'default-dev-key-change-in-production') {
+    const nodeEnv = (process.env.NODE_ENV || '').toLowerCase();
+    if ((nodeEnv === 'production' || nodeEnv === 'prod') && secret === 'default-dev-key-change-in-production') {
       throw new Error('ENCRYPTION_KEY must be set in production');
     }
 

@@ -1,8 +1,9 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { ClsService } from 'nestjs-cls';
 import { EbayStoreService } from './ebay-store.service';
 import { EbayClientService } from './ebay-client.service';
+import { MarketplaceAuditService } from '../shared/marketplace-audit.service';
 import { ListingStatus, SyncStatus } from '../shared/marketplace.types';
 import { Prisma } from '@prisma/client';
 const Decimal = Prisma.Decimal;
@@ -15,12 +16,35 @@ const Decimal = Prisma.Decimal;
 export class EbayListingsService {
   private readonly logger = new Logger(EbayListingsService.name);
 
+  /**
+   * Map marketplace site ID to the appropriate currency code.
+   */
+  private static readonly MARKETPLACE_CURRENCY_MAP: Record<string, string> = {
+    EBAY_US: 'USD',
+    EBAY_UK: 'GBP',
+    EBAY_GB: 'GBP',
+    EBAY_DE: 'EUR',
+    EBAY_FR: 'EUR',
+    EBAY_IT: 'EUR',
+    EBAY_ES: 'EUR',
+    EBAY_CA: 'CAD',
+    EBAY_AU: 'AUD',
+  };
+
   constructor(
     private prisma: PrismaService,
     private cls: ClsService,
     private ebayStore: EbayStoreService,
-    private ebayClient: EbayClientService
+    private ebayClient: EbayClientService,
+    private audit: MarketplaceAuditService
   ) {}
+
+  /**
+   * Determine the currency for a given eBay marketplace ID.
+   */
+  private getMarketplaceCurrency(marketplaceId: string): string {
+    return EbayListingsService.MARKETPLACE_CURRENCY_MAP[marketplaceId] || 'USD';
+  }
 
   /**
    * Create eBay listing from NoSlag product
@@ -73,8 +97,8 @@ export class EbayListingsService {
         : 0;
     }
 
-    // Default SKU format
-    const sku = `${product.item.code}-${connection.id.slice(0, 8)}`;
+    // SKU format: use full item code and full connection ID to avoid collision risk
+    const sku = `${product.item.code}-${connection.id}`;
 
     // Check if listing already exists
     const existing = await this.prisma.marketplaceListing.findFirst({
@@ -122,7 +146,7 @@ export class EbayListingsService {
    */
   async createDirectListing(data: {
     connectionId: string;
-    productListingId?: string;
+    productListingId: string;
     warehouseId?: string;
     title: string;
     description: string;
@@ -139,24 +163,19 @@ export class EbayListingsService {
     // Verify connection
     const connection = await this.ebayStore.getConnection(data.connectionId);
 
-    // Generate SKU
-    const timestamp = Date.now().toString(36);
-    const sku = data.productListingId
-      ? `${data.productListingId.slice(0, 8)}-${connection.id.slice(0, 8)}`
-      : `MANUAL-${timestamp}-${connection.id.slice(0, 8)}`;
+    // Generate SKU using full IDs to avoid collision risk
+    const sku = `${data.productListingId}-${connection.id}`;
 
-    // Check if listing already exists (if productListingId provided)
-    if (data.productListingId) {
-      const existing = await this.prisma.marketplaceListing.findFirst({
-        where: {
-          connectionId: data.connectionId,
-          productListingId: data.productListingId,
-        },
-      });
+    // Check if listing already exists for this product on this connection
+    const existing = await this.prisma.marketplaceListing.findFirst({
+      where: {
+        connectionId: data.connectionId,
+        productListingId: data.productListingId,
+      },
+    });
 
-      if (existing) {
-        throw new BadRequestException('Listing already exists for this product on this store');
-      }
+    if (existing) {
+      throw new BadRequestException('Listing already exists for this product on this store');
     }
 
     // Create marketplace listing
@@ -347,9 +366,28 @@ export class EbayListingsService {
       throw new BadRequestException('Only draft or approved listings can be published');
     }
 
+    // Optimistic lock: atomically claim the listing for publishing.
+    // If another request already moved the status away from DRAFT/APPROVED, count will be 0.
+    const lockResult = await this.prisma.marketplaceListing.updateMany({
+      where: {
+        id: listingId,
+        status: { in: [ListingStatus.DRAFT, ListingStatus.APPROVED] },
+      },
+      data: { status: ListingStatus.PUBLISHING },
+    });
+
+    if (lockResult.count === 0) {
+      throw new ConflictException('Listing is already being published or has been moved to another status');
+    }
+
     // Verify connection is ready
     const isReady = await this.ebayStore.isConnectionReady(listing.connectionId);
     if (!isReady) {
+      // Revert status since we already changed it
+      await this.prisma.marketplaceListing.update({
+        where: { id: listingId },
+        data: { status: listing.status },
+      });
       throw new BadRequestException('eBay connection is not fully configured. Please complete OAuth and fetch business policies.');
     }
 
@@ -359,12 +397,6 @@ export class EbayListingsService {
     let client: any;
 
     try {
-      // Update status to publishing
-      await this.prisma.marketplaceListing.update({
-        where: { id: listingId },
-        data: { status: ListingStatus.PUBLISHING },
-      });
-
       // Get eBay client
       client = await this.ebayStore.getClient(listing.connectionId);
       const photos = JSON.parse(listing.photos as string) as string[];
@@ -404,9 +436,11 @@ export class EbayListingsService {
 
       // Step 2: Create offer
       const connection = listing.connection;
+      const marketplaceId = connection.marketplaceId || 'EBAY_US';
+      const currency = this.getMarketplaceCurrency(marketplaceId);
       const offer = await this.ebayClient.createOffer(client, {
         sku: listing.sku,
-        marketplaceId: connection.marketplaceId || 'EBAY_US',
+        marketplaceId,
         format: 'FIXED_PRICE',
         availableQuantity: listing.quantity,
         categoryId: listing.categoryId,
@@ -414,7 +448,7 @@ export class EbayListingsService {
         pricingSummary: {
           price: {
             value: listing.price.toString(),
-            currency: 'USD',
+            currency,
           },
         },
         listingPolicies: {
@@ -448,6 +482,14 @@ export class EbayListingsService {
       });
 
       this.logger.log(`Published listing ${listingId} to eBay: ${publishResult.listingId}`);
+
+      // Audit log: listing published
+      try {
+        await this.audit.logListingPublished(listingId, listing.title, publishResult.listingId, 'EBAY');
+      } catch {
+        // Non-critical
+      }
+
       return updated;
     } catch (error) {
       this.logger.error(`Failed to publish listing ${listingId}`, error);
@@ -565,6 +607,13 @@ export class EbayListingsService {
       });
 
       this.logger.log(`Ended listing ${listingId}`);
+
+      // Audit log: listing ended
+      try {
+        await this.audit.logListingEnded(listingId, listing.title, 'EBAY');
+      } catch {
+        // Non-critical
+      }
     } catch (error) {
       this.logger.error(`Failed to end listing ${listingId}`, error);
       throw error;

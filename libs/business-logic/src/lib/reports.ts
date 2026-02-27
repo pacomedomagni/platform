@@ -73,7 +73,7 @@ export class ReportsService {
     /**
      * Generate Cash Flow Statement
      */
-    async getCashFlow(tenantId: string, fromDate: string, toDate: string) {
+    async getCashFlow(tenantId: string, fromDate: string, toDate: string, limit = 500, offset = 0) {
         const movements = await this.prisma.$transaction(async (tx) => {
             await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
 
@@ -90,7 +90,7 @@ export class ReportsService {
             if (!accountIds.length) return [];
 
             return tx.$queryRawUnsafe<any[]>(`
-                SELECT 
+                SELECT
                     gl."postingDate" as posting_date,
                     gl."voucherType" as voucher_type,
                     gl."voucherNo" as voucher_no,
@@ -104,7 +104,8 @@ export class ReportsService {
                   AND gl."accountId" = ANY($2::uuid[])
                   AND gl."postingDate" BETWEEN $3 AND $4
                 ORDER BY gl."postingDate", gl."postingTs"
-            `, tenantId, accountIds, new Date(`${fromDate}T00:00:00.000Z`), new Date(`${toDate}T00:00:00.000Z`));
+                LIMIT $5 OFFSET $6
+            `, tenantId, accountIds, new Date(`${fromDate}T00:00:00.000Z`), new Date(`${toDate}T00:00:00.000Z`), limit, offset);
         });
 
         const totalInflow = movements.reduce((sum, m) => sum + (m.debit || 0), 0);

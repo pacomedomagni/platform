@@ -4,7 +4,9 @@ import { DocService } from './doc.service';
 import { SchemaService } from './schema.service';
 import { DocTypeDefinition } from './types';
 
+// H-DT-5: All endpoints require JWT authentication via class-level guard
 @Controller('v1')
+@UseGuards(AuthGuard('jwt'))
 export class UniversalController {
   constructor(
     private readonly docService: DocService,
@@ -12,7 +14,7 @@ export class UniversalController {
   ) {}
 
   // --- Meta Definitions ---
-  
+
   @Get('meta')
   async listDocTypes() {
       return this.schemaService.listDocTypes();
@@ -21,13 +23,10 @@ export class UniversalController {
   @Get('meta/:name')
   async getDocType(@Param('name') name: string) {
     const docType = await this.schemaService.getDocType(name);
-    return docType || { error: 'Not Found' }; // Or throw NotFoundException
+    return docType || { error: 'Not Found' };
   }
 
-  // Meta sync should likely be restricted to admin only, but for now we follow same pattern or just public/dev?
-  // Let's protect it but maybe with a specific permission or just allow ANY auth for now (dangerous, but matching "user" request).
   @Post('meta')
-  @UseGuards(AuthGuard('jwt')) 
   async syncDocType(@Body() def: DocTypeDefinition, @Req() req: any) {
     const roles: string[] = req.user?.roles || [];
     if (!roles.includes('admin') && !roles.includes('System Manager')) {
@@ -40,28 +39,32 @@ export class UniversalController {
   // --- Generic Data Operations ---
 
   @Post(':doctype')
-  @UseGuards(AuthGuard('jwt'))
   async create(@Param('doctype') docType: string, @Body() body: any, @Req() req: any) {
     return this.docService.create(docType, body, req.user);
   }
 
   @Get(':doctype')
-  @UseGuards(AuthGuard('jwt'))
-  async list(@Param('doctype') docType: string, @Req() req: any) {
-    return this.docService.findAll(docType, req.user);
+  async list(
+    @Param('doctype') docType: string,
+    @Req() req: any,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.docService.findAll(docType, req.user, {
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+    });
   }
 
   @Get(':doctype/:name')
-  @UseGuards(AuthGuard('jwt'))
   async read(@Param('doctype') docType: string, @Param('name') name: string, @Req() req: any) {
     return this.docService.findOne(docType, name, req.user);
   }
 
   @Put(':doctype/:name')
-  @UseGuards(AuthGuard('jwt'))
   async update(
-    @Param('doctype') docType: string, 
-    @Param('name') name: string, 
+    @Param('doctype') docType: string,
+    @Param('name') name: string,
     @Body() body: any,
     @Req() req: any
   ) {
@@ -69,19 +72,16 @@ export class UniversalController {
   }
 
   @Delete(':doctype/:name')
-  @UseGuards(AuthGuard('jwt'))
   async delete(@Param('doctype') docType: string, @Param('name') name: string, @Req() req: any) {
     return this.docService.delete(docType, name, req.user);
   }
 
   @Put(':doctype/:name/submit')
-  @UseGuards(AuthGuard('jwt'))
   async submit(@Param('doctype') docType: string, @Param('name') name: string, @Req() req: any) {
     return this.docService.submit(docType, name, req.user);
   }
 
   @Put(':doctype/:name/cancel')
-  @UseGuards(AuthGuard('jwt'))
   async cancel(@Param('doctype') docType: string, @Param('name') name: string, @Req() req: any) {
     return this.docService.cancel(docType, name, req.user);
   }

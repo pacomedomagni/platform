@@ -3,10 +3,10 @@ import {
   Get,
   Post,
   Put,
+  Delete,
   Param,
   Query,
   Body,
-  Headers,
   BadRequestException,
   UseGuards,
 } from '@nestjs/common';
@@ -16,6 +16,7 @@ import {
   CreateProductListingDto,
   UpdateProductListingDto,
   CreateCategoryDto,
+  UpdateCategoryDto,
 } from './dto';
 import { CreateSimpleProductDto } from './simple-product.dto';
 import { StoreAdminGuard } from '@platform/auth';
@@ -109,7 +110,7 @@ export class ProductsController {
   @Post('admin/products')
   @UseGuards(StoreAdminGuard)
   async createProduct(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Body() dto: CreateProductListingDto
   ) {
     if (!tenantId) {
@@ -125,7 +126,7 @@ export class ProductsController {
   @Put('admin/products/:id')
   @UseGuards(StoreAdminGuard)
   async updateProduct(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('id') id: string,
     @Body() dto: UpdateProductListingDto
   ) {
@@ -136,13 +137,29 @@ export class ProductsController {
   }
 
   /**
+   * Delete (soft-delete) a product listing (admin)
+   * DELETE /api/v1/store/admin/products/:id
+   */
+  @Delete('admin/products/:id')
+  @UseGuards(StoreAdminGuard)
+  async deleteProduct(
+    @Tenant() tenantId: string,
+    @Param('id') id: string
+  ) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID required');
+    }
+    return this.productsService.deleteProduct(tenantId, id);
+  }
+
+  /**
    * Simple product creation (merchant-friendly, auto-creates ERP Item)
    * POST /api/v1/store/admin/products/simple
    */
   @Post('admin/products/simple')
   @UseGuards(StoreAdminGuard)
   async createSimpleProduct(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Body() dto: CreateSimpleProductDto
   ) {
     if (!tenantId) {
@@ -158,7 +175,7 @@ export class ProductsController {
   @Get('admin/products')
   @UseGuards(StoreAdminGuard)
   async listAdminProducts(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Query() query: ListProductsDto
   ) {
     if (!tenantId) {
@@ -174,7 +191,7 @@ export class ProductsController {
   @Get('admin/products/:id')
   @UseGuards(StoreAdminGuard)
   async getAdminProduct(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('id') id: string
   ) {
     if (!tenantId) {
@@ -190,12 +207,45 @@ export class ProductsController {
   @Post('admin/categories')
   @UseGuards(StoreAdminGuard)
   async createCategory(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Body() dto: CreateCategoryDto
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
     return this.productsService.createCategory(tenantId, dto);
+  }
+
+  /**
+   * Update category (admin)
+   * PUT /api/v1/store/admin/categories/:id
+   */
+  @Put('admin/categories/:id')
+  @UseGuards(StoreAdminGuard)
+  async updateCategory(
+    @Tenant() tenantId: string,
+    @Param('id') id: string,
+    @Body() dto: UpdateCategoryDto
+  ) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID required');
+    }
+    return this.productsService.updateCategory(tenantId, id, dto);
+  }
+
+  /**
+   * Delete (soft-delete) a category (admin)
+   * DELETE /api/v1/store/admin/categories/:id
+   */
+  @Delete('admin/categories/:id')
+  @UseGuards(StoreAdminGuard)
+  async deleteCategory(
+    @Tenant() tenantId: string,
+    @Param('id') id: string
+  ) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID required');
+    }
+    return this.productsService.deleteCategory(tenantId, id);
   }
 }

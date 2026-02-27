@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { DbModule } from '@platform/db';
+import { OperationsModule } from '../operations/operations.module';
 import { CleanupService } from './cleanup.service';
 import { FailedOperationsService } from './failed-operations.service';
 import { ProductImportWorker } from './product-import.worker';
@@ -11,6 +12,7 @@ import { ProductsService } from '../storefront/products/products.service';
   imports: [
     ScheduleModule.forRoot(), // Enable cron jobs
     DbModule,
+    OperationsModule, // Provides WebhookService needed by ProductsService
   ],
   providers: [
     CleanupService,

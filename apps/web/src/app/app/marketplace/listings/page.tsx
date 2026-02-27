@@ -443,7 +443,7 @@ function ListingRow({
       </td>
       <td className="px-6 py-4">
         <div className="flex items-center gap-2">
-          {listing.status === 'approved' && !listing.externalListingId && (
+          {(listing.status === 'approved' || listing.status === 'draft') && !listing.externalListingId && (
             <button
               onClick={() => onPublish(listing.id)}
               className="p-1 text-green-600 hover:text-green-700 hover:bg-green-50 rounded"
@@ -473,13 +473,15 @@ function ListingRow({
             </>
           )}
 
-          <button
-            onClick={() => onDelete(listing.id)}
-            className="p-1 text-red-600 hover:text-red-700 hover:bg-red-50 rounded"
-            title="Delete"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
+          {listing.status === 'draft' && (
+            <button
+              onClick={() => onDelete(listing.id)}
+              className="p-1 text-red-600 hover:text-red-700 hover:bg-red-50 rounded"
+              title="Delete"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </td>
     </tr>
@@ -491,6 +493,8 @@ function StatusBadge({ status, syncStatus }: { status: string; syncStatus: strin
     switch (status) {
       case 'draft':
         return { icon: Clock, color: 'gray', label: 'Draft' };
+      case 'pending_approval':
+        return { icon: Clock, color: 'orange', label: 'Pending Approval' };
       case 'approved':
         return { icon: CheckCircle2, color: 'green', label: 'Approved' };
       case 'publishing':

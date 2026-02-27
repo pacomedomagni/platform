@@ -126,15 +126,17 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
     loadCustomer();
   }, [params.id]);
 
+  const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
+
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat(locale, {
       style: 'currency',
       currency: 'USD',
     }).format(amount);
   };
 
   const formatDate = (date: string) => {
-    return new Date(date).toLocaleDateString('en-US', {
+    return new Date(date).toLocaleDateString(locale, {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
@@ -142,7 +144,7 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
   };
 
   const formatFullDate = (date: string) => {
-    return new Date(date).toLocaleString('en-US', {
+    return new Date(date).toLocaleString(locale, {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
@@ -299,7 +301,22 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
               onChange={(e) => setAdminNotes(e.target.value)}
               rows={4}
             />
-            <Button size="sm" className="mt-3">Save Notes</Button>
+            <Button
+              size="sm"
+              className="mt-3"
+              onClick={async () => {
+                if (!customer) return;
+                try {
+                  await api.put(`/v1/store/admin/customers/${customer.id}/notes`, { notes: adminNotes });
+                  toast({ title: 'Success', description: 'Notes saved' });
+                } catch (err: any) {
+                  console.error('Failed to save notes:', err);
+                  toast({ title: 'Error', description: 'Failed to save notes', variant: 'destructive' });
+                }
+              }}
+            >
+              Save Notes
+            </Button>
           </Card>
         </div>
 

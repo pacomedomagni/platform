@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { ConfirmDialog } from '@platform/ui';
 import { useRouter } from 'next/navigation';
-import { resolveTenantId } from '@/lib/store-api';
+import { apiFetch } from '@/lib/store-api';
 
 interface EmailPreferences {
   marketing: boolean;
@@ -11,17 +11,6 @@ interface EmailPreferences {
   promotions: boolean;
   newsletter: boolean;
   unsubscribedAt: string | null;
-}
-
-/** Get common headers for email preferences API calls */
-async function getEmailApiHeaders(): Promise<HeadersInit> {
-  const tenantId = await resolveTenantId();
-  const token = typeof window !== 'undefined' ? localStorage.getItem('customer_token') : null;
-  return {
-    'Content-Type': 'application/json',
-    'x-tenant-id': tenantId,
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
 }
 
 export default function EmailPreferencesPage() {
@@ -44,22 +33,14 @@ export default function EmailPreferencesPage() {
 
   const fetchPreferences = async () => {
     try {
-      const headers = await getEmailApiHeaders();
-      const response = await fetch('/api/v1/storefront/email-preferences', {
-        headers,
-        credentials: 'include',
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setPreferences(data);
-      } else if (response.status === 401) {
+      const data = await apiFetch<EmailPreferences>('/v1/storefront/email-preferences');
+      setPreferences(data);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('401')) {
         router.push('/storefront/account/login?redirect=/storefront/account/email-preferences');
       } else {
         setMessage({ type: 'error', text: 'Failed to load preferences' });
       }
-    } catch (error) {
-      setMessage({ type: 'error', text: 'An error occurred' });
     } finally {
       setLoading(false);
     }
@@ -77,11 +58,8 @@ export default function EmailPreferencesPage() {
     setMessage(null);
 
     try {
-      const headers = await getEmailApiHeaders();
-      const response = await fetch('/api/v1/storefront/email-preferences', {
+      await apiFetch('/v1/storefront/email-preferences', {
         method: 'PUT',
-        headers,
-        credentials: 'include',
         body: JSON.stringify({
           marketing: preferences.marketing,
           orderUpdates: preferences.orderUpdates,
@@ -89,15 +67,10 @@ export default function EmailPreferencesPage() {
           newsletter: preferences.newsletter,
         }),
       });
-
-      if (response.ok) {
-        setMessage({ type: 'success', text: 'Preferences saved successfully' });
-        fetchPreferences();
-      } else {
-        setMessage({ type: 'error', text: 'Failed to save preferences' });
-      }
+      setMessage({ type: 'success', text: 'Preferences saved successfully' });
+      fetchPreferences();
     } catch (error) {
-      setMessage({ type: 'error', text: 'An error occurred' });
+      setMessage({ type: 'error', text: 'Failed to save preferences' });
     } finally {
       setSaving(false);
     }
@@ -113,21 +86,13 @@ export default function EmailPreferencesPage() {
     setMessage(null);
 
     try {
-      const headers = await getEmailApiHeaders();
-      const response = await fetch('/api/v1/storefront/email-preferences/unsubscribe/all', {
+      await apiFetch('/v1/storefront/email-preferences/unsubscribe/all', {
         method: 'POST',
-        headers,
-        credentials: 'include',
       });
-
-      if (response.ok) {
-        setMessage({ type: 'success', text: 'Unsubscribed from all emails' });
-        fetchPreferences();
-      } else {
-        setMessage({ type: 'error', text: 'Failed to unsubscribe' });
-      }
+      setMessage({ type: 'success', text: 'Unsubscribed from all emails' });
+      fetchPreferences();
     } catch (error) {
-      setMessage({ type: 'error', text: 'An error occurred' });
+      setMessage({ type: 'error', text: 'Failed to unsubscribe' });
     } finally {
       setSaving(false);
     }

@@ -1,14 +1,14 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { Prisma } from '@prisma/client';
-import { v4 as uuidv4 } from 'uuid';
 import * as crypto from 'crypto';
+import { IsOptional, IsBoolean } from 'class-validator';
 
-export interface UpdatePreferencesDto {
-  marketing?: boolean;
-  orderUpdates?: boolean;
-  promotions?: boolean;
-  newsletter?: boolean;
+export class UpdatePreferencesDto {
+  @IsOptional() @IsBoolean() marketing?: boolean;
+  @IsOptional() @IsBoolean() orderUpdates?: boolean;
+  @IsOptional() @IsBoolean() promotions?: boolean;
+  @IsOptional() @IsBoolean() newsletter?: boolean;
 }
 
 export interface UnsubscribeType {
@@ -293,6 +293,60 @@ export class EmailPreferencesService {
     );
 
     return bounce;
+  }
+
+  /**
+   * Subscribe an email to the newsletter (public, no auth required).
+   * Creates or updates a StoreCustomer + preferences record.
+   */
+  async subscribeToNewsletter(tenantId: string, email: string) {
+    const normalizedEmail = email.toLowerCase().trim();
+
+    // Check if email is suppressed (bounced)
+    const suppressed = await this.isEmailSuppressed(tenantId, normalizedEmail);
+    if (suppressed) {
+      throw new BadRequestException('This email address cannot receive emails');
+    }
+
+    // Find or create a store customer for this email
+    let customer = await this.prisma.storeCustomer.findFirst({
+      where: { tenantId, email: normalizedEmail },
+    });
+
+    if (!customer) {
+      customer = await this.prisma.storeCustomer.create({
+        data: {
+          tenantId,
+          email: normalizedEmail,
+          firstName: null,
+          lastName: null,
+          password: '',
+        },
+      });
+    }
+
+    // Upsert preferences with newsletter=true
+    await this.prisma.storeCustomerPreferences.upsert({
+      where: { customerId: customer.id },
+      create: {
+        tenantId,
+        customerId: customer.id,
+        marketing: true,
+        orderUpdates: true,
+        promotions: true,
+        newsletter: true,
+      },
+      update: {
+        newsletter: true,
+      },
+    });
+
+    this.logger.log(`Newsletter subscription for: ${normalizedEmail}`);
+
+    return {
+      success: true,
+      message: 'Successfully subscribed to the newsletter',
+    };
   }
 
   /**

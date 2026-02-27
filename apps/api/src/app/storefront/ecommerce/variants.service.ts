@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import {
@@ -197,7 +196,7 @@ export class VariantsService {
       }
 
       const attrValue = await this.prisma.itemAttributeValue.findFirst({
-        where: { id: attr.attributeValueId, attributeTypeId: attr.attributeTypeId },
+        where: { id: attr.attributeValueId, attributeTypeId: attr.attributeTypeId, tenantId },
       });
       if (!attrValue) {
         throw new BadRequestException(`Attribute value ${attr.attributeValueId} not found`);
@@ -285,23 +284,103 @@ export class VariantsService {
   // ============ BULK OPERATIONS ============
 
   async bulkCreateVariants(tenantId: string, productListingId: string, variants: CreateVariantDto[]) {
-    // Verify product listing exists
-    const product = await this.prisma.productListing.findFirst({
-      where: { id: productListingId, tenantId },
+    // Enforce size limit
+    if (variants.length > 100) {
+      throw new BadRequestException('Maximum 100 variants per bulk operation');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      // Verify product listing exists
+      const product = await tx.productListing.findFirst({
+        where: { id: productListingId, tenantId },
+      });
+
+      if (!product) {
+        throw new NotFoundException('Product not found');
+      }
+
+      // Check for duplicate attribute combinations within the batch
+      const combinations = new Set<string>();
+      for (const variant of variants) {
+        const combo = variant.attributes
+          .map(a => `${a.attributeTypeId}:${a.attributeValueId}`)
+          .sort()
+          .join('|');
+        if (combinations.has(combo)) {
+          throw new BadRequestException(`Duplicate attribute combination found in batch: ${combo}`);
+        }
+        combinations.add(combo);
+      }
+
+      // Check for duplicate attribute combinations against existing variants
+      const existingVariants = await tx.productVariant.findMany({
+        where: { tenantId, productListingId },
+        include: {
+          attributes: { select: { attributeTypeId: true, attributeValueId: true } },
+        },
+      });
+
+      for (const existing of existingVariants) {
+        const combo = existing.attributes
+          .map(a => `${a.attributeTypeId}:${a.attributeValueId}`)
+          .sort()
+          .join('|');
+        if (combinations.has(combo)) {
+          throw new BadRequestException(`Variant with attribute combination already exists: ${combo}`);
+        }
+      }
+
+      // Create all variants within the transaction
+      const results = [];
+      for (const variant of variants) {
+        variant.productListingId = productListingId;
+
+        // Validate attribute types and values belong to tenant
+        for (const attr of variant.attributes) {
+          const attrType = await tx.itemAttributeType.findFirst({
+            where: { id: attr.attributeTypeId, tenantId },
+          });
+          if (!attrType) {
+            throw new BadRequestException(`Attribute type ${attr.attributeTypeId} not found`);
+          }
+          const attrValue = await tx.itemAttributeValue.findFirst({
+            where: { id: attr.attributeValueId, attributeTypeId: attr.attributeTypeId, tenantId },
+          });
+          if (!attrValue) {
+            throw new BadRequestException(`Attribute value ${attr.attributeValueId} not found`);
+          }
+        }
+
+        const created = await tx.productVariant.create({
+          data: {
+            tenantId,
+            productListingId,
+            sku: variant.sku,
+            barcode: variant.barcode,
+            price: variant.price,
+            compareAtPrice: variant.compareAtPrice,
+            imageUrl: variant.imageUrl,
+            stockQty: variant.stockQty ?? 0,
+            trackInventory: variant.trackInventory ?? true,
+            allowBackorder: variant.allowBackorder ?? false,
+            attributes: {
+              create: variant.attributes.map((attr) => ({
+                attributeTypeId: attr.attributeTypeId,
+                attributeValueId: attr.attributeValueId,
+              })),
+            },
+          },
+          include: {
+            attributes: {
+              include: { attributeType: true, attributeValue: true },
+            },
+          },
+        });
+        results.push(created);
+      }
+
+      return results;
     });
-
-    if (!product) {
-      throw new NotFoundException('Product not found');
-    }
-
-    const results = [];
-    for (const variant of variants) {
-      variant.productListingId = productListingId;
-      const created = await this.createVariant(tenantId, variant);
-      results.push(created);
-    }
-
-    return results;
   }
 
   async updateVariantStock(tenantId: string, id: string, quantity: number) {

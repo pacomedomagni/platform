@@ -1,8 +1,6 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { Prisma } from '@prisma/client';
-import { v4 as uuidv4 } from 'uuid';
 import * as crypto from 'crypto';
 import {
   CreateWishlistDto,
@@ -31,7 +29,7 @@ type WishlistWithRelations = Prisma.WishlistGetPayload<{
       };
     };
   };
-}> & { customer?: { firstName: string | null } | null };
+}>;
 
 @Injectable()
 export class WishlistService {
@@ -91,14 +89,31 @@ export class WishlistService {
     });
 
     if (!wishlist) {
-      wishlist = await this.prisma.wishlist.create({
-        data: {
-          tenantId,
-          customerId,
-          name: 'My Wishlist',
-          isDefault: true,
-        },
-      });
+      try {
+        wishlist = await this.prisma.wishlist.create({
+          data: {
+            tenantId,
+            customerId,
+            name: 'My Wishlist',
+            isDefault: true,
+          },
+        });
+      } catch (error) {
+        // Handle race condition: another request may have created the default wishlist concurrently
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2002'
+        ) {
+          wishlist = await this.prisma.wishlist.findFirst({
+            where: { tenantId, customerId, isDefault: true },
+          });
+          if (!wishlist) {
+            throw error;
+          }
+        } else {
+          throw error;
+        }
+      }
     }
 
     return wishlist;
@@ -336,30 +351,31 @@ export class WishlistService {
     // Get current price
     const price = item.variant?.price || item.productListing.price;
 
-    // Add to cart
-    await this.prisma.cartItem.upsert({
-      where: {
-        cartId_productId_variantId: {
+    // Wrap cart upsert + wishlist item delete in an interactive transaction for atomicity
+    await this.prisma.$transaction(async (tx) => {
+      await tx.cartItem.upsert({
+        where: {
+          cartId_productId_variantId: {
+            cartId,
+            productId: item.productListingId,
+            variantId: item.variantId || '',
+          },
+        },
+        create: {
+          tenantId,
           cartId,
           productId: item.productListingId,
-          variantId: item.variantId || '',
+          variantId: item.variantId,
+          quantity: 1,
+          price,
         },
-      },
-      create: {
-        tenantId,
-        cartId,
-        productId: item.productListingId,
-        variantId: item.variantId,
-        quantity: 1,
-        price,
-      },
-      update: {
-        quantity: { increment: 1 },
-      },
-    });
+        update: {
+          quantity: { increment: 1 },
+        },
+      });
 
-    // Remove from wishlist
-    await this.prisma.wishlistItem.delete({ where: { id: itemId } });
+      await tx.wishlistItem.delete({ where: { id: itemId } });
+    });
 
     return { success: true };
   }
@@ -370,9 +386,6 @@ export class WishlistService {
     const wishlist = await this.prisma.wishlist.findFirst({
       where: { shareToken, isPublic: true, tenantId },
       include: {
-        customer: {
-          select: { firstName: true },
-        },
         items: {
           include: {
             productListing: {
@@ -413,7 +426,7 @@ export class WishlistService {
       isPublic: wishlist.isPublic,
       shareToken: wishlist.shareToken,
       shareUrl: wishlist.shareToken ? `/wishlist/shared/${wishlist.shareToken}` : null,
-      ownerName: wishlist.customer?.firstName || 'Someone',
+      ownerName: wishlist.name || 'Wishlist',
       items: wishlist.items?.map((item) => ({
         id: item.id,
         product: {

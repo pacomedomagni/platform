@@ -19,11 +19,11 @@ export class AuditLogQueryDto {
 
   @IsString()
   @IsOptional()
-  entityType?: string;
+  docType?: string;
 
   @IsString()
   @IsOptional()
-  entityId?: string;
+  docName?: string;
 
   @IsEnum(['create', 'update', 'delete', 'login', 'logout', 'export', 'import', 'other'])
   @IsOptional()
@@ -46,11 +46,11 @@ export class CreateAuditLogDto {
 
   @IsString()
   @IsOptional()
-  entityType?: string;
+  docType?: string;
 
   @IsString()
   @IsOptional()
-  entityId?: string;
+  docName?: string;
 
   @IsObject()
   @IsOptional()

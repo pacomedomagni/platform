@@ -54,6 +54,19 @@ export class StripeConnectWebhookController {
 
     this.logger.log(`Received Stripe Connect webhook: ${event.type}`);
 
+    // Webhook deduplication: prevent processing the same event twice
+    const dedupeResult = await this.prisma.$queryRaw<{ already_processed: boolean }[]>`
+      INSERT INTO processed_webhook_events (id, "eventId", "eventType", "processedAt")
+      VALUES (gen_random_uuid(), ${event.id}, ${event.type}, NOW())
+      ON CONFLICT ("eventId") DO NOTHING
+      RETURNING FALSE as already_processed
+    `;
+
+    if (!dedupeResult || dedupeResult.length === 0) {
+      this.logger.log(`Duplicate Stripe Connect webhook event skipped: ${event.id}`);
+      return { received: true, duplicate: true };
+    }
+
     switch (event.type) {
       case 'account.updated':
         await this.handleAccountUpdated(event.data.object as Stripe.Account);

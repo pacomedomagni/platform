@@ -24,20 +24,17 @@ type DashboardData = {
   orderCount: number;
   orderGrowth: number;
   averageOrderValue: number;
-  aovGrowth: number;
   customerCount: number;
-  customerGrowth: number;
-  topProducts: Array<{ name: string; revenue: number; quantity: number }>;
-  revenueByCategory: Array<{ category: string; revenue: number; percentage: number }>;
+  topProducts: Array<{ productName: string; revenue: number; quantitySold: number }>;
+  revenueByCategory: Array<{ categoryName: string; revenue: number; percentageOfTotal: number }>;
   revenueByPaymentMethod: Array<{ method: string; revenue: number; count: number }>;
-  salesTrends: Array<{ date: string; revenue: number; orders: number }>;
+  salesTrends: Array<{ period: string; revenue: number; orderCount: number }>;
 };
 
 type InventoryData = {
-  totalValue: number;
+  totalCostValue: number;
   lowStockItems: number;
   deadStockItems: number;
-  turnoverRate: number;
 };
 
 export default function AnalyticsDashboardPage() {
@@ -76,9 +73,7 @@ export default function AnalyticsDashboardPage() {
         orderCount: dashboardRes.data?.summary?.totalOrders || dashboardRes.data?.orderCount || 0,
         orderGrowth: dashboardRes.data?.summary?.orderGrowth || dashboardRes.data?.orderGrowth || 0,
         averageOrderValue: dashboardRes.data?.summary?.averageOrderValue || dashboardRes.data?.averageOrderValue || 0,
-        aovGrowth: dashboardRes.data?.summary?.aovGrowth || dashboardRes.data?.aovGrowth || 0,
         customerCount: dashboardRes.data?.summary?.totalCustomers || dashboardRes.data?.customerCount || 0,
-        customerGrowth: dashboardRes.data?.summary?.customerGrowth || dashboardRes.data?.customerGrowth || 0,
         topProducts: topProductsRes.data || [],
         revenueByCategory: categoryRes.data || [],
         revenueByPaymentMethod: paymentRes.data || [],
@@ -86,10 +81,9 @@ export default function AnalyticsDashboardPage() {
       });
 
       setInventory({
-        totalValue: inventoryRes.data?.totalValue || 0,
+        totalCostValue: inventoryRes.data?.totalCostValue || 0,
         lowStockItems: lowStockRes.data?.length || 0,
         deadStockItems: deadStockRes.data?.length || 0,
-        turnoverRate: inventoryRes.data?.turnoverRate || 0,
       });
     } catch (e: any) {
       setError(e?.response?.data?.message || 'Failed to load analytics');
@@ -119,14 +113,21 @@ export default function AnalyticsDashboardPage() {
 
   useEffect(() => {
     loadDashboard();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startDate, endDate, groupBy]);
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+    const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
+    try {
+      return new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' }).format(amount);
+    } catch {
+      return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+    }
   };
 
   const formatNumber = (num: number) => {
-    return new Intl.NumberFormat('en-US').format(num);
+    const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
+    return new Intl.NumberFormat(locale).format(num);
   };
 
   const formatPercentage = (num: number) => {
@@ -225,10 +226,6 @@ export default function AnalyticsDashboardPage() {
                 <BarChart3 className="h-4 w-4 text-purple-500" />
               </div>
               <div className="text-2xl font-bold">{formatCurrency(dashboard.averageOrderValue)}</div>
-              <div className={`text-sm flex items-center gap-1 ${dashboard.aovGrowth >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {dashboard.aovGrowth >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                {formatPercentage(dashboard.aovGrowth)} vs previous period
-              </div>
             </Card>
 
             <Card className="p-5 space-y-2">
@@ -237,22 +234,18 @@ export default function AnalyticsDashboardPage() {
                 <Users className="h-4 w-4 text-amber-500" />
               </div>
               <div className="text-2xl font-bold">{formatNumber(dashboard.customerCount)}</div>
-              <div className={`text-sm flex items-center gap-1 ${dashboard.customerGrowth >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                {dashboard.customerGrowth >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                {formatPercentage(dashboard.customerGrowth)} vs previous period
-              </div>
             </Card>
           </div>
 
           {/* Inventory KPIs */}
           {inventory && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
               <Card className="p-5 space-y-2 bg-slate-50/50">
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-muted-foreground">Inventory Value</span>
                   <Package className="h-4 w-4 text-slate-500" />
                 </div>
-                <div className="text-2xl font-bold">{formatCurrency(inventory.totalValue)}</div>
+                <div className="text-2xl font-bold">{formatCurrency(inventory.totalCostValue)}</div>
               </Card>
 
               <Card className="p-5 space-y-2 bg-amber-50/50 border-amber-200">
@@ -269,14 +262,6 @@ export default function AnalyticsDashboardPage() {
                   <Package className="h-4 w-4 text-red-500" />
                 </div>
                 <div className="text-2xl font-bold text-red-700">{inventory.deadStockItems}</div>
-              </Card>
-
-              <Card className="p-5 space-y-2 bg-blue-50/50 border-blue-200">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-blue-700">Turnover Rate</span>
-                  <RefreshCw className="h-4 w-4 text-blue-500" />
-                </div>
-                <div className="text-2xl font-bold text-blue-700">{inventory.turnoverRate.toFixed(2)}x</div>
               </Card>
             </div>
           )}
@@ -303,10 +288,10 @@ export default function AnalyticsDashboardPage() {
                         <div
                           className="w-full bg-blue-500 rounded-t transition-all hover:bg-blue-600"
                           style={{ height: `${height}%`, minHeight: '4px' }}
-                          title={`${item.date}: ${formatCurrency(item.revenue)}`}
+                          title={`${item.period}: ${formatCurrency(item.revenue)}`}
                         />
                         <span className="text-[10px] text-muted-foreground rotate-45 origin-left whitespace-nowrap">
-                          {new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          {new Date(item.period).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                         </span>
                       </div>
                     );
@@ -332,13 +317,13 @@ export default function AnalyticsDashboardPage() {
                     return (
                       <div key={idx} className="space-y-1">
                         <div className="flex items-center justify-between text-sm">
-                          <span>{cat.category || 'Uncategorized'}</span>
+                          <span>{cat.categoryName || 'Uncategorized'}</span>
                           <span className="font-medium">{formatCurrency(cat.revenue)}</span>
                         </div>
                         <div className="h-2 bg-muted rounded-full overflow-hidden">
                           <div
                             className={`h-full ${colors[idx % colors.length]} transition-all`}
-                            style={{ width: `${cat.percentage}%` }}
+                            style={{ width: `${cat.percentageOfTotal}%` }}
                           />
                         </div>
                       </div>
@@ -365,8 +350,8 @@ export default function AnalyticsDashboardPage() {
                           {idx + 1}
                         </span>
                         <div>
-                          <p className="font-medium text-sm">{product.name}</p>
-                          <p className="text-xs text-muted-foreground">{product.quantity} sold</p>
+                          <p className="font-medium text-sm">{product.productName}</p>
+                          <p className="text-xs text-muted-foreground">{product.quantitySold} sold</p>
                         </div>
                       </div>
                       <span className="font-semibold">{formatCurrency(product.revenue)}</span>

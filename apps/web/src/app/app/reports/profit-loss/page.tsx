@@ -14,6 +14,20 @@ type ProfitLoss = {
   net_profit_margin: number;
 };
 
+const formatCurrency = (amount: number) => {
+  const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+  }
+};
+
 export default function ProfitLossPage() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -49,7 +63,7 @@ export default function ProfitLossPage() {
         {rows.map((row, idx) => (
           <tr key={`${row.account}-${idx}`} className="border-b last:border-0">
             <td className="p-3">{row.account}</td>
-            <td className="p-3 text-right">{Math.abs(row.balance)}</td>
+            <td className="p-3 text-right">{formatCurrency(Math.abs(row.balance))}</td>
           </tr>
         ))}
       </tbody>
@@ -81,19 +95,19 @@ export default function ProfitLossPage() {
           <div>
             <div className="flex items-center gap-2 mb-2">
               <div className="font-medium">Income</div>
-              <Badge variant="secondary">Total: {data.income.total}</Badge>
+              <Badge variant="secondary">Total: {formatCurrency(data.income.total)}</Badge>
             </div>
             <ReportCard>{renderRows(data.income.accounts)}</ReportCard>
           </div>
           <div>
             <div className="flex items-center gap-2 mb-2">
               <div className="font-medium">Expenses</div>
-              <Badge variant="secondary">Total: {data.expenses.total}</Badge>
+              <Badge variant="secondary">Total: {formatCurrency(data.expenses.total)}</Badge>
             </div>
             <ReportCard>{renderRows(data.expenses.accounts)}</ReportCard>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
-            <span>Net Profit: {data.net_profit}</span>
+            <span>Net Profit: {formatCurrency(data.net_profit)}</span>
             <span className="text-muted-foreground">|</span>
             <span>Margin: {data.net_profit_margin.toFixed(2)}%</span>
           </div>

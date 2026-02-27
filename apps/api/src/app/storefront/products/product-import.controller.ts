@@ -3,7 +3,6 @@ import {
   Post,
   Get,
   Param,
-  Headers,
   BadRequestException,
   UseGuards,
   UseInterceptors,
@@ -11,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { StoreAdminGuard } from '@platform/auth';
+import { Tenant } from '../../tenant.middleware';
 import { ProductImportService } from './product-import.service';
 
 @Controller('store/admin/products/import')
@@ -35,7 +35,7 @@ export class ProductImportController {
     }),
   )
   async startImport(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
     if (!tenantId) {
@@ -49,7 +49,7 @@ export class ProductImportController {
 
   @Get(':jobId')
   async getImportStatus(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('jobId') jobId: string,
   ) {
     if (!tenantId) {
@@ -59,7 +59,7 @@ export class ProductImportController {
   }
 
   @Get()
-  async listImports(@Headers('x-tenant-id') tenantId: string) {
+  async listImports(@Tenant() tenantId: string) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }

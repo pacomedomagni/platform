@@ -27,42 +27,42 @@ model Tenant {
   allowNegativeStock       Boolean                  @default(false)
 
   // Storefront configuration
-  nextOrderNumber        Int     @default(1)
-  defaultTaxRate         Decimal @default(0.0825) @db.Decimal(8, 6)
-  defaultShippingRate    Decimal @default(9.99) @db.Decimal(18, 2)
-  freeShippingThreshold  Decimal @default(100.00) @db.Decimal(18, 2)
+  nextOrderNumber       Int     @default(1)
+  defaultTaxRate        Decimal @default(0.0825) @db.Decimal(8, 6)
+  defaultShippingRate   Decimal @default(9.99) @db.Decimal(18, 2)
+  freeShippingThreshold Decimal @default(100.00) @db.Decimal(18, 2)
 
   // Payment provider configuration
-  paymentProvider         String?  // "stripe" | "square" | null
-  paymentProviderStatus   String   @default("pending") // "pending"|"onboarding"|"active"|"disabled"
+  paymentProvider       String? // "stripe" | "square" | null
+  paymentProviderStatus String  @default("pending") // "pending"|"onboarding"|"active"|"disabled"
 
   // Stripe Connect
-  stripeConnectAccountId  String?  @unique
-  stripeChargesEnabled    Boolean  @default(false)
-  stripePayoutsEnabled    Boolean  @default(false)
-  stripeDetailsSubmitted  Boolean  @default(false)
+  stripeConnectAccountId String? @unique
+  stripeChargesEnabled   Boolean @default(false)
+  stripePayoutsEnabled   Boolean @default(false)
+  stripeDetailsSubmitted Boolean @default(false)
 
   // Square
-  squareMerchantId        String?  @unique
+  squareMerchantId        String?   @unique
   squareLocationId        String?
-  squareAccessToken       String?  // Encrypted
-  squareRefreshToken      String?  // Encrypted
+  squareAccessToken       String? // Encrypted
+  squareRefreshToken      String? // Encrypted
   squareAccessTokenExpiry DateTime?
 
   // Platform fees
-  platformFeePercent      Decimal  @default(2.9) @db.Decimal(5, 2)
-  platformFeeFixed        Decimal  @default(0.30) @db.Decimal(18, 2)
+  platformFeePercent Decimal @default(2.9) @db.Decimal(5, 2)
+  platformFeeFixed   Decimal @default(0.30) @db.Decimal(18, 2)
 
   // Onboarding tracking
-  onboardingStep          String?  // "signup"|"provisioning"|"payment"|"completed"
-  onboardingCompletedAt   DateTime?
+  onboardingStep        String? // "signup"|"provisioning"|"payment"|"completed"
+  onboardingCompletedAt DateTime?
 
   // Storefront publish gate
-  storePublished    Boolean   @default(false)
-  storePublishedAt  DateTime?
+  storePublished   Boolean   @default(false)
+  storePublishedAt DateTime?
 
-  createdAt                DateTime                 @default(now())
-  updatedAt                DateTime                 @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   users                     User[]
   warehouses                Warehouse[]
@@ -124,12 +124,12 @@ model Tenant {
   storeThemes StoreTheme[]
 
   // Marketplace integrations
-  marketplaceConnections     MarketplaceConnection[]
-  marketplaceListings        MarketplaceListing[]
-  marketplaceOrders          MarketplaceOrder[]
-  marketplaceActiveListings  MarketplaceActiveListing[]
-  marketplaceSyncLogs        MarketplaceSyncLog[]
-  failedOperations           FailedOperation[]
+  marketplaceConnections    MarketplaceConnection[]
+  marketplaceListings       MarketplaceListing[]
+  marketplaceOrders         MarketplaceOrder[]
+  marketplaceActiveListings MarketplaceActiveListing[]
+  marketplaceSyncLogs       MarketplaceSyncLog[]
+  failedOperations          FailedOperation[]
 
   // Webhook system (database-backed)
   webhooks Webhook[]
@@ -165,8 +165,8 @@ model User {
   roles String[] @default(["user"])
 
   // Email verification
-  emailVerified   Boolean   @default(false)
-  emailVerifiedAt DateTime?
+  emailVerified           Boolean                          @default(false)
+  emailVerifiedAt         DateTime?
   emailVerificationTokens MerchantEmailVerificationToken[]
 
   // Marketplace listing approvals
@@ -333,8 +333,8 @@ model Location {
   isActive   Boolean @default(true)
 
   deletedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   stockFromEntries StockLedgerEntry[] @relation("StockFromLocation")
   stockToEntries   StockLedgerEntry[] @relation("StockToLocation")
@@ -1157,13 +1157,13 @@ model ProductListing {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  cartItems      CartItem[]
-  orderItems     OrderItem[]
-  variants       ProductVariant[]
-  reviews        ProductReview[]
-  wishlistItems  WishlistItem[]
-  priceOverrides ProductPriceOverride[]
-  translations   ProductTranslation[]
+  cartItems           CartItem[]
+  orderItems          OrderItem[]
+  variants            ProductVariant[]
+  reviews             ProductReview[]
+  wishlistItems       WishlistItem[]
+  priceOverrides      ProductPriceOverride[]
+  translations        ProductTranslation[]
   marketplaceListings MarketplaceListing[]
 
   @@unique([tenantId, slug])
@@ -1194,9 +1194,9 @@ model StoreCustomer {
   emailVerified   Boolean   @default(false)
   emailVerifiedAt DateTime?
 
-  // Password reset
-  resetToken    String?
-  resetTokenExp DateTime?
+  // Password reset (DEPRECATED: use PasswordReset model instead. Remove in a future migration.)
+  resetToken    String? // @deprecated - superseded by PasswordReset table
+  resetTokenExp DateTime? // @deprecated - superseded by PasswordReset table
 
   // Marketing preferences
   acceptsMarketing Boolean @default(false)
@@ -1260,6 +1260,7 @@ model StoreAddress {
   updatedAt DateTime @updatedAt
 
   @@index([customerId])
+  @@index([tenantId, customerId])
   @@map("store_addresses")
 }
 
@@ -1820,6 +1821,7 @@ model ReviewVote {
   createdAt DateTime @default(now())
 
   @@unique([reviewId, customerId])
+  @@unique([reviewId, sessionToken])
   @@index([reviewId])
   @@map("review_votes")
 }
@@ -1832,6 +1834,7 @@ model GiftCard {
 
   // Card details
   code String
+  // TODO: PINs should be hashed (e.g. bcrypt) in a future iteration to avoid plaintext storage
   pin  String? // Optional PIN for security
 
   // Value
@@ -2464,8 +2467,8 @@ model MarketplaceConnection {
   isDefault   Boolean @default(false)
 
   // Sync settings
-  autoSyncInventory Boolean @default(true)
-  autoSyncOrders    Boolean @default(true)
+  autoSyncInventory Boolean   @default(true)
+  autoSyncOrders    Boolean   @default(true)
   lastSyncAt        DateTime?
 
   createdAt DateTime @default(now())
@@ -2540,7 +2543,7 @@ model MarketplaceListing {
 
   // Status
   status       String // draft, pending_approval, approved, publishing, published, ended, error
-  syncStatus   String @default("pending") // synced, pending, error
+  syncStatus   String  @default("pending") // synced, pending, error
   errorMessage String?
 
   // Workflow
@@ -2583,7 +2586,7 @@ model MarketplaceActiveListing {
   connection   MarketplaceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   // Platform IDs
-  externalListingId String @unique
+  externalListingId String  @unique
   externalItemId    String?
   sku               String
 
@@ -2705,7 +2708,7 @@ model MarketplaceSyncLog {
   errorMessage String?
   metadata     Json? // Detailed info
 
-  startedAt   DateTime @default(now())
+  startedAt   DateTime  @default(now())
   completedAt DateTime?
 
   @@index([tenantId, connectionId])
@@ -2877,6 +2880,7 @@ model ProductImportJob {
   successCount  Int       @default(0)
   errorCount    Int       @default(0)
   errors        Json      @default("[]")
+  payload       Json?
   startedAt     DateTime?
   completedAt   DateTime?
 
@@ -2917,17 +2921,17 @@ model BackgroundJob {
 // ─── Notifications ────────────────────────────────────────────────
 
 model Notification {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   userId    String
-  type      String   // e.g. order.received, inventory.low
+  type      String // e.g. order.received, inventory.low
   title     String
   message   String
-  data      Json?    // Arbitrary metadata
+  data      Json? // Arbitrary metadata
   link      String?
-  priority  String   @default("normal") // low, normal, high, urgent
-  isRead    Boolean  @default(false)
+  priority  String    @default("normal") // low, normal, high, urgent
+  isRead    Boolean   @default(false)
   readAt    DateTime?
   expiresAt DateTime?
 

@@ -287,7 +287,7 @@ function ReviewCard({ review, onVote, hasVoted }: ReviewCardProps) {
               <span className="font-semibold text-slate-900">{review.reviewerName}</span>
               <span className="text-slate-400">·</span>
               <span className="text-slate-500">
-                {new Date(review.createdAt).toLocaleDateString('en-US', {
+                {new Date(review.createdAt).toLocaleDateString(undefined, {
                   year: 'numeric',
                   month: 'long',
                   day: 'numeric',

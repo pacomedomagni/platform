@@ -101,8 +101,8 @@ function ProductsContent() {
       : product.category?.name || 'Uncategorized',
     price: product.price,
     compareAt: product.compareAtPrice || undefined,
-    rating: 4.5, // Default rating - would come from reviews in a full implementation
-    reviews: 0,
+    rating: product.averageRating ?? undefined,
+    reviews: product.reviewCount ?? 0,
     badge: product.tags?.includes('bestseller')
       ? 'Best Seller' as const
       : product.tags?.includes('new')
@@ -112,7 +112,7 @@ function ProductsContent() {
     stockStatus: (product.trackInventory && (product.quantity ?? product.stockQuantity) === 0)
       ? 'Low Stock' as const
       : 'In Stock' as const,
-    leadTime: '2-4 days',
+    leadTime: product.leadTime ?? undefined,
     tone: 'from-blue-50 via-slate-50 to-amber-50',
     images: product.images,
   });

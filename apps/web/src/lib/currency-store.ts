@@ -109,9 +109,10 @@ export const useCurrencyStore = create<CurrencyState>()(
         const symbol = selectedCurrency?.symbol || '$';
         const code = selectedCurrency?.code || 'USD';
 
-        // Format based on currency code
+        // Format based on currency code, using browser locale when available
         try {
-          return new Intl.NumberFormat('en-US', {
+          const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
+          return new Intl.NumberFormat(locale, {
             style: 'currency',
             currency: code,
             minimumFractionDigits: 2,

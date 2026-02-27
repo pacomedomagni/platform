@@ -36,9 +36,11 @@ export class ProvisioningController {
   /**
    * GET /api/provision/:tenantId/status
    * Get the current provisioning status
+   * H-TP-1: Requires API key to prevent unauthorized access to provisioning status
    */
   @Get(':tenantId/status')
   @HttpCode(HttpStatus.OK)
+  @RequireApiKey()
   async getProvisioningStatus(@Param('tenantId') tenantId: string) {
     return this.provisioningService.getProvisioningStatus(tenantId);
   }

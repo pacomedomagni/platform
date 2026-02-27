@@ -286,7 +286,7 @@ export default function AdminReviewsPage() {
                         )}
                         <span>·</span>
                         <span>
-                          {new Date(review.createdAt).toLocaleDateString('en-US', {
+                          {new Date(review.createdAt).toLocaleDateString(undefined, {
                             year: 'numeric',
                             month: 'short',
                             day: 'numeric',

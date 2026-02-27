@@ -188,7 +188,7 @@ export class DashboardService {
     outOfStock: InventoryAlert[];
     totalActive: number;
   }> {
-    // Get items with warehouse balances
+    // Get items with warehouse balances (limit to 200 to prevent loading all items)
     const itemsWithStock = await this.db.item.findMany({
       where: {
         tenantId,
@@ -200,6 +200,7 @@ export class DashboardService {
           select: { actualQty: true },
         },
       },
+      take: 200,
     });
 
     const lowStock: InventoryAlert[] = [];
@@ -311,16 +312,16 @@ export class DashboardService {
       totalQty: number;
       totalRevenue: number;
     }>>`
-      SELECT 
-        oi."productCode",
-        oi."productName",
+      SELECT
+        oi."sku" as "productCode",
+        oi."name" as "productName",
         SUM(oi."quantity")::float as "totalQty",
-        SUM(oi."lineTotal")::float as "totalRevenue"
+        SUM(oi."totalPrice")::float as "totalRevenue"
       FROM "order_items" oi
       INNER JOIN "orders" o ON o.id = oi."orderId"
       WHERE o."tenantId" = ${tenantId}
         AND o."paymentStatus" = 'CAPTURED'
-      GROUP BY oi."productCode", oi."productName"
+      GROUP BY oi."sku", oi."name"
       ORDER BY "totalRevenue" DESC
       LIMIT ${limit}
     `;
@@ -338,67 +339,75 @@ export class DashboardService {
     tenantId: string,
     limit = 10
   ): Promise<RecentActivity[]> {
-    const activities: RecentActivity[] = [];
+    // Use a single combined query via UNION ALL for efficiency (L3)
+    const combined = await this.db.$queryRaw<Array<{
+      id: string;
+      type: string;
+      action: string;
+      description: string;
+      timestamp: Date;
+      metadata: string;
+    }>>`
+      (
+        SELECT
+          o.id,
+          'order' as type,
+          'created' as action,
+          CONCAT('Order #', o."orderNumber", ' placed for $', ROUND(o."grandTotal"::numeric, 2)) as description,
+          o."createdAt" as timestamp,
+          json_build_object('orderNumber', o."orderNumber", 'status', o."status", 'email', o."email")::text as metadata
+        FROM orders o
+        WHERE o."tenantId" = ${tenantId}
+        ORDER BY o."createdAt" DESC
+        LIMIT ${limit}
+      )
+      UNION ALL
+      (
+        SELECT
+          sc.id,
+          'customer' as type,
+          'registered' as action,
+          CONCAT('New customer: ', COALESCE(sc."firstName", ''), ' ', COALESCE(sc."lastName", ''), ' (', sc."email", ')') as description,
+          sc."createdAt" as timestamp,
+          json_build_object('email', sc."email")::text as metadata
+        FROM store_customers sc
+        WHERE sc."tenantId" = ${tenantId}
+        ORDER BY sc."createdAt" DESC
+        LIMIT 5
+      )
+      ORDER BY timestamp DESC
+      LIMIT ${limit}
+    `;
 
-    // Get recent orders
-    const recentOrders = await this.db.order.findMany({
-      where: { tenantId },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-      select: {
-        id: true,
-        orderNumber: true,
-        status: true,
-        grandTotal: true,
-        email: true,
-        createdAt: true,
-      },
-    });
+    return combined.map(row => ({
+      id: row.id,
+      type: row.type as 'order' | 'customer',
+      action: row.action,
+      description: row.description,
+      timestamp: row.timestamp,
+      metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata,
+    }));
+  }
 
-    for (const order of recentOrders) {
-      activities.push({
-        id: order.id,
-        type: 'order',
-        action: 'created',
-        description: `Order #${order.orderNumber} placed for $${Number(order.grandTotal).toFixed(2)}`,
-        timestamp: order.createdAt,
-        metadata: {
-          orderNumber: order.orderNumber,
-          status: order.status,
-          email: order.email,
-        },
-      });
-    }
+  /**
+   * Get only revenue stats (H5 - lightweight endpoint instead of full summary)
+   */
+  async getRevenue(tenantId: string): Promise<RevenueStats> {
+    return this.getRevenueStats(tenantId);
+  }
 
-    // Get recent customers
-    const recentCustomers = await this.db.storeCustomer.findMany({
-      where: { tenantId },
-      orderBy: { createdAt: 'desc' },
-      take: 5,
-      select: {
-        id: true,
-        email: true,
-        firstName: true,
-        lastName: true,
-        createdAt: true,
-      },
-    });
+  /**
+   * Get only order stats (H5 - lightweight endpoint instead of full summary)
+   */
+  async getOrders(tenantId: string): Promise<OrderStats> {
+    return this.getOrderStats(tenantId);
+  }
 
-    for (const customer of recentCustomers) {
-      activities.push({
-        id: customer.id,
-        type: 'customer',
-        action: 'registered',
-        description: `New customer: ${customer.firstName || ''} ${customer.lastName || ''} (${customer.email})`.trim(),
-        timestamp: customer.createdAt,
-        metadata: { email: customer.email },
-      });
-    }
-
-    // Sort by timestamp and limit
-    return activities
-      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
-      .slice(0, limit);
+  /**
+   * Get only inventory alerts (H5 - lightweight endpoint instead of full summary)
+   */
+  async getInventory(tenantId: string) {
+    return this.getInventoryAlerts(tenantId);
   }
 
   /**

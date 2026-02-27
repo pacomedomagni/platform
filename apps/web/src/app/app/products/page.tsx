@@ -63,7 +63,8 @@ export default function ProductsPage() {
   );
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
+    const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
+    return new Intl.NumberFormat(locale, {
       style: 'currency',
       currency: 'USD',
     }).format(amount);

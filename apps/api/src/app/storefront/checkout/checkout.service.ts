@@ -60,7 +60,7 @@ export class CheckoutService {
     }
 
     // Run database operations inside a transaction; Stripe call stays outside
-    const result = await this.prisma.$transaction(async (tx) => {
+    const txResult = await this.prisma.$transaction(async (tx) => {
       // PAY-3: Lock cart row to prevent TOCTOU race
       const lockedCarts = await tx.$queryRaw<any[]>`
         SELECT id FROM carts
@@ -112,10 +112,14 @@ export class CheckoutService {
       }
 
       // Re-validate coupon at checkout time (may have expired or hit limit since added to cart)
+      // Use FOR UPDATE to prevent concurrent orders from both passing the usage limit check
       if (cart.couponCode) {
-        const coupon = await tx.coupon.findFirst({
-          where: { tenantId, code: cart.couponCode },
-        });
+        const lockedCoupons = await tx.$queryRaw<any[]>`
+          SELECT * FROM coupons
+          WHERE "tenantId" = ${tenantId} AND code = ${cart.couponCode}
+          FOR UPDATE
+        `;
+        const coupon = lockedCoupons?.[0] || null;
         const now = new Date();
         const invalid = !coupon || !coupon.isActive
           || (coupon.expiresAt && new Date(coupon.expiresAt) < now)
@@ -314,59 +318,76 @@ export class CheckoutService {
         data: { status: 'converted' },
       });
 
-      return order;
-    }, { timeout: 30000 });
+      // ============ GIFT CARD REDEMPTION (inside transaction for automatic rollback) ============
+      let giftCardAmountApplied = 0;
+      let giftCardTransactionId: string | null = null;
+      let chargeAmount = Number(order.grandTotal);
 
-    // ============ GIFT CARD REDEMPTION ============
-    let giftCardAmountApplied = 0;
-    let giftCardTransactionId: string | null = null;
-    let chargeAmount = Number(result.grandTotal);
-
-    if (dto.giftCardCode) {
-      try {
-        // Validate the gift card balance first
-        const balanceCheck = await this.giftCardsService.checkBalance(
-          tenantId,
-          dto.giftCardCode,
-          dto.giftCardPin,
-        );
-
-        if (balanceCheck.balance > 0) {
-          // Redeem the gift card against this order
-          const redemption = await this.giftCardsService.redeemForOrder(
+      if (dto.giftCardCode) {
+        try {
+          // Validate the gift card balance first
+          const balanceCheck = await this.giftCardsService.checkBalance(
             tenantId,
-            result.id,
-            { code: dto.giftCardCode, pin: dto.giftCardPin },
-            chargeAmount,
+            dto.giftCardCode,
+            dto.giftCardPin,
           );
 
-          giftCardAmountApplied = redemption.amountRedeemed;
-          giftCardTransactionId = redemption.transactionId;
-          chargeAmount = chargeAmount - giftCardAmountApplied;
+          if (balanceCheck.balance > 0) {
+            // Redeem the gift card against this order
+            const redemption = await this.giftCardsService.redeemForOrder(
+              tenantId,
+              order.id,
+              { code: dto.giftCardCode, pin: dto.giftCardPin },
+              chargeAmount,
+            );
 
-          // If gift card covers the full amount, mark as paid — no external payment needed
-          if (chargeAmount <= 0) {
-            chargeAmount = 0;
-            await this.prisma.order.update({
-              where: { id: result.id },
+            giftCardAmountApplied = redemption.amountRedeemed;
+            giftCardTransactionId = redemption.transactionId;
+            chargeAmount = chargeAmount - giftCardAmountApplied;
+
+            // Store gift card amount on the order for retry logic
+            await tx.order.update({
+              where: { id: order.id },
               data: {
-                paymentStatus: 'CAPTURED',
-                paymentMethod: 'gift_card',
+                giftCardAmountApplied,
               },
             });
+
+            // If gift card covers the full amount, mark as paid — no external payment needed
+            if (chargeAmount <= 0) {
+              chargeAmount = 0;
+              await tx.order.update({
+                where: { id: order.id },
+                data: {
+                  paymentStatus: 'CAPTURED',
+                  paymentMethod: 'gift_card',
+                },
+              });
+            }
           }
+        } catch (error) {
+          // If gift card validation/redemption fails, log and continue with full payment
+          this.logger.error(
+            { err: error, orderId: order.id, giftCardCode: dto.giftCardCode },
+            'Gift card redemption failed, proceeding with full payment',
+          );
+          giftCardAmountApplied = 0;
+          giftCardTransactionId = null;
+          chargeAmount = Number(order.grandTotal);
         }
-      } catch (error) {
-        // If gift card validation/redemption fails, log and continue with full payment
-        this.logger.error(
-          { err: error, orderId: result.id, giftCardCode: dto.giftCardCode },
-          'Gift card redemption failed, proceeding with full payment',
-        );
-        giftCardAmountApplied = 0;
-        giftCardTransactionId = null;
-        chargeAmount = Number(result.grandTotal);
       }
-    }
+
+      return {
+        order,
+        giftCardAmountApplied,
+        giftCardTransactionId,
+        chargeAmount,
+        couponRemoved: (cart as any).couponRemoved || null,
+        couponRemoveReason: (cart as any).couponRemoveReason || null,
+      };
+    }, { timeout: 30000 });
+
+    const { order: result, giftCardAmountApplied, giftCardTransactionId, chargeAmount, couponRemoved, couponRemoveReason } = txResult;
 
     // Create payment intent — route through connected account if tenant has one
     let stripeClientSecret: string | null = null;
@@ -466,10 +487,10 @@ export class CheckoutService {
     });
 
     // Include coupon removal notice if coupon was invalidated during checkout
-    if ((result as any).couponRemoved) {
+    if (couponRemoved) {
       (response as any).couponRemoved = {
-        code: (result as any).couponRemoved,
-        reason: (result as any).couponRemoveReason,
+        code: couponRemoved,
+        reason: couponRemoveReason,
       };
     }
 
@@ -533,20 +554,39 @@ export class CheckoutService {
 
     const retryCurrency = (order.currency || 'usd').toLowerCase();
 
+    // Subtract any gift card amount already applied to this order
+    const giftCardAmountApplied = Number(order.giftCardAmountApplied || 0);
+    const chargeAmount = Math.max(Number(order.grandTotal) - giftCardAmountApplied, 0);
+
+    if (chargeAmount <= 0) {
+      // Gift card covers the full amount — no external payment needed
+      await this.prisma.order.update({
+        where: { id: order.id },
+        data: {
+          paymentStatus: 'CAPTURED',
+          paymentMethod: 'gift_card',
+        },
+      });
+      return { clientSecret: null, paymentProvider: 'gift_card', orderId: order.id };
+    }
+
+    if (giftCardAmountApplied > 0) {
+      metadata.giftCardAmountApplied = String(giftCardAmountApplied);
+    }
+
     if (
       tenant?.paymentProvider === 'stripe' &&
       tenant.stripeConnectAccountId &&
       tenant.paymentProviderStatus === 'active'
     ) {
-      const amount = Number(order.grandTotal);
       const fee =
-        amount * (Number(tenant.platformFeePercent) / 100) +
+        chargeAmount * (Number(tenant.platformFeePercent) / 100) +
         Number(tenant.platformFeeFixed);
 
       const paymentIntent =
         await this.stripeConnectService.createConnectedPaymentIntent(
           tenant.stripeConnectAccountId,
-          amount,
+          chargeAmount,
           retryCurrency,
           fee,
           metadata,
@@ -561,7 +601,7 @@ export class CheckoutService {
       clientSecret = paymentIntent.client_secret;
     } else {
       const paymentIntent = await this.stripeService.createPaymentIntent(
-        Number(order.grandTotal),
+        chargeAmount,
         retryCurrency,
         metadata,
         idempotencyKey,
@@ -761,6 +801,51 @@ export class CheckoutService {
               AND "itemId" = ${item.product.item.id}
               AND "reservedQty" >= ${item.quantity}
           `;
+        }
+      }
+
+      // Reverse gift card transaction if one was applied
+      const giftCardAmount = Number(order.giftCardAmountApplied || 0);
+      if (giftCardAmount > 0) {
+        try {
+          // Find the gift card transaction for this order and reverse it
+          const gcTransaction = await tx.giftCardTransaction.findFirst({
+            where: { orderId, tenantId, type: 'redemption' },
+            include: { giftCard: true },
+          });
+
+          if (gcTransaction && gcTransaction.giftCard) {
+            const currentBalance = Number(gcTransaction.giftCard.currentBalance);
+            const restoredBalance = currentBalance + giftCardAmount;
+
+            // Create a reversal transaction
+            await tx.giftCardTransaction.create({
+              data: {
+                tenantId,
+                giftCardId: gcTransaction.giftCardId,
+                type: 'refund',
+                amount: giftCardAmount,
+                balanceBefore: currentBalance,
+                balanceAfter: restoredBalance,
+                orderId,
+                notes: `Reversed due to order cancellation (${order.orderNumber})`,
+              },
+            });
+
+            // Restore the balance
+            await tx.giftCard.update({
+              where: { id: gcTransaction.giftCardId },
+              data: {
+                currentBalance: restoredBalance,
+                status: 'active',
+              },
+            });
+          }
+        } catch (error) {
+          this.logger.error(
+            { err: error, orderId, tenantId },
+            'Failed to reverse gift card on checkout cancellation',
+          );
         }
       }
 

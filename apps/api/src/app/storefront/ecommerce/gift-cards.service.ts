@@ -1,8 +1,6 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { Prisma } from '@prisma/client';
-import { v4 as uuidv4 } from 'uuid';
 import * as crypto from 'crypto';
 import {
   CreateGiftCardDto,
@@ -198,64 +196,87 @@ export class GiftCardsService {
   }
 
   async createGiftCard(tenantId: string, dto: CreateGiftCardDto, createdBy?: string) {
-    // Generate unique code
-    const code = this.generateGiftCardCode();
+    const MAX_RETRIES = 3;
 
-    const giftCard = await this.prisma.giftCard.create({
-      data: {
-        tenantId,
-        code,
-        pin: dto.sourceType === 'purchased' ? this.generatePin() : null,
-        initialValue: dto.initialValue,
-        currentBalance: dto.initialValue,
-        currency: dto.currency || 'USD',
-        sourceType: dto.sourceType,
-        sourceOrderId: dto.sourceOrderId,
-        recipientEmail: dto.recipientEmail,
-        recipientName: dto.recipientName,
-        senderName: dto.senderName,
-        personalMessage: dto.personalMessage,
-        deliveryMethod: dto.deliveryMethod || 'email',
-        expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
-        status: dto.sourceType === 'purchased' ? 'pending' : 'active',
-        activatedAt: dto.sourceType === 'purchased' ? null : new Date(),
-      },
-    });
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        // Generate unique code (retry with new code on conflict)
+        const code = this.generateGiftCardCode();
 
-    // Create initial activation transaction for non-purchased cards
-    if (dto.sourceType !== 'purchased') {
-      await this.prisma.giftCardTransaction.create({
-        data: {
-          tenantId,
-          giftCardId: giftCard.id,
-          type: 'activation',
-          amount: dto.initialValue,
-          balanceBefore: 0,
-          balanceAfter: dto.initialValue,
-          notes: `Created as ${dto.sourceType} by ${createdBy || 'system'}`,
-          performedBy: createdBy,
-        },
-      });
+        const giftCard = await this.prisma.giftCard.create({
+          data: {
+            tenantId,
+            code,
+            pin: dto.sourceType === 'purchased' ? this.generatePin() : null,
+            initialValue: dto.initialValue,
+            currentBalance: dto.initialValue,
+            currency: dto.currency || 'USD',
+            sourceType: dto.sourceType,
+            sourceOrderId: dto.sourceOrderId,
+            recipientEmail: dto.recipientEmail,
+            recipientName: dto.recipientName,
+            senderName: dto.senderName,
+            personalMessage: dto.personalMessage,
+            deliveryMethod: dto.deliveryMethod || 'email',
+            expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
+            status: dto.sourceType === 'purchased' ? 'pending' : 'active',
+            activatedAt: dto.sourceType === 'purchased' ? null : new Date(),
+          },
+        });
+
+        // Create initial activation transaction for non-purchased cards
+        if (dto.sourceType !== 'purchased') {
+          await this.prisma.giftCardTransaction.create({
+            data: {
+              tenantId,
+              giftCardId: giftCard.id,
+              type: 'activation',
+              amount: dto.initialValue,
+              balanceBefore: 0,
+              balanceAfter: dto.initialValue,
+              notes: `Created as ${dto.sourceType} by ${createdBy || 'system'}`,
+              performedBy: createdBy,
+            },
+          });
+        }
+
+        return giftCard;
+      } catch (error) {
+        // Retry on unique constraint violation (code collision)
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2002' &&
+          attempt < MAX_RETRIES - 1
+        ) {
+          continue;
+        }
+        throw error;
+      }
     }
 
-    return giftCard;
+    throw new BadRequestException('Failed to generate a unique gift card code. Please try again.');
   }
 
   async activateGiftCard(tenantId: string, id: string) {
-    const giftCard = await this.prisma.giftCard.findFirst({
-      where: { id, tenantId },
-    });
+    return this.prisma.$transaction(async (tx) => {
+      // Lock the gift card row to prevent concurrent activations
+      const lockedCards = await tx.$queryRaw<any[]>`
+        SELECT * FROM gift_cards
+        WHERE id = ${id} AND "tenantId" = ${tenantId}
+        FOR UPDATE
+      `;
 
-    if (!giftCard) {
-      throw new NotFoundException('Gift card not found');
-    }
+      if (!lockedCards || lockedCards.length === 0) {
+        throw new NotFoundException('Gift card not found');
+      }
 
-    if (giftCard.status !== 'pending') {
-      throw new BadRequestException('Gift card is not pending activation');
-    }
+      const giftCard = lockedCards[0];
 
-    const [transaction, updated] = await this.prisma.$transaction([
-      this.prisma.giftCardTransaction.create({
+      if (giftCard.status !== 'pending') {
+        throw new BadRequestException('Gift card is not pending activation');
+      }
+
+      await tx.giftCardTransaction.create({
         data: {
           tenantId,
           giftCardId: id,
@@ -264,63 +285,72 @@ export class GiftCardsService {
           balanceBefore: 0,
           balanceAfter: giftCard.initialValue,
         },
-      }),
-      this.prisma.giftCard.update({
+      });
+
+      return tx.giftCard.update({
         where: { id },
         data: {
           status: 'active',
           activatedAt: new Date(),
         },
-      }),
-    ]);
-
-    return updated;
+      });
+    });
   }
 
   async adjustBalance(tenantId: string, id: string, dto: GiftCardTransactionDto, performedBy?: string) {
-    const giftCard = await this.prisma.giftCard.findFirst({
-      where: { id, tenantId },
-    });
+    return this.prisma.$transaction(async (tx) => {
+      // Lock the gift card row to prevent concurrent balance modifications
+      const lockedCards = await tx.$queryRaw<any[]>`
+        SELECT * FROM gift_cards
+        WHERE id = ${id} AND "tenantId" = ${tenantId}
+        FOR UPDATE
+      `;
 
-    if (!giftCard) {
-      throw new NotFoundException('Gift card not found');
-    }
+      if (!lockedCards || lockedCards.length === 0) {
+        throw new NotFoundException('Gift card not found');
+      }
 
-    const newBalance = Number(giftCard.currentBalance) + dto.amount;
-    if (newBalance < 0) {
-      throw new BadRequestException('Resulting balance cannot be negative');
-    }
+      const giftCard = lockedCards[0];
 
-    // Prevent balance from exceeding 2x the initial value to avoid abuse
-    const maxBalance = Number(giftCard.initialValue) * 2;
-    if (newBalance > maxBalance) {
-      throw new BadRequestException(`Balance cannot exceed ${maxBalance.toFixed(2)}`);
-    }
+      // Negate the amount for deduction/redemption types
+      const effectiveAmount = (dto.type === 'redemption' || dto.type === 'deduction')
+        ? -Math.abs(dto.amount)
+        : dto.amount;
 
-    const [transaction, updated] = await this.prisma.$transaction([
-      this.prisma.giftCardTransaction.create({
+      const currentBalance = Number(giftCard.currentBalance);
+      const newBalance = currentBalance + effectiveAmount;
+      if (newBalance < 0) {
+        throw new BadRequestException('Resulting balance cannot be negative');
+      }
+
+      // Prevent balance from exceeding 2x the initial value to avoid abuse
+      const maxBalance = Number(giftCard.initialValue) * 2;
+      if (newBalance > maxBalance) {
+        throw new BadRequestException(`Balance cannot exceed ${maxBalance.toFixed(2)}`);
+      }
+
+      await tx.giftCardTransaction.create({
         data: {
           tenantId,
           giftCardId: id,
           type: dto.type,
-          amount: dto.amount,
-          balanceBefore: giftCard.currentBalance,
+          amount: effectiveAmount,
+          balanceBefore: currentBalance,
           balanceAfter: newBalance,
           orderId: dto.orderId,
           notes: dto.notes,
           performedBy,
         },
-      }),
-      this.prisma.giftCard.update({
+      });
+
+      return tx.giftCard.update({
         where: { id },
         data: {
           currentBalance: newBalance,
           status: newBalance <= 0 ? 'depleted' : 'active',
         },
-      }),
-    ]);
-
-    return updated;
+      });
+    });
   }
 
   async disableGiftCard(tenantId: string, id: string) {

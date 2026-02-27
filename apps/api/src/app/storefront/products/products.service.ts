@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { Prisma } from '@prisma/client';
@@ -8,6 +7,7 @@ import {
   CreateProductListingDto,
   UpdateProductListingDto,
   CreateCategoryDto,
+  UpdateCategoryDto,
 } from './dto';
 import { CreateSimpleProductDto } from './simple-product.dto';
 import { WebhookService } from '../../operations/webhook.service';
@@ -70,7 +70,52 @@ export class ProductsService {
       }
     }
 
-    // Build orderBy
+    // Handle sales-based sorting separately with aggregate query
+    if (sortBy === 'sales') {
+      // Use raw aggregate to sort by actual order item count
+      const productIds = await this.prisma.$queryRaw<Array<{ id: string }>>`
+        SELECT pl."id"
+        FROM "product_listings" pl
+        LEFT JOIN "order_items" oi ON oi."productListingId" = pl."id"
+        WHERE pl."tenantId" = ${tenantId} AND pl."isPublished" = true
+        ${categorySlug ? Prisma.sql`AND EXISTS (SELECT 1 FROM "product_categories" pc WHERE pc."id" = pl."categoryId" AND pc."slug" = ${categorySlug})` : Prisma.empty}
+        ${search ? Prisma.sql`AND (pl."displayName" ILIKE ${'%' + search + '%'} OR pl."shortDescription" ILIKE ${'%' + search + '%'})` : Prisma.empty}
+        ${minPrice !== undefined ? Prisma.sql`AND pl."price" >= ${minPrice}` : Prisma.empty}
+        ${maxPrice !== undefined ? Prisma.sql`AND pl."price" <= ${maxPrice}` : Prisma.empty}
+        GROUP BY pl."id"
+        ORDER BY COUNT(oi."id") ${sortOrder === 'asc' ? Prisma.sql`ASC` : Prisma.sql`DESC`}
+        LIMIT ${limit} OFFSET ${offset}
+      `;
+
+      const ids = productIds.map(p => p.id);
+      const [products, total] = await Promise.all([
+        ids.length > 0
+          ? this.prisma.productListing.findMany({
+              where: { id: { in: ids }, tenantId },
+              include: {
+                category: { select: { id: true, name: true, slug: true } },
+                item: {
+                  select: {
+                    code: true,
+                    warehouseItemBalances: { select: { actualQty: true, reservedQty: true } },
+                  },
+                },
+              },
+            })
+          : Promise.resolve([]),
+        this.prisma.productListing.count({ where }),
+      ]);
+
+      // Preserve the order from the raw query
+      const orderedProducts = ids.map(id => products.find(p => p.id === id)).filter(Boolean);
+
+      return {
+        data: orderedProducts.map((p: typeof products[0]) => this.mapProductToResponse(p)),
+        pagination: { total, limit, offset, hasMore: offset + orderedProducts.length < total },
+      };
+    }
+
+    // Build orderBy for non-sales sorting
     const orderBy: Prisma.ProductListingOrderByWithRelationInput = {};
     switch (sortBy) {
       case 'price':
@@ -81,10 +126,6 @@ export class ProductsService {
         break;
       case 'createdAt':
         orderBy.createdAt = sortOrder;
-        break;
-      case 'sales':
-        // Sort by creation date as proxy for popularity when sales data isn't directly sortable
-        orderBy.createdAt = 'desc';
         break;
       default:
         orderBy.sortOrder = sortOrder;
@@ -393,6 +434,8 @@ export class ProductsService {
         throw new BadRequestException('Price cannot be negative');
       }
 
+      const shouldPublish = dto.isPublished === true;
+
       return tx.productListing.create({
         data: {
           tenantId,
@@ -407,8 +450,8 @@ export class ProductsService {
           categoryId: dto.categoryId,
           badge: dto.badge,
           isFeatured: dto.isFeatured ?? false,
-          isPublished: false, // Always start unpublished, use update to publish
-          publishedAt: null,
+          isPublished: shouldPublish,
+          publishedAt: shouldPublish ? new Date() : null,
           metaTitle: dto.metaTitle,
           metaDescription: dto.metaDescription,
         },
@@ -541,6 +584,40 @@ export class ProductsService {
   }
 
   /**
+   * Soft-delete a product listing (admin)
+   */
+  async deleteProduct(tenantId: string, id: string) {
+    const existing = await this.prisma.productListing.findFirst({
+      where: { id, tenantId },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Product listing not found');
+    }
+
+    await this.prisma.productListing.update({
+      where: { id },
+      data: {
+        isPublished: false,
+        deletedAt: new Date(),
+      },
+    });
+
+    // Fire-and-forget: trigger product.deleted webhook
+    this.webhookService.triggerEvent({ tenantId }, {
+      event: 'product.deleted',
+      payload: {
+        productId: id,
+        slug: existing.slug,
+        displayName: existing.displayName,
+      },
+      timestamp: new Date(),
+    }).catch(() => { /* silent */ });
+
+    return { success: true };
+  }
+
+  /**
    * Create a category (admin)
    */
   async createCategory(tenantId: string, dto: CreateCategoryDto) {
@@ -579,6 +656,77 @@ export class ProductsService {
       imageUrl: category.imageUrl,
       productCount: category._count.products,
     };
+  }
+
+  /**
+   * Update a category (admin)
+   */
+  async updateCategory(tenantId: string, id: string, dto: UpdateCategoryDto) {
+    const existing = await this.prisma.productCategory.findFirst({
+      where: { id, tenantId },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Category not found');
+    }
+
+    // Check slug uniqueness if changing
+    if (dto.slug && dto.slug !== existing.slug) {
+      const existingSlug = await this.prisma.productCategory.findFirst({
+        where: { tenantId, slug: dto.slug, id: { not: id } },
+      });
+      if (existingSlug) {
+        throw new ConflictException('Category with this slug already exists');
+      }
+    }
+
+    const updated = await this.prisma.productCategory.update({
+      where: { id },
+      data: {
+        ...(dto.name !== undefined && { name: dto.name }),
+        ...(dto.slug !== undefined && { slug: dto.slug }),
+        ...(dto.description !== undefined && { description: dto.description }),
+        ...(dto.imageUrl !== undefined && { imageUrl: dto.imageUrl }),
+        ...(dto.parentId !== undefined && { parentId: dto.parentId }),
+        ...(dto.sortOrder !== undefined && { sortOrder: dto.sortOrder }),
+        ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+      },
+      include: {
+        _count: {
+          select: { products: true },
+        },
+      },
+    });
+
+    return {
+      id: updated.id,
+      name: updated.name,
+      slug: updated.slug,
+      description: updated.description,
+      imageUrl: updated.imageUrl,
+      isActive: updated.isActive,
+      productCount: updated._count.products,
+    };
+  }
+
+  /**
+   * Soft-delete a category (admin)
+   */
+  async deleteCategory(tenantId: string, id: string) {
+    const existing = await this.prisma.productCategory.findFirst({
+      where: { id, tenantId },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Category not found');
+    }
+
+    await this.prisma.productCategory.update({
+      where: { id },
+      data: { isActive: false },
+    });
+
+    return { success: true };
   }
 
   /**
@@ -643,7 +791,7 @@ export class ProductsService {
       slug = `${baseSlug}-${crypto.randomBytes(3).toString('hex')}`;
     }
 
-    // Create the ProductListing using existing method
+    // Create the ProductListing using existing method, passing all DTO fields
     return this.createProductListing(tenantId, {
       itemId: item.id,
       slug,
@@ -656,7 +804,7 @@ export class ProductsService {
       categoryId: dto.categoryId,
       isFeatured: dto.isFeatured,
       isPublished: dto.isPublished ?? true,
-    });
+    } as CreateProductListingDto);
   }
 
   /**
@@ -719,9 +867,16 @@ export class ProductsService {
 
   // ============ HELPERS ============
 
-  private mapProductToResponse(product: any) {
+  private mapProductToResponse(product: {
+    id: string; slug: string; displayName: string; shortDescription: string | null;
+    price: Prisma.Decimal | number | null; compareAtPrice: Prisma.Decimal | number | null;
+    images: string[] | Prisma.JsonValue; badge: string | null;
+    category: { id: string; name: string; slug: string } | null;
+    isFeatured: boolean;
+    item: { code: string; warehouseItemBalances: Array<{ actualQty: Prisma.Decimal | number; reservedQty: Prisma.Decimal | number }> };
+  }) {
     const totalQty = product.item.warehouseItemBalances.reduce(
-      (sum: number, b: any) => sum + Number(b.actualQty) - Number(b.reservedQty),
+      (sum: number, b) => sum + Number(b.actualQty) - Number(b.reservedQty),
       0
     );
 
@@ -740,25 +895,32 @@ export class ProductsService {
     };
   }
 
-  private mapProductToDetailResponse(product: any) {
-    const totalQty = product.item.warehouseItemBalances.reduce(
-      (sum: number, b: any) => sum + Number(b.actualQty) - Number(b.reservedQty),
+  private mapProductToDetailResponse(product: Record<string, unknown>) {
+    const p = product as Record<string, unknown> & {
+      item: { code: string; stockUomCode?: string | null; warehouseItemBalances: Array<{ actualQty: Prisma.Decimal | number; reservedQty: Prisma.Decimal | number }> };
+      longDescription?: string | null; metaTitle?: string | null; metaDescription?: string | null;
+      averageRating?: Prisma.Decimal | number | null; reviewCount?: number;
+      variants?: Array<Record<string, unknown>>;
+    };
+
+    const totalQty = p.item.warehouseItemBalances.reduce(
+      (sum: number, b) => sum + Number(b.actualQty) - Number(b.reservedQty),
       0
     );
 
     return {
-      ...this.mapProductToResponse(product),
-      longDescription: product.longDescription,
-      metaTitle: product.metaTitle,
-      metaDescription: product.metaDescription,
+      ...this.mapProductToResponse(product as Parameters<typeof this.mapProductToResponse>[0]),
+      longDescription: p.longDescription,
+      metaTitle: p.metaTitle,
+      metaDescription: p.metaDescription,
       item: {
-        code: product.item.code,
-        stockUomCode: product.item.stockUomCode,
+        code: p.item.code,
+        stockUomCode: p.item.stockUomCode,
       },
       availableQuantity: totalQty,
-      averageRating: product.averageRating ? Number(product.averageRating) : null,
-      reviewCount: product.reviewCount,
-      variants: product.variants?.map((v: any) => ({
+      averageRating: p.averageRating ? Number(p.averageRating) : null,
+      reviewCount: p.reviewCount,
+      variants: p.variants?.map((v: Record<string, unknown>) => ({
         id: v.id,
         sku: v.sku,
         price: v.price ? Number(v.price) : null,
@@ -767,15 +929,20 @@ export class ProductsService {
         stockQty: v.stockQty,
         trackInventory: v.trackInventory,
         allowBackorder: v.allowBackorder,
-        attributes: v.attributes?.map((a: any) => ({
-          type: a.attributeType?.displayName || a.attributeType?.name,
-          value: a.attributeValue?.displayValue || a.attributeValue?.value,
+        attributes: (v.attributes as Array<Record<string, unknown>>)?.map((a: Record<string, unknown>) => ({
+          type: (a.attributeType as Record<string, string>)?.displayName || (a.attributeType as Record<string, string>)?.name,
+          value: (a.attributeValue as Record<string, string>)?.displayValue || (a.attributeValue as Record<string, string>)?.value,
         })),
       })) || [],
     };
   }
 
-  private mapCategoryToResponse(category: any): any {
+  private mapCategoryToResponse(category: {
+    id: string; name: string; slug: string;
+    description: string | null; imageUrl: string | null;
+    _count: { products: number };
+    children?: Array<Record<string, unknown>>;
+  }): Record<string, unknown> {
     return {
       id: category.id,
       name: category.name,
@@ -783,7 +950,7 @@ export class ProductsService {
       description: category.description,
       imageUrl: category.imageUrl,
       productCount: category._count.products,
-      children: category.children?.map((c: any) => this.mapCategoryToResponse(c)),
+      children: category.children?.map((c) => this.mapCategoryToResponse(c as Parameters<typeof this.mapCategoryToResponse>[0])),
     };
   }
 

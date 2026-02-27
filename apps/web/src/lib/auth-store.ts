@@ -82,21 +82,25 @@ export const useAuthStore = create<AuthState>()(
 
         try {
           const response = await authApi.register(data);
-          localStorage.setItem('customer_token', response.token);
-          set({
-            customer: response.customer,
-            token: response.token,
-            isAuthenticated: true,
-          });
 
-          // Initialize onboarding for new customers
-          if (typeof window !== 'undefined') {
-            // Dynamically import to avoid circular dependencies
-            import('./onboarding-store').then(({ useOnboardingStore }) => {
-              const onboardingStore = useOnboardingStore.getState();
-              // Fetch onboarding status which will trigger wizard if needed
-              setTimeout(() => onboardingStore.fetchStatus(), 500);
+          // Handle duplicate email path where customer/token are null
+          if (response.token) {
+            localStorage.setItem('customer_token', response.token);
+            set({
+              customer: response.customer,
+              token: response.token,
+              isAuthenticated: true,
             });
+
+            // Initialize onboarding for new customers
+            if (typeof window !== 'undefined') {
+              // Dynamically import to avoid circular dependencies
+              import('./onboarding-store').then(({ useOnboardingStore }) => {
+                const onboardingStore = useOnboardingStore.getState();
+                // Fetch onboarding status which will trigger wizard if needed
+                setTimeout(() => onboardingStore.fetchStatus(), 500);
+              });
+            }
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Registration failed';

@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { Prisma } from '@prisma/client';
 
@@ -62,18 +62,64 @@ type NotificationRecord = {
   updatedAt: Date;
 };
 
+// M-NT-2: Track subscription creation time for TTL cleanup
+interface TimedCallback {
+  callback: (notification: NotificationRecord) => void;
+  createdAt: number;
+}
+
+const MAX_SUBSCRIPTIONS_PER_USER = 10;
+const SUBSCRIPTION_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const SUBSCRIPTION_CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
 @Injectable()
-export class NotificationService {
+export class NotificationService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(NotificationService.name);
-  
+
   // Real-time subscriptions (kept in-memory since these are ephemeral WebSocket callbacks)
-  private notificationSubscriptions: Map<string, Array<(notification: NotificationRecord) => void>> = new Map();
+  private notificationSubscriptions: Map<string, TimedCallback[]> = new Map();
+  private subscriptionCleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly prisma: PrismaService) {}
+
+  onModuleInit() {
+    // M-NT-2: Periodic cleanup of stale subscriptions every 5 minutes
+    // L-NT-5: Also cleans up expired notifications on the same interval
+    this.subscriptionCleanupInterval = setInterval(() => {
+      this.cleanupStaleSubscriptions();
+      this.deleteExpired().catch(err =>
+        this.logger.error(`Failed to delete expired notifications: ${err}`),
+      );
+    }, SUBSCRIPTION_CLEANUP_INTERVAL_MS);
+  }
+
+  onModuleDestroy() {
+    if (this.subscriptionCleanupInterval) {
+      clearInterval(this.subscriptionCleanupInterval);
+      this.subscriptionCleanupInterval = null;
+    }
+  }
+
+  private cleanupStaleSubscriptions(): void {
+    const now = Date.now();
+    for (const [userId, entries] of this.notificationSubscriptions.entries()) {
+      const active = entries.filter(e => (now - e.createdAt) < SUBSCRIPTION_TTL_MS);
+      if (active.length === 0) {
+        this.notificationSubscriptions.delete(userId);
+      } else {
+        this.notificationSubscriptions.set(userId, active);
+      }
+    }
+  }
 
   // ==========================================
   // Create Notifications
   // ==========================================
+
+  // TODO (M-NT-4): Email notification integration is planned. When implemented,
+  // the `create` method should check user notification preferences and optionally
+  // dispatch an email via the EmailModule for high-priority or urgent notifications.
+  // This will require injecting EmailService and adding a NotificationPreference model.
 
   /**
    * Create a notification for a user
@@ -102,18 +148,48 @@ export class NotificationService {
   }
 
   /**
-   * Create notifications for multiple users
+   * Create notifications for multiple users using createMany for efficiency.
+   * Note: createMany doesn't return the created records, so we query them after.
+   * Real-time notifications are sent per-user after creation.
    */
   async createBulk(
     ctx: TenantContext,
     userIds: string[],
     dto: Omit<CreateNotificationInput, 'userId'>
   ): Promise<NotificationRecord[]> {
-    const notifications: NotificationRecord[] = [];
+    if (userIds.length === 0) return [];
 
-    for (const userId of userIds) {
-      const notification = await this.create(ctx, { ...dto, userId });
-      notifications.push(notification);
+    // M-NT-1: Use createMany instead of looping individual creates
+    await this.prisma.notification.createMany({
+      data: userIds.map(userId => ({
+        tenantId: ctx.tenantId,
+        userId,
+        type: dto.type,
+        title: dto.title,
+        message: dto.message,
+        data: dto.data ? (dto.data as Prisma.InputJsonValue) : Prisma.JsonNull,
+        link: dto.link,
+        priority: dto.priority || 'normal',
+        isRead: false,
+        expiresAt: dto.expiresAt,
+      })),
+    });
+
+    // Fetch the created notifications for return value and real-time subscriptions
+    const notifications = await this.prisma.notification.findMany({
+      where: {
+        tenantId: ctx.tenantId,
+        userId: { in: userIds },
+        type: dto.type,
+        title: dto.title,
+      },
+      orderBy: { createdAt: 'desc' },
+      take: userIds.length,
+    });
+
+    // Notify real-time subscribers
+    for (const notification of notifications) {
+      this.notifySubscribers(notification);
     }
 
     return notifications;
@@ -184,13 +260,18 @@ export class NotificationService {
   }
 
   /**
-   * Get a single notification
+   * Get a single notification.
+   * M-NT-3: Always include userId in the where clause to ensure users can only
+   * access their own notifications. The userId must be provided in the context.
    */
   async findOne(ctx: TenantContext, id: string): Promise<NotificationRecord> {
-    const where: Prisma.NotificationWhereInput = { id, tenantId: ctx.tenantId };
-    if (ctx.userId) where.userId = ctx.userId;
+    if (!ctx.userId) {
+      throw new NotFoundException('Notification not found');
+    }
 
-    const notification = await this.prisma.notification.findFirst({ where });
+    const notification = await this.prisma.notification.findFirst({
+      where: { id, tenantId: ctx.tenantId, userId: ctx.userId },
+    });
 
     if (!notification) {
       throw new NotFoundException('Notification not found');
@@ -298,7 +379,10 @@ export class NotificationService {
   }
 
   /**
-   * Delete expired notifications
+   * Delete expired notifications.
+   * L-NT-5: This is called automatically by the subscription cleanup interval
+   * alongside stale subscription cleanup, ensuring expired notifications
+   * are regularly purged.
    */
   async deleteExpired(): Promise<number> {
     const result = await this.prisma.notification.deleteMany({
@@ -306,6 +390,10 @@ export class NotificationService {
         expiresAt: { lt: new Date() },
       },
     });
+
+    if (result.count > 0) {
+      this.logger.log(`Deleted ${result.count} expired notifications`);
+    }
 
     return result.count;
   }
@@ -315,34 +403,46 @@ export class NotificationService {
   // ==========================================
 
   /**
-   * Subscribe to notifications for a user
+   * Subscribe to notifications for a user.
+   * M-NT-2: Max 10 subscriptions per user to prevent memory leaks.
    */
   subscribe(userId: string, callback: (notification: NotificationRecord) => void): () => void {
     if (!this.notificationSubscriptions.has(userId)) {
       this.notificationSubscriptions.set(userId, []);
     }
 
-    this.notificationSubscriptions.get(userId)!.push(callback);
+    const entries = this.notificationSubscriptions.get(userId)!;
+
+    // M-NT-2: Enforce max subscriptions per user - evict oldest if at limit
+    if (entries.length >= MAX_SUBSCRIPTIONS_PER_USER) {
+      entries.shift();
+    }
+
+    const timedEntry: TimedCallback = { callback, createdAt: Date.now() };
+    entries.push(timedEntry);
 
     // Return unsubscribe function
     return () => {
       const callbacks = this.notificationSubscriptions.get(userId);
       if (callbacks) {
-        const index = callbacks.indexOf(callback);
+        const index = callbacks.indexOf(timedEntry);
         if (index > -1) {
           callbacks.splice(index, 1);
+        }
+        if (callbacks.length === 0) {
+          this.notificationSubscriptions.delete(userId);
         }
       }
     };
   }
 
   private notifySubscribers(notification: NotificationRecord): void {
-    const callbacks = this.notificationSubscriptions.get(notification.userId);
-    if (callbacks) {
+    const entries = this.notificationSubscriptions.get(notification.userId);
+    if (entries) {
       // Iterate over a copy to avoid issues if callbacks mutate the array
-      for (const callback of [...callbacks]) {
+      for (const entry of [...entries]) {
         try {
-          callback(notification);
+          entry.callback(notification);
         } catch (error) {
           this.logger.error(`Error notifying subscriber: ${error}`);
         }

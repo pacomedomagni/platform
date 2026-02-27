@@ -2,10 +2,15 @@ import {
   IsString,
   IsEmail,
   IsOptional,
+  IsNotEmpty,
   MinLength,
   MaxLength,
   IsBoolean,
+  Matches,
 } from 'class-validator';
+
+const PASSWORD_PATTERN = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/;
+const PASSWORD_MESSAGE = 'Password must contain uppercase, lowercase, and number';
 
 export class RegisterCustomerDto {
   @IsEmail()
@@ -13,6 +18,8 @@ export class RegisterCustomerDto {
 
   @IsString()
   @MinLength(8, { message: 'Password must be at least 8 characters' })
+  @MaxLength(128)
+  @Matches(PASSWORD_PATTERN, { message: PASSWORD_MESSAGE })
   password: string;
 
   @IsOptional()
@@ -51,6 +58,8 @@ export class ResetPasswordDto {
 
   @IsString()
   @MinLength(8, { message: 'Password must be at least 8 characters' })
+  @MaxLength(128)
+  @Matches(PASSWORD_PATTERN, { message: PASSWORD_MESSAGE })
   password: string;
 }
 
@@ -74,10 +83,13 @@ export class UpdateProfileDto {
 
 export class ChangePasswordDto {
   @IsString()
+  @MaxLength(128)
   currentPassword: string;
 
   @IsString()
   @MinLength(8, { message: 'Password must be at least 8 characters' })
+  @MaxLength(128)
+  @Matches(PASSWORD_PATTERN, { message: PASSWORD_MESSAGE })
   newPassword: string;
 }
 
@@ -94,8 +106,14 @@ export class CustomerResponseDto {
 
 export class AuthResponseDto {
   customer: CustomerResponseDto;
-  accessToken: string;
-  refreshToken?: string;
+  token: string;
+}
+
+export class VerifyEmailDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(500)
+  token: string;
 }
 
 export class AddAddressDto {

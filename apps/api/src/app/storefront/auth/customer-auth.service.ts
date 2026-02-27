@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
   Injectable,
   UnauthorizedException,
@@ -9,6 +8,7 @@ import {
   Logger,
   OnModuleInit,
 } from '@nestjs/common';
+import type { StoreCustomer } from '@prisma/client';
 import { PrismaService } from '@platform/db';
 import { EmailService } from '@platform/email';
 import * as bcrypt from 'bcrypt';
@@ -57,9 +57,21 @@ export class CustomerAuthService implements OnModuleInit {
   }
 
   /**
+   * Validate that the tenant exists and is active.
+   */
+  private async validateTenant(tenantId: string): Promise<void> {
+    const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant || !tenant.isActive) {
+      throw new BadRequestException('Invalid or inactive store');
+    }
+  }
+
+  /**
    * Register a new customer
    */
   async register(tenantId: string, dto: RegisterCustomerDto) {
+    await this.validateTenant(tenantId);
+
     // Check if email already exists
     const existing = await this.prisma.storeCustomer.findFirst({
       where: { tenantId, email: dto.email.toLowerCase() },
@@ -69,6 +81,8 @@ export class CustomerAuthService implements OnModuleInit {
       // Return generic success to prevent email enumeration
       this.logger.warn(`Registration attempt for existing email in tenant ${tenantId}`);
       return {
+        customer: null,
+        token: null,
         message: 'Registration initiated. Please check your email for verification.',
       };
     }
@@ -131,6 +145,8 @@ export class CustomerAuthService implements OnModuleInit {
    * Login customer
    */
   async login(tenantId: string, dto: LoginCustomerDto) {
+    await this.validateTenant(tenantId);
+
     const customer = await this.prisma.storeCustomer.findFirst({
       where: {
         tenantId,
@@ -187,7 +203,7 @@ export class CustomerAuthService implements OnModuleInit {
    */
   async updateProfile(tenantId: string, customerId: string, dto: UpdateProfileDto) {
     const customer = await this.prisma.storeCustomer.findFirst({
-      where: { id: customerId, tenantId },
+      where: { id: customerId, tenantId, isActive: true },
     });
 
     if (!customer) {
@@ -212,7 +228,7 @@ export class CustomerAuthService implements OnModuleInit {
    */
   async changePassword(tenantId: string, customerId: string, dto: ChangePasswordDto) {
     const customer = await this.prisma.storeCustomer.findFirst({
-      where: { id: customerId, tenantId },
+      where: { id: customerId, tenantId, isActive: true },
     });
 
     if (!customer || !customer.passwordHash) {
@@ -247,6 +263,8 @@ export class CustomerAuthService implements OnModuleInit {
    * Request password reset
    */
   async forgotPassword(tenantId: string, email: string) {
+    await this.validateTenant(tenantId);
+
     const customer = await this.prisma.storeCustomer.findFirst({
       where: {
         tenantId,
@@ -281,7 +299,8 @@ export class CustomerAuthService implements OnModuleInit {
     ]);
 
     // Send password reset email
-    this.sendPasswordResetEmail(customer.id, tenantId, token);
+    this.sendPasswordResetEmail(customer.id, tenantId, token)
+      .catch(err => this.logger.error('Failed to send reset email', err));
 
     return { success: true, message: 'If the email exists, a reset link will be sent' };
   }
@@ -290,6 +309,8 @@ export class CustomerAuthService implements OnModuleInit {
    * Reset password with token
    */
   async resetPassword(tenantId: string, token: string, newPassword: string) {
+    await this.validateTenant(tenantId);
+
     const resetRecord = await this.prisma.passwordReset.findFirst({
       where: {
         token,
@@ -481,6 +502,13 @@ export class CustomerAuthService implements OnModuleInit {
    * Get customer addresses
    */
   async getAddresses(tenantId: string, customerId: string) {
+    const customer = await this.prisma.storeCustomer.findFirst({
+      where: { id: customerId, tenantId, isActive: true },
+    });
+    if (!customer) {
+      throw new NotFoundException('Customer not found');
+    }
+
     const addresses = await this.prisma.storeAddress.findMany({
       where: { tenantId, customerId },
       orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
@@ -493,38 +521,47 @@ export class CustomerAuthService implements OnModuleInit {
    * Add address
    */
   async addAddress(tenantId: string, customerId: string, dto: AddAddressDto) {
-    // If this is the first address or marked as default, unset other defaults
-    if (dto.isDefault) {
-      await this.prisma.storeAddress.updateMany({
-        where: { tenantId, customerId },
-        data: { isDefault: false },
-      });
+    const customer = await this.prisma.storeCustomer.findFirst({
+      where: { id: customerId, tenantId, isActive: true },
+    });
+    if (!customer) {
+      throw new NotFoundException('Customer not found');
     }
 
-    const addressCount = await this.prisma.storeAddress.count({
-      where: { tenantId, customerId },
-    });
+    return this.prisma.$transaction(async (tx) => {
+      // If this is the first address or marked as default, unset other defaults
+      if (dto.isDefault) {
+        await tx.storeAddress.updateMany({
+          where: { tenantId, customerId },
+          data: { isDefault: false },
+        });
+      }
 
-    const address = await this.prisma.storeAddress.create({
-      data: {
-        tenantId,
-        customerId,
-        label: dto.label || 'Home',
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        company: dto.company,
-        addressLine1: dto.addressLine1,
-        addressLine2: dto.addressLine2,
-        city: dto.city,
-        state: dto.state,
-        postalCode: dto.postalCode,
-        country: dto.country,
-        phone: dto.phone,
-        isDefault: dto.isDefault || addressCount === 0, // First address is always default
-      },
-    });
+      const addressCount = await tx.storeAddress.count({
+        where: { tenantId, customerId },
+      });
 
-    return address;
+      const address = await tx.storeAddress.create({
+        data: {
+          tenantId,
+          customerId,
+          label: dto.label || 'Home',
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          company: dto.company,
+          addressLine1: dto.addressLine1,
+          addressLine2: dto.addressLine2,
+          city: dto.city,
+          state: dto.state,
+          postalCode: dto.postalCode,
+          country: dto.country,
+          phone: dto.phone,
+          isDefault: dto.isDefault || addressCount === 0, // First address is always default
+        },
+      });
+
+      return address;
+    });
   }
 
   /**
@@ -536,6 +573,13 @@ export class CustomerAuthService implements OnModuleInit {
     addressId: string,
     dto: Partial<AddAddressDto>
   ) {
+    const customer = await this.prisma.storeCustomer.findFirst({
+      where: { id: customerId, tenantId, isActive: true },
+    });
+    if (!customer) {
+      throw new NotFoundException('Customer not found');
+    }
+
     const existing = await this.prisma.storeAddress.findFirst({
       where: { id: addressId, tenantId, customerId },
     });
@@ -544,39 +588,48 @@ export class CustomerAuthService implements OnModuleInit {
       throw new NotFoundException('Address not found');
     }
 
-    // If setting as default, unset other defaults
-    if (dto.isDefault) {
-      await this.prisma.storeAddress.updateMany({
-        where: { tenantId, customerId, id: { not: addressId } },
-        data: { isDefault: false },
+    return this.prisma.$transaction(async (tx) => {
+      // If setting as default, unset other defaults
+      if (dto.isDefault) {
+        await tx.storeAddress.updateMany({
+          where: { tenantId, customerId, id: { not: addressId } },
+          data: { isDefault: false },
+        });
+      }
+
+      const address = await tx.storeAddress.update({
+        where: { id: addressId },
+        data: {
+          ...(dto.label && { label: dto.label }),
+          ...(dto.firstName !== undefined && { firstName: dto.firstName }),
+          ...(dto.lastName !== undefined && { lastName: dto.lastName }),
+          ...(dto.company !== undefined && { company: dto.company }),
+          ...(dto.addressLine1 && { addressLine1: dto.addressLine1 }),
+          ...(dto.addressLine2 !== undefined && { addressLine2: dto.addressLine2 }),
+          ...(dto.city && { city: dto.city }),
+          ...(dto.state !== undefined && { state: dto.state }),
+          ...(dto.postalCode && { postalCode: dto.postalCode }),
+          ...(dto.country && { country: dto.country }),
+          ...(dto.phone !== undefined && { phone: dto.phone }),
+          ...(dto.isDefault !== undefined && { isDefault: dto.isDefault }),
+        },
       });
-    }
 
-    const address = await this.prisma.storeAddress.update({
-      where: { id: addressId },
-      data: {
-        ...(dto.label && { label: dto.label }),
-        ...(dto.firstName !== undefined && { firstName: dto.firstName }),
-        ...(dto.lastName !== undefined && { lastName: dto.lastName }),
-        ...(dto.company !== undefined && { company: dto.company }),
-        ...(dto.addressLine1 && { addressLine1: dto.addressLine1 }),
-        ...(dto.addressLine2 !== undefined && { addressLine2: dto.addressLine2 }),
-        ...(dto.city && { city: dto.city }),
-        ...(dto.state !== undefined && { state: dto.state }),
-        ...(dto.postalCode && { postalCode: dto.postalCode }),
-        ...(dto.country && { country: dto.country }),
-        ...(dto.phone !== undefined && { phone: dto.phone }),
-        ...(dto.isDefault !== undefined && { isDefault: dto.isDefault }),
-      },
+      return address;
     });
-
-    return address;
   }
 
   /**
    * Delete address
    */
   async deleteAddress(tenantId: string, customerId: string, addressId: string) {
+    const customer = await this.prisma.storeCustomer.findFirst({
+      where: { id: customerId, tenantId, isActive: true },
+    });
+    if (!customer) {
+      throw new NotFoundException('Customer not found');
+    }
+
     const existing = await this.prisma.storeAddress.findFirst({
       where: { id: addressId, tenantId, customerId },
     });
@@ -585,26 +638,28 @@ export class CustomerAuthService implements OnModuleInit {
       throw new NotFoundException('Address not found');
     }
 
-    await this.prisma.storeAddress.delete({
-      where: { id: addressId },
-    });
-
-    // If deleted address was default, make the first remaining address default
-    if (existing.isDefault) {
-      const firstAddress = await this.prisma.storeAddress.findFirst({
-        where: { tenantId, customerId },
-        orderBy: { createdAt: 'asc' },
+    return this.prisma.$transaction(async (tx) => {
+      await tx.storeAddress.delete({
+        where: { id: addressId },
       });
 
-      if (firstAddress) {
-        await this.prisma.storeAddress.update({
-          where: { id: firstAddress.id },
-          data: { isDefault: true },
+      // If deleted address was default, make the first remaining address default
+      if (existing.isDefault) {
+        const firstAddress = await tx.storeAddress.findFirst({
+          where: { tenantId, customerId },
+          orderBy: { createdAt: 'asc' },
         });
-      }
-    }
 
-    return { success: true };
+        if (firstAddress) {
+          await tx.storeAddress.update({
+            where: { id: firstAddress.id },
+            data: { isDefault: true },
+          });
+        }
+      }
+
+      return { success: true };
+    });
   }
 
   // ============ HELPERS ============
@@ -617,7 +672,7 @@ export class CustomerAuthService implements OnModuleInit {
     );
   }
 
-  private mapCustomerToResponse(customer: any) {
+  private mapCustomerToResponse(customer: Pick<StoreCustomer, 'id' | 'email' | 'firstName' | 'lastName' | 'phone' | 'emailVerified' | 'acceptsMarketing' | 'createdAt'>) {
     return {
       id: customer.id,
       email: customer.email,

@@ -2,8 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { Prisma } from '@prisma/client';
 import { Response } from 'express';
-import * as fs from 'fs';
-import * as path from 'path';
 
 interface TenantContext {
   tenantId: string;
@@ -39,24 +37,17 @@ export class AuditLogService {
         },
       });
     } catch (error) {
-      this.logger.error(`Failed to create audit log: ${error}`);
-      // Fallback: write the failed audit entry to a local JSON log file
-      try {
-        const fallbackPath = path.join(process.cwd(), 'audit-log-fallback.json');
-        const fallbackEntry = JSON.stringify({
-          timestamp: new Date().toISOString(),
-          tenantId: ctx.tenantId,
-          userId: ctx.userId,
-          action: entry.action,
-          docType: entry.docType,
-          docName: entry.docName,
-          meta: entry.meta || null,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        fs.appendFileSync(fallbackPath, fallbackEntry + '\n', 'utf-8');
-      } catch (fallbackError) {
-        this.logger.error(`Failed to write audit log fallback: ${fallbackError}`);
-      }
+      // Log the full audit entry to stderr so it can be captured by log aggregation
+      this.logger.error(`Failed to create audit log: ${error}`, JSON.stringify({
+        timestamp: new Date().toISOString(),
+        tenantId: ctx.tenantId,
+        userId: ctx.userId,
+        action: entry.action,
+        docType: entry.docType,
+        docName: entry.docName,
+        meta: entry.meta || null,
+        error: error instanceof Error ? error.message : String(error),
+      }));
       // Don't throw - audit logging should not break the main operation
     }
   }
@@ -221,32 +212,29 @@ export class AuditLogService {
       if (options.endDate) (where.createdAt as any).lte = options.endDate;
     }
 
-    // Get counts by action
-    const actionCounts = await this.prisma.auditLog.groupBy({
-      by: ['action'],
-      where,
-      _count: { action: true },
-      orderBy: { _count: { action: 'desc' } },
-    });
-
-    // Get counts by docType
-    const typeCounts = await this.prisma.auditLog.groupBy({
-      by: ['docType'],
-      where,
-      _count: { docType: true },
-      orderBy: { _count: { docType: 'desc' } },
-    });
-
-    // Get counts by user
-    const userCounts = await this.prisma.auditLog.groupBy({
-      by: ['userId'],
-      where,
-      _count: { userId: true },
-      orderBy: { _count: { userId: 'desc' } },
-      take: 10,
-    });
-
-    const totalCount = await this.prisma.auditLog.count({ where });
+    // Run all groupBy queries and total count in parallel to minimize round trips
+    const [actionCounts, typeCounts, userCounts, totalCount] = await Promise.all([
+      this.prisma.auditLog.groupBy({
+        by: ['action'],
+        where,
+        _count: { action: true },
+        orderBy: { _count: { action: 'desc' } },
+      }),
+      this.prisma.auditLog.groupBy({
+        by: ['docType'],
+        where,
+        _count: { docType: true },
+        orderBy: { _count: { docType: 'desc' } },
+      }),
+      this.prisma.auditLog.groupBy({
+        by: ['userId'],
+        where,
+        _count: { userId: true },
+        orderBy: { _count: { userId: 'desc' } },
+        take: 10,
+      }),
+      this.prisma.auditLog.count({ where }),
+    ]);
 
     return {
       total: totalCount,

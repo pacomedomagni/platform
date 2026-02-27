@@ -145,7 +145,7 @@ export class OrdersController {
   async updateOrderStatus(
     @Headers('x-tenant-id') tenantId: string,
     @Param('id') orderId: string,
-    @Body() body: { status: string; carrier?: string; trackingNumber?: string }
+    @Body() body: { status: string; carrier?: string; trackingNumber?: string; adminNotes?: string }
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
@@ -153,6 +153,7 @@ export class OrdersController {
     return this.ordersService.updateOrderStatus(tenantId, orderId, body.status, {
       carrier: body.carrier,
       trackingNumber: body.trackingNumber,
+      adminNotes: body.adminNotes,
     });
   }
 

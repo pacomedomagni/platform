@@ -92,98 +92,103 @@ export class SchemaService implements OnModuleInit {
     for (const field of def.fields) {
       assertSafeColumnName(field.name);
     }
-    
-    // 1. Upsert DocType Metadata
-    await this.prisma.docType.upsert({
-      where: { name: def.name },
-      update: {
-        module: def.module,
-        isSingle: def.isSingle ?? false,
-        isChild: def.isChild ?? false,
-        description: def.description,
-      },
-      create: {
-        name: def.name,
-        module: def.module,
-        isSingle: def.isSingle ?? false,
-        isChild: def.isChild ?? false,
-        description: def.description,
-      },
-    });
 
-    // 2. Sync Fields Metadata
-    const fieldNames = def.fields.map(f => f.name);
-    
-    // Remove deleted fields
-    await this.prisma.docField.deleteMany({
-      where: {
-        docTypeName: def.name,
-        name: { notIn: fieldNames }
-      }
-    });
-
-    for (const [idx, fieldDef] of def.fields.entries()) {
-      const existing = await this.prisma.docField.findFirst({
-        where: { docTypeName: def.name, name: fieldDef.name }
+    // M-DT-9: Wrap metadata sync in a transaction to ensure atomicity.
+    // If any step fails, all metadata changes are rolled back.
+    await this.prisma.$transaction(async (tx) => {
+      // 1. Upsert DocType Metadata
+      await tx.docType.upsert({
+        where: { name: def.name },
+        update: {
+          module: def.module,
+          isSingle: def.isSingle ?? false,
+          isChild: def.isChild ?? false,
+          description: def.description,
+        },
+        create: {
+          name: def.name,
+          module: def.module,
+          isSingle: def.isSingle ?? false,
+          isChild: def.isChild ?? false,
+          description: def.description,
+        },
       });
 
-      const data = {
-        label: fieldDef.label,
-        type: fieldDef.type,
-        required: fieldDef.required ?? false,
-        unique: fieldDef.unique ?? false,
-        hidden: fieldDef.hidden ?? false,
-        readonly: fieldDef.readonly ?? false,
-        options: fieldDef.options,
-        target: fieldDef.target,
-        idx: idx
-      };
+      // 2. Sync Fields Metadata
+      const fieldNames = def.fields.map(f => f.name);
 
-      if (existing) {
-        await this.prisma.docField.update({
-          where: { id: existing.id },
-          data
-        });
-      } else {
-        await this.prisma.docField.create({
-          data: {
-            ...data,
-            name: fieldDef.name,
-            docTypeName: def.name
-          }
-        });
-      }
-    }
-
-    // 3. Sync Permissions
-    if (def.permissions) {
-        // Simple strategy: Clear all and re-insert. 
-        // Identifiers for perms are just indexes basically.
-        await this.prisma.docPerm.deleteMany({
-            where: { docTypeName: def.name }
-        });
-
-        for (const [idx, perm] of def.permissions.entries()) {
-            await this.prisma.docPerm.create({
-                data: {
-                    docTypeName: def.name,
-                    role: perm.role,
-                    read: perm.read ?? true,
-                    write: perm.write ?? false,
-                    create: perm.create ?? false,
-                    delete: perm.delete ?? false,
-                    submit: perm.submit ?? false,
-                    cancel: perm.cancel ?? false,
-                    amend: perm.amend ?? false,
-                    report: perm.report ?? false,
-                    idx: idx
-                }
-            });
+      // Remove deleted fields
+      await tx.docField.deleteMany({
+        where: {
+          docTypeName: def.name,
+          name: { notIn: fieldNames }
         }
-    }
+      });
+
+      for (const [idx, fieldDef] of def.fields.entries()) {
+        const existing = await tx.docField.findFirst({
+          where: { docTypeName: def.name, name: fieldDef.name }
+        });
+
+        const data = {
+          label: fieldDef.label,
+          type: fieldDef.type,
+          required: fieldDef.required ?? false,
+          unique: fieldDef.unique ?? false,
+          hidden: fieldDef.hidden ?? false,
+          readonly: fieldDef.readonly ?? false,
+          options: fieldDef.options,
+          target: fieldDef.target,
+          idx: idx
+        };
+
+        if (existing) {
+          await tx.docField.update({
+            where: { id: existing.id },
+            data
+          });
+        } else {
+          await tx.docField.create({
+            data: {
+              ...data,
+              name: fieldDef.name,
+              docTypeName: def.name
+            }
+          });
+        }
+      }
+
+      // 3. Sync Permissions
+      if (def.permissions) {
+          // Simple strategy: Clear all and re-insert.
+          // Identifiers for perms are just indexes basically.
+          await tx.docPerm.deleteMany({
+              where: { docTypeName: def.name }
+          });
+
+          for (const [idx, perm] of def.permissions.entries()) {
+              await tx.docPerm.create({
+                  data: {
+                      docTypeName: def.name,
+                      role: perm.role,
+                      read: perm.read ?? true,
+                      write: perm.write ?? false,
+                      create: perm.create ?? false,
+                      delete: perm.delete ?? false,
+                      submit: perm.submit ?? false,
+                      cancel: perm.cancel ?? false,
+                      amend: perm.amend ?? false,
+                      report: perm.report ?? false,
+                      idx: idx
+                  }
+              });
+          }
+      }
+    });
 
     // 4. Physical Schema Migration (DDL)
     // Only for standard tables, not Singles (which might be key-value store) or Virtual
+    // DDL operations run outside the transaction since they auto-commit in PostgreSQL.
     if (!def.isSingle) {
         await this.ensureTable(def.name);
         for (const field of def.fields) {
@@ -275,6 +280,13 @@ export class SchemaService implements OnModuleInit {
             await this.prisma.$executeRawUnsafe(`
                 ALTER TABLE "${tableName}" ADD COLUMN "${colName}" ${sqlType};
             `);
+         } else if (field.type !== 'Table') {
+            // M-DT-8: Throw an error for unrecognized field types instead of silently skipping.
+            // 'Table' type fields are intentionally skipped (they don't create columns in the parent).
+            throw new Error(
+              `Unsupported field type "${field.type}" for column "${colName}" on table "${tableName}". ` +
+              `Cannot map to a SQL type.`,
+            );
          }
      }
   }
@@ -298,21 +310,23 @@ export class SchemaService implements OnModuleInit {
     await this.prisma.$executeRawUnsafe(`ALTER TABLE "${tableName}" ENABLE ROW LEVEL SECURITY;`);
     await this.prisma.$executeRawUnsafe(`ALTER TABLE "${tableName}" FORCE ROW LEVEL SECURITY;`);
 
-    await this.prisma.$executeRawUnsafe(`
-      DO $$
-      BEGIN
-        IF NOT EXISTS (
-          SELECT 1 FROM pg_policies
-          WHERE schemaname = 'public'
-            AND tablename = '${tableName}'
-            AND policyname = 'tenant_isolation_policy'
-        ) THEN
-          CREATE POLICY tenant_isolation_policy ON "${tableName}"
-            USING ("tenantId" = current_setting('app.tenant', true))
-            WITH CHECK ("tenantId" = current_setting('app.tenant', true));
-        END IF;
-      END $$;
-    `);
+    // C-DT-1: Fix SQL injection - use a parameterized query to check if the policy exists
+    // instead of interpolating tableName into a DO block.
+    const existingPolicy = await this.prisma.$queryRaw<{ policyname: string }[]>`
+      SELECT policyname FROM pg_policies
+      WHERE schemaname = 'public'
+        AND tablename = ${tableName}
+        AND policyname = 'tenant_isolation_policy'
+    `;
+
+    if (existingPolicy.length === 0) {
+      // tableName is already validated by toSafeTableName() which ensures it's a safe identifier
+      await this.prisma.$executeRawUnsafe(
+        `CREATE POLICY tenant_isolation_policy ON "${tableName}"
+          USING ("tenantId"::text = current_setting('app.tenant', true))
+          WITH CHECK ("tenantId"::text = current_setting('app.tenant', true))`
+      );
+    }
   }
 
   private async ensureChildLinkColumns(docTypeName: string, isChildOverride?: boolean) {

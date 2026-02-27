@@ -28,6 +28,20 @@ type BalanceSheet = {
   balanced: boolean;
 };
 
+const formatCurrency = (amount: number) => {
+  const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+  }
+};
+
 export default function BalanceSheetPage() {
   const [asOfDate, setAsOfDate] = useState('');
   const [data, setData] = useState<BalanceSheet | null>(null);
@@ -53,7 +67,7 @@ export default function BalanceSheetPage() {
     <div className="space-y-2">
       <div className="flex items-center gap-2">
         <div className="font-medium">{label}</div>
-        <Badge variant="secondary">Total: {section.total}</Badge>
+        <Badge variant="secondary">Total: {formatCurrency(section.total)}</Badge>
       </div>
       <ReportCard>
         <ReportTable>
@@ -68,7 +82,7 @@ export default function BalanceSheetPage() {
             {section.accounts.map((row, idx) => (
               <tr key={`${row.account}-${idx}`} className="border-b last:border-0">
                 <td className="p-3">{row.account}</td>
-                <td className="p-3 text-right">{Math.abs(row.balance)}</td>
+                <td className="p-3 text-right">{formatCurrency(Math.abs(row.balance))}</td>
               </tr>
             ))}
           </tbody>
@@ -98,7 +112,7 @@ export default function BalanceSheetPage() {
           {renderSection('Liabilities', data.liabilities)}
           {renderSection('Equity', data.equity)}
           <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
-            <span>Total Liabilities + Equity: {data.total_liabilities_and_equity}</span>
+            <span>Total Liabilities + Equity: {formatCurrency(data.total_liabilities_and_equity)}</span>
             <Badge variant={data.balanced ? 'success' : 'warning'}>
               {data.balanced ? 'Balanced' : 'Unbalanced'}
             </Badge>

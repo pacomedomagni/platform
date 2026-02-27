@@ -27,11 +27,10 @@ export default function ExportPage() {
       if (dateRange.startDate) params.set('startDate', dateRange.startDate);
       if (dateRange.endDate) params.set('endDate', dateRange.endDate);
 
-      const endpoint = `/v1/operations/export/${entityType}?${params.toString()}`;
+      const endpoint = `/v1/operations/export/${entityType}/${format}?${params.toString()}`;
 
       const response = await api.get(endpoint, {
         responseType: 'blob',
-        params: { format },
       });
 
       const blob = new Blob([response.data], {

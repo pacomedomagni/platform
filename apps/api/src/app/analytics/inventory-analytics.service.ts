@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '@platform/db';
 import {
   InventoryTurnover,
@@ -47,14 +48,19 @@ export class InventoryAnalyticsService {
           AND o."createdAt" <= ${endDate}
         GROUP BY oi."productId"
       )
-      SELECT 
+      SELECT
         i.id as product_id,
         i.name as product_name,
         i.code as product_code,
-        COALESCE(i."qtyOnHand"::float, 0) as current_stock,
+        COALESCE(wib_totals.total_qty::float, 0) as current_stock,
         COALESCE(sd.units_sold, 0) as units_sold,
         COALESCE(sd.units_sold / ${daysDiff}::float, 0) as avg_daily_sales
       FROM items i
+      LEFT JOIN (
+        SELECT wib."itemId", SUM(wib."actualQty") as total_qty
+        FROM warehouse_item_balances wib
+        GROUP BY wib."itemId"
+      ) wib_totals ON wib_totals."itemId" = i.id
       LEFT JOIN sales_data sd ON sd."productId" = i.id
       WHERE i."tenantId" = ${ctx.tenantId}
         AND i."isActive" = true
@@ -70,7 +76,7 @@ export class InventoryAnalyticsService {
       // Turnover rate = units sold / average inventory (simplified as current stock)
       const turnoverRate = currentStock > 0 ? unitsSold / currentStock : 0;
       // Days of supply = current stock / average daily sales
-      const daysOfSupply = avgDailySales > 0 ? currentStock / avgDailySales : Infinity;
+      const daysOfSupply = avgDailySales > 0 ? Math.round(currentStock / avgDailySales) : 999;
 
       return {
         productId: t.product_id,
@@ -79,7 +85,7 @@ export class InventoryAnalyticsService {
         currentStock,
         unitsSold,
         turnoverRate: Math.round(turnoverRate * 100) / 100,
-        daysOfSupply: daysOfSupply === Infinity ? 999 : Math.round(daysOfSupply),
+        daysOfSupply,
       };
     });
   }
@@ -112,18 +118,24 @@ export class InventoryAnalyticsService {
           AND o."paymentStatus" = 'CAPTURED'
         GROUP BY oi."productId"
       )
-      SELECT 
+      SELECT
         i.id as product_id,
         i.name as product_name,
         i.code as product_code,
-        COALESCE(i."qtyOnHand"::float, 0) as current_stock,
-        COALESCE(i."costPrice"::float, 0) as cost_price,
+        COALESCE(wib_totals.total_qty::float, 0) as current_stock,
+        COALESCE(pl."costPrice"::float, 0) as cost_price,
         ls.last_sold_date
       FROM items i
+      LEFT JOIN (
+        SELECT wib."itemId", SUM(wib."actualQty") as total_qty
+        FROM warehouse_item_balances wib
+        GROUP BY wib."itemId"
+      ) wib_totals ON wib_totals."itemId" = i.id
+      LEFT JOIN product_listings pl ON pl."itemId" = i.id
       LEFT JOIN last_sale ls ON ls."productId" = i.id
       WHERE i."tenantId" = ${ctx.tenantId}
         AND i."isActive" = true
-        AND i."qtyOnHand" > 0
+        AND COALESCE(wib_totals.total_qty, 0) > 0
         AND (ls.last_sold_date IS NULL OR ls.last_sold_date < ${cutoffDate})
       ORDER BY current_stock DESC
     `;
@@ -178,19 +190,24 @@ export class InventoryAnalyticsService {
           AND o."createdAt" >= NOW() - INTERVAL '30 days'
         GROUP BY oi."productId"
       )
-      SELECT 
+      SELECT
         i.id as product_id,
         i.name as product_name,
         i.code as product_code,
-        COALESCE(i."qtyOnHand"::float, 0) as current_stock,
+        COALESCE(wib_totals.total_qty::float, 0) as current_stock,
         COALESCE(i."reorderLevel"::float, ${threshold ?? 10}) as reorder_level,
         COALESCE(i."reorderQty"::float, 0) as reorder_quantity,
         COALESCE(rs.avg_daily_sales, 0) as avg_daily_sales
       FROM items i
+      LEFT JOIN (
+        SELECT wib."itemId", SUM(wib."actualQty") as total_qty
+        FROM warehouse_item_balances wib
+        GROUP BY wib."itemId"
+      ) wib_totals ON wib_totals."itemId" = i.id
       LEFT JOIN recent_sales rs ON rs."productId" = i.id
       WHERE i."tenantId" = ${ctx.tenantId}
         AND i."isActive" = true
-        AND i."qtyOnHand" <= COALESCE(i."reorderLevel", ${threshold ?? 10})
+        AND COALESCE(wib_totals.total_qty, 0) <= COALESCE(i."reorderLevel", ${threshold ?? 10})
       ORDER BY current_stock ASC
     `;
 
@@ -230,15 +247,21 @@ export class InventoryAnalyticsService {
         total_cost: number;
         total_retail: number;
       }]>`
-        SELECT 
+        SELECT
           COUNT(DISTINCT i.id)::int as total_items,
-          COALESCE(SUM(i."qtyOnHand")::float, 0) as total_units,
-          COALESCE(SUM(i."qtyOnHand" * i."costPrice")::float, 0) as total_cost,
-          COALESCE(SUM(i."qtyOnHand" * i."sellPrice")::float, 0) as total_retail
+          COALESCE(SUM(wib_totals.total_qty)::float, 0) as total_units,
+          COALESCE(SUM(wib_totals.total_qty * pl."costPrice")::float, 0) as total_cost,
+          COALESCE(SUM(wib_totals.total_qty * pl."price")::float, 0) as total_retail
         FROM items i
+        LEFT JOIN (
+          SELECT wib."itemId", SUM(wib."quantity") as total_qty
+          FROM warehouse_item_balances wib
+          GROUP BY wib."itemId"
+        ) wib_totals ON wib_totals."itemId" = i.id
+        LEFT JOIN product_listings pl ON pl."itemId" = i.id
         WHERE i."tenantId" = ${ctx.tenantId}
           AND i."isActive" = true
-          AND i."qtyOnHand" > 0
+          AND COALESCE(wib_totals.total_qty, 0) > 0
       `,
       this.prisma.$queryRaw<Array<{
         category_id: string;
@@ -247,18 +270,23 @@ export class InventoryAnalyticsService {
         retail_value: number;
         item_count: number;
       }>>`
-        SELECT 
+        SELECT
           COALESCE(pc.id, 'uncategorized') as category_id,
           COALESCE(pc.name, 'Uncategorized') as category_name,
-          COALESCE(SUM(i."qtyOnHand" * i."costPrice")::float, 0) as cost_value,
-          COALESCE(SUM(i."qtyOnHand" * i."sellPrice")::float, 0) as retail_value,
+          COALESCE(SUM(wib_totals.total_qty * pl."costPrice")::float, 0) as cost_value,
+          COALESCE(SUM(wib_totals.total_qty * pl."price")::float, 0) as retail_value,
           COUNT(DISTINCT i.id)::int as item_count
         FROM items i
+        LEFT JOIN (
+          SELECT wib."itemId", SUM(wib."quantity") as total_qty
+          FROM warehouse_item_balances wib
+          GROUP BY wib."itemId"
+        ) wib_totals ON wib_totals."itemId" = i.id
         LEFT JOIN product_listings pl ON pl."itemId" = i.id
         LEFT JOIN product_categories pc ON pc.id = pl."categoryId"
         WHERE i."tenantId" = ${ctx.tenantId}
           AND i."isActive" = true
-          AND i."qtyOnHand" > 0
+          AND COALESCE(wib_totals.total_qty, 0) > 0
         GROUP BY pc.id, pc.name
         ORDER BY cost_value DESC
       `,
@@ -295,16 +323,16 @@ export class InventoryAnalyticsService {
       units_sold: number;
       revenue: number;
     }>>`
-      SELECT 
+      SELECT
         DATE(o."createdAt") as sale_date,
         COALESCE(SUM(oi."quantity")::float, 0) as units_sold,
-        COALESCE(SUM(oi."lineTotal")::float, 0) as revenue
+        COALESCE(SUM(oi."totalPrice")::float, 0) as revenue
       FROM order_items oi
       INNER JOIN orders o ON o.id = oi."orderId"
       WHERE o."tenantId" = ${ctx.tenantId}
         AND o."paymentStatus" = 'CAPTURED'
         AND o."createdAt" >= NOW() - INTERVAL '90 days'
-        ${productId ? this.prisma.$queryRaw`AND oi."productId" = ${productId}` : this.prisma.$queryRaw``}
+        ${productId ? Prisma.sql`AND oi."productId" = ${productId}` : Prisma.empty}
       GROUP BY DATE(o."createdAt")
       ORDER BY sale_date
     `;
@@ -359,23 +387,29 @@ export class InventoryAnalyticsService {
       total_value: number;
     }>>`
       WITH last_movement AS (
-        SELECT 
+        SELECT
           i.id,
-          i."qtyOnHand",
-          i."costPrice",
+          COALESCE(wib_totals.total_qty, 0) as qty_on_hand,
+          COALESCE(pl."costPrice", 0) as cost_price,
           COALESCE(
-            (SELECT MAX(o."createdAt") FROM order_items oi 
+            (SELECT MAX(o."createdAt") FROM order_items oi
              INNER JOIN orders o ON o.id = oi."orderId"
              WHERE oi."productId" = i.id AND o."paymentStatus" = 'CAPTURED'),
             i."createdAt"
           ) as last_activity
         FROM items i
+        LEFT JOIN (
+          SELECT wib."itemId", SUM(wib."quantity") as total_qty
+          FROM warehouse_item_balances wib
+          GROUP BY wib."itemId"
+        ) wib_totals ON wib_totals."itemId" = i.id
+        LEFT JOIN product_listings pl ON pl."itemId" = i.id
         WHERE i."tenantId" = ${ctx.tenantId}
           AND i."isActive" = true
-          AND i."qtyOnHand" > 0
+          AND COALESCE(wib_totals.total_qty, 0) > 0
       )
-      SELECT 
-        CASE 
+      SELECT
+        CASE
           WHEN last_activity >= NOW() - INTERVAL '30 days' THEN '0-30 days'
           WHEN last_activity >= NOW() - INTERVAL '60 days' THEN '31-60 days'
           WHEN last_activity >= NOW() - INTERVAL '90 days' THEN '61-90 days'
@@ -383,8 +417,8 @@ export class InventoryAnalyticsService {
           ELSE '180+ days'
         END as age_range,
         COUNT(*)::int as item_count,
-        COALESCE(SUM("qtyOnHand")::float, 0) as total_units,
-        COALESCE(SUM("qtyOnHand" * "costPrice")::float, 0) as total_value
+        COALESCE(SUM(qty_on_hand)::float, 0) as total_units,
+        COALESCE(SUM(qty_on_hand * cost_price)::float, 0) as total_value
       FROM last_movement
       GROUP BY age_range
       ORDER BY 

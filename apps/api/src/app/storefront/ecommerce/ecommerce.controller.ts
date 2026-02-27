@@ -11,6 +11,8 @@ import {
   BadRequestException,
   UnauthorizedException,
   UseGuards,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { VariantsService } from './variants.service';
@@ -18,6 +20,7 @@ import { ReviewsService } from './reviews.service';
 import { GiftCardsService } from './gift-cards.service';
 import { WishlistService } from './wishlist.service';
 import { StoreAdminGuard } from '@platform/auth';
+import { Tenant } from '../../tenant.middleware';
 import {
   CreateAttributeTypeDto,
   CreateAttributeValueDto,
@@ -49,7 +52,7 @@ export class EcommerceController {
 
   @Get('products/:productId/variants')
   async listVariants(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('productId') productId: string
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
@@ -58,7 +61,7 @@ export class EcommerceController {
 
   @Get('variants/:id')
   async getVariant(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('id') id: string
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
@@ -69,7 +72,7 @@ export class EcommerceController {
 
   @Get('admin/attribute-types')
   @UseGuards(StoreAdminGuard)
-  async listAttributeTypes(@Headers('x-tenant-id') tenantId: string) {
+  async listAttributeTypes(@Tenant() tenantId: string) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
     return this.variantsService.listAttributeTypes(tenantId);
   }
@@ -77,7 +80,7 @@ export class EcommerceController {
   @Post('admin/attribute-types')
   @UseGuards(StoreAdminGuard)
   async createAttributeType(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Body() dto: CreateAttributeTypeDto
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
@@ -87,7 +90,7 @@ export class EcommerceController {
   @Put('admin/attribute-types/:id')
   @UseGuards(StoreAdminGuard)
   async updateAttributeType(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('id') id: string,
     @Body() dto: Partial<CreateAttributeTypeDto>
   ) {
@@ -98,7 +101,7 @@ export class EcommerceController {
   @Delete('admin/attribute-types/:id')
   @UseGuards(StoreAdminGuard)
   async deleteAttributeType(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('id') id: string
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
@@ -108,7 +111,7 @@ export class EcommerceController {
   @Post('admin/attribute-values')
   @UseGuards(StoreAdminGuard)
   async createAttributeValue(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Body() dto: CreateAttributeValueDto
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
@@ -118,7 +121,7 @@ export class EcommerceController {
   @Put('admin/attribute-values/:id')
   @UseGuards(StoreAdminGuard)
   async updateAttributeValue(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('id') id: string,
     @Body() dto: Partial<CreateAttributeValueDto>
   ) {
@@ -129,7 +132,7 @@ export class EcommerceController {
   @Delete('admin/attribute-values/:id')
   @UseGuards(StoreAdminGuard)
   async deleteAttributeValue(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('id') id: string
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
@@ -139,7 +142,7 @@ export class EcommerceController {
   @Post('admin/products/:productId/variants')
   @UseGuards(StoreAdminGuard)
   async createVariant(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('productId') productId: string,
     @Body() dto: CreateVariantDto
   ) {
@@ -151,7 +154,7 @@ export class EcommerceController {
   @Put('admin/variants/:id')
   @UseGuards(StoreAdminGuard)
   async updateVariant(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('id') id: string,
     @Body() dto: UpdateVariantDto
   ) {
@@ -162,7 +165,7 @@ export class EcommerceController {
   @Delete('admin/variants/:id')
   @UseGuards(StoreAdminGuard)
   async deleteVariant(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('id') id: string
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
@@ -172,19 +175,20 @@ export class EcommerceController {
   @Post('admin/products/:productId/variants/bulk')
   @UseGuards(StoreAdminGuard)
   async bulkCreateVariants(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('productId') productId: string,
     @Body() body: { variants: CreateVariantDto[] }
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
     if (!body.variants?.length) throw new BadRequestException('Variants array required');
+    if (body.variants.length > 100) throw new BadRequestException('Maximum 100 variants per bulk operation');
     return this.variantsService.bulkCreateVariants(tenantId, productId, body.variants);
   }
 
   @Put('admin/variants/:id/stock')
   @UseGuards(StoreAdminGuard)
   async updateVariantStock(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('id') id: string,
     @Body() body: { quantity: number }
   ) {
@@ -196,7 +200,7 @@ export class EcommerceController {
   @Post('admin/variants/:id/stock/adjust')
   @UseGuards(StoreAdminGuard)
   async adjustVariantStock(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('id') id: string,
     @Body() body: { adjustment: number }
   ) {
@@ -209,7 +213,7 @@ export class EcommerceController {
 
   @Get('products/:productId/reviews')
   async getProductReviews(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('productId') productId: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
@@ -227,7 +231,7 @@ export class EcommerceController {
 
   @Post('products/:productId/reviews')
   async createReview(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
     @Param('productId') productId: string,
     @Body() dto: CreateReviewDto
@@ -238,9 +242,20 @@ export class EcommerceController {
     return this.reviewsService.createReview(tenantId, customerId, dto);
   }
 
+  @Post('reviews/upload-images')
+  @HttpCode(HttpStatus.NOT_IMPLEMENTED)
+  async uploadReviewImages() {
+    // TODO: Implement multipart file upload with image validation and storage service integration
+    return {
+      statusCode: 501,
+      message: 'Review image upload is not yet implemented. Please provide image URLs directly.',
+      urls: [],
+    };
+  }
+
   @Post('reviews/:reviewId/vote')
   async voteReview(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
     @Headers('x-session-token') sessionToken: string,
     @Param('reviewId') reviewId: string,
@@ -256,7 +271,7 @@ export class EcommerceController {
   @Get('admin/reviews')
   @UseGuards(StoreAdminGuard)
   async listReviewsAdmin(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('status') status?: string,
@@ -274,43 +289,48 @@ export class EcommerceController {
   @Put('admin/reviews/:reviewId/moderate')
   @UseGuards(StoreAdminGuard)
   async moderateReview(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
+    @Headers('x-user-id') userId: string,
     @Param('reviewId') reviewId: string,
     @Body() dto: ModerateReviewDto
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
-    return this.reviewsService.moderateReview(tenantId, reviewId, dto, 'admin');
+    const moderatorId = userId || 'unknown-admin';
+    return this.reviewsService.moderateReview(tenantId, reviewId, dto, moderatorId);
   }
 
   @Post('admin/reviews/bulk-moderate')
   @UseGuards(StoreAdminGuard)
   async bulkModerateReviews(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
+    @Headers('x-user-id') userId: string,
     @Body() body: { reviewIds: string[]; status: 'approved' | 'rejected' }
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
     if (!body.reviewIds?.length) throw new BadRequestException('Review IDs required');
+    const moderatorId = userId || 'unknown-admin';
     let count = 0;
+    const failed: string[] = [];
     for (const reviewId of body.reviewIds) {
       try {
         await this.reviewsService.moderateReview(
           tenantId,
           reviewId,
           { status: body.status } as ModerateReviewDto,
-          'admin',
+          moderatorId,
         );
         count++;
       } catch {
-        // Skip reviews that fail moderation
+        failed.push(reviewId);
       }
     }
-    return { success: true, count };
+    return { success: true, count, failed };
   }
 
   @Post('admin/reviews/:reviewId/respond')
   @UseGuards(StoreAdminGuard)
   async adminRespondToReview(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('reviewId') reviewId: string,
     @Body() dto: AdminRespondDto
   ) {
@@ -321,7 +341,7 @@ export class EcommerceController {
   @Delete('admin/reviews/:reviewId')
   @UseGuards(StoreAdminGuard)
   async deleteReview(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('reviewId') reviewId: string
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
@@ -333,7 +353,7 @@ export class EcommerceController {
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Get('gift-cards/check')
   async checkGiftCardBalance(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Query('code') code: string,
     @Query('pin') pin?: string
   ) {
@@ -347,7 +367,7 @@ export class EcommerceController {
   @Get('admin/gift-cards')
   @UseGuards(StoreAdminGuard)
   async listGiftCards(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('status') status?: string
@@ -363,7 +383,7 @@ export class EcommerceController {
   @Get('admin/gift-cards/:id')
   @UseGuards(StoreAdminGuard)
   async getGiftCard(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('id') id: string
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
@@ -373,7 +393,7 @@ export class EcommerceController {
   @Post('admin/gift-cards')
   @UseGuards(StoreAdminGuard)
   async createGiftCard(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Body() dto: CreateGiftCardDto
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
@@ -383,7 +403,7 @@ export class EcommerceController {
   @Post('admin/gift-cards/:id/activate')
   @UseGuards(StoreAdminGuard)
   async activateGiftCard(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('id') id: string
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
@@ -393,7 +413,7 @@ export class EcommerceController {
   @Post('admin/gift-cards/:id/adjust')
   @UseGuards(StoreAdminGuard)
   async adjustGiftCardBalance(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('id') id: string,
     @Body() dto: GiftCardTransactionDto
   ) {
@@ -404,7 +424,7 @@ export class EcommerceController {
   @Post('admin/gift-cards/:id/disable')
   @UseGuards(StoreAdminGuard)
   async disableGiftCard(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('id') id: string
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
@@ -415,7 +435,7 @@ export class EcommerceController {
 
   @Get('wishlist')
   async getWishlists(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
@@ -425,7 +445,7 @@ export class EcommerceController {
 
   @Get('wishlist/:id')
   async getWishlist(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
     @Param('id') id: string
   ) {
@@ -436,7 +456,7 @@ export class EcommerceController {
 
   @Post('wishlist')
   async createWishlist(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
     @Body() dto: CreateWishlistDto
   ) {
@@ -447,7 +467,7 @@ export class EcommerceController {
 
   @Put('wishlist/:id')
   async updateWishlist(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
     @Param('id') id: string,
     @Body() dto: CreateWishlistDto
@@ -459,7 +479,7 @@ export class EcommerceController {
 
   @Delete('wishlist/:id')
   async deleteWishlist(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
     @Param('id') id: string
   ) {
@@ -470,7 +490,7 @@ export class EcommerceController {
 
   @Post('wishlist/items')
   async addWishlistItem(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
     @Body() dto: AddWishlistItemDto
   ) {
@@ -481,7 +501,7 @@ export class EcommerceController {
 
   @Post('wishlist/:wishlistId/items')
   async addItemToWishlist(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
     @Param('wishlistId') wishlistId: string,
     @Body() dto: AddWishlistItemDto
@@ -493,7 +513,7 @@ export class EcommerceController {
 
   @Delete('wishlist/items/:itemId')
   async removeWishlistItem(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
     @Param('itemId') itemId: string
   ) {
@@ -504,7 +524,7 @@ export class EcommerceController {
 
   @Post('wishlist/items/:itemId/move-to-cart')
   async moveWishlistItemToCart(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
     @Param('itemId') itemId: string,
     @Body('cartId') cartId: string
@@ -519,7 +539,7 @@ export class EcommerceController {
 
   @Get('wishlist/shared/:shareToken')
   async getSharedWishlist(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @Param('shareToken') shareToken: string,
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');

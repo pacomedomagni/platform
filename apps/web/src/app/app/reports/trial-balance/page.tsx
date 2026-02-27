@@ -23,6 +23,20 @@ type TrialBalance = {
   balanced: boolean;
 };
 
+const formatCurrency = (amount: number) => {
+  const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+  }
+};
+
 export default function TrialBalancePage() {
   const [asOfDate, setAsOfDate] = useState('');
   const [data, setData] = useState<TrialBalance | null>(null);
@@ -62,11 +76,11 @@ export default function TrialBalancePage() {
       {data && (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
-            <span>Total Debit: {data.total_debit}</span>
+            <span>Total Debit: {formatCurrency(data.total_debit)}</span>
             <span className="text-muted-foreground">|</span>
-            <span>Total Credit: {data.total_credit}</span>
+            <span>Total Credit: {formatCurrency(data.total_credit)}</span>
             <span className="text-muted-foreground">|</span>
-            <span>Difference: {data.difference}</span>
+            <span>Difference: {formatCurrency(data.difference)}</span>
             <Badge variant={data.balanced ? 'success' : 'warning'}>
               {data.balanced ? 'Balanced' : 'Unbalanced'}
             </Badge>
@@ -90,9 +104,9 @@ export default function TrialBalancePage() {
                     <td className="p-3">{row.account}</td>
                     <td className="p-3">{row.root_type}</td>
                     <td className="p-3">{row.account_type}</td>
-                    <td className="p-3 text-right">{row.total_debit}</td>
-                    <td className="p-3 text-right">{row.total_credit}</td>
-                    <td className="p-3 text-right">{row.balance}</td>
+                    <td className="p-3 text-right">{formatCurrency(row.total_debit)}</td>
+                    <td className="p-3 text-right">{formatCurrency(row.total_credit)}</td>
+                    <td className="p-3 text-right">{formatCurrency(row.balance)}</td>
                   </tr>
                 ))}
               </tbody>

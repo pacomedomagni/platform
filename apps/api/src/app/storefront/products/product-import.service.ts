@@ -30,11 +30,12 @@ export class ProductImportService {
       { attempts: 1 },
     );
 
-    // Store file content temporarily in the job
+    // L-IE-7: Store file content in the payload JSON field instead of abusing
+    // the errors field, which is intended for error reporting.
     await this.prisma.productImportJob.update({
       where: { id: job.id },
       data: {
-        errors: { fileContent: file.buffer.toString('utf-8') },
+        payload: { fileContent: file.buffer.toString('utf-8') },
       },
     });
 
@@ -55,7 +56,8 @@ export class ProductImportService {
       data: { status: 'processing', startedAt: new Date() },
     });
 
-    const fileContent = (job.errors as any)?.fileContent;
+    // L-IE-7: Read file content from payload field (migrated from errors field)
+    const fileContent = (job as any).payload?.fileContent ?? (job.errors as any)?.fileContent;
     if (!fileContent) {
       await this.prisma.productImportJob.update({
         where: { id: jobId },

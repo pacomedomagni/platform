@@ -42,14 +42,37 @@ const socialLinks = [
 export function Footer() {
   const [email, setEmail] = useState('');
   const [subscribed, setSubscribed] = useState(false);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleSubscribe = (e: React.FormEvent) => {
+  const handleSubscribe = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubscribed(true);
-    setTimeout(() => {
-      setEmail('');
-      setSubscribed(false);
-    }, 3000);
+    setError('');
+    setLoading(true);
+
+    try {
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
+      const res = await fetch(`${apiBase}/v1/storefront/email-preferences/newsletter/subscribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || 'Subscription failed');
+      }
+
+      setSubscribed(true);
+      setTimeout(() => {
+        setEmail('');
+        setSubscribed(false);
+      }, 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Subscription failed. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -81,12 +104,15 @@ export function Footer() {
               />
               <button
                 type="submit"
-                disabled={subscribed}
+                disabled={subscribed || loading}
                 className="rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white transition-colors hover:bg-blue-700 disabled:bg-green-600"
               >
-                {subscribed ? 'Subscribed!' : 'Subscribe'}
+                {subscribed ? 'Subscribed!' : loading ? 'Subscribing...' : 'Subscribe'}
               </button>
             </form>
+            {error && (
+              <p className="mt-2 text-sm text-red-400">{error}</p>
+            )}
           </div>
         </motion.div>
 

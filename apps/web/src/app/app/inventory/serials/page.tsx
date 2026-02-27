@@ -9,49 +9,55 @@ import {
   Plus,
   CheckCircle,
   XCircle,
-  Clock,
   Package,
   Edit2,
   History,
 } from 'lucide-react';
 
+// Matches backend querySerials response shape
 type SerialRecord = {
   id: string;
-  serialNumber: string;
+  serialNo: string;
   itemCode: string;
-  warehouseCode: string;
-  batchNumber?: string;
-  status: 'available' | 'sold' | 'reserved' | 'damaged' | 'returned';
-  purchaseDate?: string;
-  saleDate?: string;
-  warrantyExpiry?: string;
-  notes?: string;
+  itemName: string;
+  status: 'AVAILABLE' | 'ISSUED';
+  warehouseCode?: string;
+  locationCode?: string;
+  batchNo?: string;
   createdAt: string;
 };
 
-type SerialHistory = {
+// Matches backend getSerialHistory response shape
+type SerialHistoryResponse = {
   id: string;
-  serialId: string;
-  action: string;
-  fromStatus?: string;
-  toStatus?: string;
-  referenceNumber?: string;
-  notes?: string;
-  performedBy?: string;
-  performedAt: string;
+  itemCode: string;
+  itemName: string;
+  serialNo: string;
+  status: string;
+  currentWarehouse?: string;
+  currentLocation?: string;
+  batchNo?: string;
+  history: SerialHistoryEntry[];
 };
 
-const statusConfig = {
-  available: { icon: CheckCircle, color: 'bg-green-50 text-green-700 border-green-200', label: 'Available' },
-  sold: { icon: Package, color: 'bg-blue-50 text-blue-700 border-blue-200', label: 'Sold' },
-  reserved: { icon: Clock, color: 'bg-amber-50 text-amber-700 border-amber-200', label: 'Reserved' },
-  damaged: { icon: XCircle, color: 'bg-red-50 text-red-700 border-red-200', label: 'Damaged' },
-  returned: { icon: History, color: 'bg-purple-50 text-purple-700 border-purple-200', label: 'Returned' },
+type SerialHistoryEntry = {
+  date: string;
+  voucherType: string;
+  voucherNo: string;
+  warehouse: string;
+  qty: number;
 };
+
+const statusConfig: Record<string, { icon: typeof CheckCircle; color: string; label: string }> = {
+  AVAILABLE: { icon: CheckCircle, color: 'bg-green-50 text-green-700 border-green-200', label: 'Available' },
+  ISSUED: { icon: Package, color: 'bg-blue-50 text-blue-700 border-blue-200', label: 'Issued' },
+};
+
+const defaultStatusConfig = { icon: XCircle, color: 'bg-slate-50 text-slate-700 border-slate-200', label: 'Unknown' };
 
 export default function SerialTrackingPage() {
   const [serials, setSerials] = useState<SerialRecord[]>([]);
-  const [serialHistory, setSerialHistory] = useState<SerialHistory[]>([]);
+  const [serialHistory, setSerialHistory] = useState<SerialHistoryEntry[]>([]);
   const [selectedSerial, setSelectedSerial] = useState<SerialRecord | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,16 +72,14 @@ export default function SerialTrackingPage() {
   const [status, setStatus] = useState('');
   const [searchSerial, setSearchSerial] = useState('');
 
-  // Form state
+  // Form state - backend uses serialNo, batchNo fields
   const [formData, setFormData] = useState({
-    serialNumber: '',
+    serialNo: '',
     itemCode: '',
     warehouseCode: '',
-    batchNumber: '',
-    status: 'available' as 'available' | 'sold' | 'reserved' | 'damaged' | 'returned',
-    purchaseDate: '',
-    warrantyExpiry: '',
-    notes: '',
+    locationCode: '',
+    batchNo: '',
+    status: 'AVAILABLE' as 'AVAILABLE' | 'ISSUED',
   });
 
   // Bulk create state
@@ -97,23 +101,26 @@ export default function SerialTrackingPage() {
           itemCode: itemCode || undefined,
           warehouseCode: warehouseCode || undefined,
           status: status || undefined,
-          serialNumber: searchSerial || undefined,
+          search: searchSerial || undefined,
         },
       });
-      setSerials(res.data || []);
-    } catch (e: any) {
-      setError(e?.response?.data?.message || 'Failed to load serials');
+      setSerials(res.data.data || []);
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      setError(err?.response?.data?.message || 'Failed to load serials');
     } finally {
       setLoading(false);
     }
   };
 
-  const loadSerialHistory = async (serialId: string) => {
+  const loadSerialHistory = async (serialNo: string) => {
     try {
-      const res = await api.get(`/v1/inventory-management/serials/${serialId}/history`);
-      setSerialHistory(res.data || []);
-    } catch (e: any) {
-      setError(e?.response?.data?.message || 'Failed to load serial history');
+      const res = await api.get(`/v1/inventory-management/serials/history/${encodeURIComponent(serialNo)}`);
+      const historyResponse: SerialHistoryResponse = res.data;
+      setSerialHistory(historyResponse.history || []);
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      setError(err?.response?.data?.message || 'Failed to load serial history');
     }
   };
 
@@ -124,15 +131,26 @@ export default function SerialTrackingPage() {
       setShowCreateModal(false);
       resetForm();
       loadSerials();
-    } catch (e: any) {
-      setError(e?.response?.data?.message || 'Failed to create serial');
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      setError(err?.response?.data?.message || 'Failed to create serial');
     }
   };
 
   const bulkCreateSerials = async () => {
     setError(null);
     try {
-      await api.post('/v1/inventory-management/serials/bulk', bulkData);
+      // Map frontend UI fields to backend CreateSerialBulkDto shape
+      const serialNos = Array.from({ length: bulkData.count }, (_, i) =>
+        `${bulkData.prefix}${(bulkData.startNumber + i).toString().padStart(4, '0')}`
+      );
+      const payload = {
+        itemCode: bulkData.itemCode,
+        serialNos,
+        warehouseCode: bulkData.warehouseCode || undefined,
+        batchNo: bulkData.batchNumber || undefined,
+      };
+      await api.post('/v1/inventory-management/serials/bulk', payload);
       setShowBulkModal(false);
       setBulkData({
         itemCode: '',
@@ -143,8 +161,9 @@ export default function SerialTrackingPage() {
         batchNumber: '',
       });
       loadSerials();
-    } catch (e: any) {
-      setError(e?.response?.data?.message || 'Failed to create serials');
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      setError(err?.response?.data?.message || 'Failed to create serials');
     }
   };
 
@@ -156,41 +175,38 @@ export default function SerialTrackingPage() {
       setEditingSerial(null);
       resetForm();
       loadSerials();
-    } catch (e: any) {
-      setError(e?.response?.data?.message || 'Failed to update serial');
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      setError(err?.response?.data?.message || 'Failed to update serial');
     }
   };
 
   const resetForm = () => {
     setFormData({
-      serialNumber: '',
+      serialNo: '',
       itemCode: '',
       warehouseCode: '',
-      batchNumber: '',
-      status: 'available',
-      purchaseDate: '',
-      warrantyExpiry: '',
-      notes: '',
+      locationCode: '',
+      batchNo: '',
+      status: 'AVAILABLE',
     });
   };
 
   const openEditModal = (serial: SerialRecord) => {
     setEditingSerial(serial);
     setFormData({
-      serialNumber: serial.serialNumber,
+      serialNo: serial.serialNo,
       itemCode: serial.itemCode,
-      warehouseCode: serial.warehouseCode,
-      batchNumber: serial.batchNumber || '',
+      warehouseCode: serial.warehouseCode || '',
+      locationCode: serial.locationCode || '',
+      batchNo: serial.batchNo || '',
       status: serial.status,
-      purchaseDate: serial.purchaseDate?.split('T')[0] || '',
-      warrantyExpiry: serial.warrantyExpiry?.split('T')[0] || '',
-      notes: serial.notes || '',
     });
   };
 
   const openHistoryModal = async (serial: SerialRecord) => {
     setSelectedSerial(serial);
-    await loadSerialHistory(serial.id);
+    await loadSerialHistory(serial.serialNo);
     setShowHistoryModal(true);
   };
 
@@ -238,11 +254,8 @@ export default function SerialTrackingPage() {
           onChange={(e) => setStatus(e.target.value)}
         >
           <option value="">All Status</option>
-          <option value="available">Available</option>
-          <option value="sold">Sold</option>
-          <option value="reserved">Reserved</option>
-          <option value="damaged">Damaged</option>
-          <option value="returned">Returned</option>
+          <option value="AVAILABLE">Available</option>
+          <option value="ISSUED">Issued</option>
         </select>
         <Button onClick={loadSerials} disabled={loading}>
           {loading ? 'Loading...' : 'Apply Filters'}
@@ -261,41 +274,35 @@ export default function SerialTrackingPage() {
               <th className="text-left p-3">Warehouse</th>
               <th className="text-left p-3">Batch</th>
               <th className="text-left p-3">Status</th>
-              <th className="text-left p-3">Warranty Expiry</th>
+              <th className="text-left p-3">Location</th>
               <th className="text-right p-3">Actions</th>
             </tr>
           </thead>
           <tbody>
             {serials.length === 0 && <ReportEmpty colSpan={7} />}
             {serials.map((serial) => {
-              const config = statusConfig[serial.status];
+              const config = statusConfig[serial.status] || defaultStatusConfig;
               const Icon = config.icon;
-              const warrantyExpired = serial.warrantyExpiry && new Date(serial.warrantyExpiry) < new Date();
 
               return (
                 <tr key={serial.id} className="border-b last:border-0 hover:bg-muted/30">
                   <td className="p-3">
                     <div className="flex items-center gap-2">
                       <Hash className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span className="font-mono text-sm font-medium">{serial.serialNumber}</span>
+                      <span className="font-mono text-sm font-medium">{serial.serialNo}</span>
                     </div>
                   </td>
                   <td className="p-3 font-mono text-sm">{serial.itemCode}</td>
-                  <td className="p-3">{serial.warehouseCode}</td>
-                  <td className="p-3 text-sm text-muted-foreground">{serial.batchNumber || '-'}</td>
+                  <td className="p-3">{serial.warehouseCode || '-'}</td>
+                  <td className="p-3 text-sm text-muted-foreground">{serial.batchNo || '-'}</td>
                   <td className="p-3">
                     <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium border ${config.color}`}>
                       <Icon className="h-3 w-3" />
                       {config.label}
                     </span>
                   </td>
-                  <td className="p-3 text-sm">
-                    {serial.warrantyExpiry ? (
-                      <span className={warrantyExpired ? 'text-red-600' : ''}>
-                        {new Date(serial.warrantyExpiry).toLocaleDateString()}
-                        {warrantyExpired && ' (Expired)'}
-                      </span>
-                    ) : '-'}
+                  <td className="p-3 text-sm text-muted-foreground">
+                    {serial.locationCode || '-'}
                   </td>
                   <td className="p-3 text-right">
                     <div className="flex items-center justify-end gap-1">
@@ -337,28 +344,11 @@ export default function SerialTrackingPage() {
                 <label className="text-sm font-medium text-muted-foreground">Serial Number</label>
                 <Input
                   className="mt-1"
-                  value={formData.serialNumber}
-                  onChange={(e) => setFormData({ ...formData, serialNumber: e.target.value })}
+                  value={formData.serialNo}
+                  onChange={(e) => setFormData({ ...formData, serialNo: e.target.value })}
                   disabled={!!editingSerial}
                 />
               </div>
-              <div>
-                <label className="text-sm font-medium text-muted-foreground">Status</label>
-                <select
-                  className="flex h-9 w-full mt-1 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
-                  value={formData.status}
-                  onChange={(e) => setFormData({ ...formData, status: e.target.value as any })}
-                >
-                  <option value="available">Available</option>
-                  <option value="sold">Sold</option>
-                  <option value="reserved">Reserved</option>
-                  <option value="damaged">Damaged</option>
-                  <option value="returned">Returned</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="text-sm font-medium text-muted-foreground">Item Code</label>
                 <Input
@@ -368,12 +358,23 @@ export default function SerialTrackingPage() {
                   disabled={!!editingSerial}
                 />
               </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="text-sm font-medium text-muted-foreground">Warehouse Code</label>
                 <Input
                   className="mt-1"
                   value={formData.warehouseCode}
                   onChange={(e) => setFormData({ ...formData, warehouseCode: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-muted-foreground">Location Code</label>
+                <Input
+                  className="mt-1"
+                  value={formData.locationCode}
+                  onChange={(e) => setFormData({ ...formData, locationCode: e.target.value })}
                 />
               </div>
             </div>
@@ -383,38 +384,23 @@ export default function SerialTrackingPage() {
                 <label className="text-sm font-medium text-muted-foreground">Batch Number</label>
                 <Input
                   className="mt-1"
-                  value={formData.batchNumber}
-                  onChange={(e) => setFormData({ ...formData, batchNumber: e.target.value })}
+                  value={formData.batchNo}
+                  onChange={(e) => setFormData({ ...formData, batchNo: e.target.value })}
                 />
               </div>
-              <div>
-                <label className="text-sm font-medium text-muted-foreground">Purchase Date</label>
-                <Input
-                  type="date"
-                  className="mt-1"
-                  value={formData.purchaseDate}
-                  onChange={(e) => setFormData({ ...formData, purchaseDate: e.target.value })}
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Warranty Expiry</label>
-              <Input
-                type="date"
-                className="mt-1"
-                value={formData.warrantyExpiry}
-                onChange={(e) => setFormData({ ...formData, warrantyExpiry: e.target.value })}
-              />
-            </div>
-
-            <div>
-              <label className="text-sm font-medium text-muted-foreground">Notes</label>
-              <Input
-                className="mt-1"
-                value={formData.notes}
-                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-              />
+              {editingSerial && (
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">Status</label>
+                  <select
+                    className="flex h-9 w-full mt-1 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+                    value={formData.status}
+                    onChange={(e) => setFormData({ ...formData, status: e.target.value as 'AVAILABLE' | 'ISSUED' })}
+                  >
+                    <option value="AVAILABLE">Available</option>
+                    <option value="ISSUED">Issued</option>
+                  </select>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end gap-3 pt-4">
@@ -528,7 +514,7 @@ export default function SerialTrackingPage() {
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-semibold">Serial History</h2>
-                <p className="text-sm text-muted-foreground font-mono">{selectedSerial.serialNumber}</p>
+                <p className="text-sm text-muted-foreground font-mono">{selectedSerial.serialNo}</p>
               </div>
               <Button variant="ghost" size="sm" onClick={() => setShowHistoryModal(false)}>
                 ✕
@@ -539,32 +525,22 @@ export default function SerialTrackingPage() {
               {serialHistory.length === 0 ? (
                 <p className="text-muted-foreground text-center py-4">No history available</p>
               ) : (
-                serialHistory.map((history) => (
-                  <div key={history.id} className="flex gap-3 p-3 bg-muted/30 rounded-lg">
+                serialHistory.map((entry, idx) => (
+                  <div key={idx} className="flex gap-3 p-3 bg-muted/30 rounded-lg">
                     <div className="w-2 h-2 rounded-full bg-primary mt-2" />
                     <div className="flex-1">
                       <div className="flex items-center justify-between">
-                        <span className="font-medium">{history.action}</span>
+                        <span className="font-medium">{entry.voucherType}</span>
                         <span className="text-xs text-muted-foreground">
-                          {new Date(history.performedAt).toLocaleString()}
+                          {entry.date}
                         </span>
                       </div>
-                      {(history.fromStatus || history.toStatus) && (
-                        <p className="text-sm text-muted-foreground">
-                          {history.fromStatus && `From: ${history.fromStatus}`}
-                          {history.fromStatus && history.toStatus && ' → '}
-                          {history.toStatus && `To: ${history.toStatus}`}
-                        </p>
-                      )}
-                      {history.referenceNumber && (
-                        <p className="text-sm text-muted-foreground">Ref: {history.referenceNumber}</p>
-                      )}
-                      {history.notes && (
-                        <p className="text-sm mt-1">{history.notes}</p>
-                      )}
-                      {history.performedBy && (
-                        <p className="text-xs text-muted-foreground mt-1">By: {history.performedBy}</p>
-                      )}
+                      <p className="text-sm text-muted-foreground">
+                        Voucher: {entry.voucherNo}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Warehouse: {entry.warehouse} | Qty: {entry.qty > 0 ? '+' : ''}{entry.qty}
+                      </p>
                     </div>
                   </div>
                 ))

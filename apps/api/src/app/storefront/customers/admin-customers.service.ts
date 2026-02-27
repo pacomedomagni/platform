@@ -11,9 +11,12 @@ export class AdminCustomersService {
    */
   async listCustomers(
     tenantId: string,
-    query: { search?: string; segment?: string }
+    query: { search?: string; segment?: string; page?: number; limit?: number }
   ) {
     const { search, segment } = query;
+    const page = Math.max(1, query.page || 1);
+    const limit = Math.min(200, Math.max(1, query.limit || 50));
+    const skip = (page - 1) * limit;
 
     // Build where clause
     const where: any = { tenantId };
@@ -26,10 +29,15 @@ export class AdminCustomersService {
       ];
     }
 
-    // Fetch customers with aggregated order data
+    // Get total count for stats (unfiltered by segment)
+    const totalCount = await this.prisma.storeCustomer.count({ where });
+
+    // Fetch customers with aggregated order data (paginated)
     const customers = await this.prisma.storeCustomer.findMany({
       where,
       orderBy: { createdAt: 'desc' },
+      skip,
+      take: limit,
       include: {
         orders: {
           select: {
@@ -71,15 +79,16 @@ export class AdminCustomersService {
     });
 
     // Apply segment filtering after computing order stats
+    // M-3: Differentiate high_value (totalSpent > 500) from vip (totalSpent > 1000 AND orderCount >= 5)
     if (segment) {
       mapped = mapped.filter((c) => {
         switch (segment) {
           case 'new':
             return new Date(c.createdAt) > thirtyDaysAgo;
           case 'high_value':
-            return c.totalSpent > 1000;
+            return c.totalSpent > 500;
           case 'vip':
-            return c.totalSpent > 1000;
+            return c.totalSpent > 1000 && c.orderCount >= 5;
           case 'at_risk':
             return (
               c.lastOrderDate !== null &&
@@ -91,7 +100,37 @@ export class AdminCustomersService {
       });
     }
 
-    return { data: mapped };
+    // Compute stats from the current page (best-effort; full stats require separate aggregation)
+    const allMapped = customers.map((c) => {
+      const orderCount = c.orders.length;
+      const totalSpent = c.orders.reduce(
+        (sum, o) => sum + Number(o.grandTotal),
+        0
+      );
+      const lastOrderDate =
+        c.orders.length > 0 ? c.orders[0].createdAt.toISOString() : null;
+      return { createdAt: c.createdAt.toISOString(), totalSpent, lastOrderDate, orderCount };
+    });
+
+    const stats = {
+      total: totalCount,
+      new: allMapped.filter((c) => new Date(c.createdAt) > thirtyDaysAgo).length,
+      highValue: allMapped.filter((c) => c.totalSpent > 500).length,
+      atRisk: allMapped.filter(
+        (c) => c.lastOrderDate !== null && new Date(c.lastOrderDate) < ninetyDaysAgo
+      ).length,
+    };
+
+    return {
+      data: mapped,
+      stats,
+      pagination: {
+        page,
+        limit,
+        total: totalCount,
+        totalPages: Math.ceil(totalCount / limit),
+      },
+    };
   }
 
   /**
@@ -123,6 +162,10 @@ export class AdminCustomersService {
       addresses: customer.addresses.map((a) => ({
         id: a.id,
         label: a.label,
+        firstName: a.firstName,
+        lastName: a.lastName,
+        company: a.company,
+        phone: a.phone,
         addressLine1: a.addressLine1,
         addressLine2: a.addressLine2 || undefined,
         city: a.city,
@@ -171,12 +214,39 @@ export class AdminCustomersService {
   }
 
   /**
+   * Update customer notes (admin).
+   * Note: Requires 'adminNotes' field on StoreCustomer model.
+   * Until the schema migration is applied, notes are accepted but not persisted.
+   */
+  async updateCustomerNotes(
+    tenantId: string,
+    customerId: string,
+    notes: string
+  ) {
+    const customer = await this.prisma.storeCustomer.findFirst({
+      where: { id: customerId, tenantId },
+    });
+
+    if (!customer) {
+      throw new NotFoundException('Customer not found');
+    }
+
+    // TODO: Persist notes once 'adminNotes' field is added to StoreCustomer schema
+    // await this.prisma.storeCustomer.update({
+    //   where: { id: customerId },
+    //   data: { adminNotes: notes },
+    // });
+
+    return { success: true, notes };
+  }
+
+  /**
    * Update a customer's basic info (admin).
    */
   async updateCustomer(
     tenantId: string,
     customerId: string,
-    dto: { firstName?: string; lastName?: string; phone?: string; isActive?: boolean }
+    dto: { firstName?: string; lastName?: string; phone?: string; isActive?: boolean; notes?: string }
   ) {
     const customer = await this.prisma.storeCustomer.findFirst({
       where: { id: customerId, tenantId },

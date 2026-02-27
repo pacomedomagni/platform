@@ -27,8 +27,10 @@ interface OrderTableProps {
 export function OrderTable({ orders, loading }: OrderTableProps) {
   const router = useRouter();
 
+  const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
+
   const formatDate = (date: string | Date) => {
-    return new Date(date).toLocaleString('en-US', {
+    return new Date(date).toLocaleString(locale, {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
@@ -38,7 +40,7 @@ export function OrderTable({ orders, loading }: OrderTableProps) {
   };
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat(locale, {
       style: 'currency',
       currency: 'USD',
     }).format(amount);

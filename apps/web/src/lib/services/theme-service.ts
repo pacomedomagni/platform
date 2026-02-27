@@ -5,6 +5,7 @@
 
 import { themesApi } from '../api/themes';
 import type { Theme, CreateThemeDto, UpdateThemeDto } from '../theme/types';
+import { sanitizeCSS } from '../theme/theme-engine';
 
 // Mock tenant ID for now - in production, this would come from auth context
 const getCurrentTenantId = (): string => {
@@ -175,5 +176,5 @@ export function generateThemeCSS(theme: Theme): string {
     }
   `;
 
-  return cssVariables + baseStyles + (theme.customCSS || '');
+  return cssVariables + baseStyles + (theme.customCSS ? sanitizeCSS(theme.customCSS) : '');
 }

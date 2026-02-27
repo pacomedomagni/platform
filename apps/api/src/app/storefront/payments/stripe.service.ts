@@ -146,6 +146,17 @@ export class StripeService {
   }
 
   /**
+   * Retrieve a charge by ID (used to get card details when latest_charge is a string)
+   */
+  async retrieveCharge(chargeId: string): Promise<Stripe.Charge> {
+    if (!this.stripe) {
+      throw new BadRequestException('Payment processing is not configured');
+    }
+
+    return this.stripe.charges.retrieve(chargeId);
+  }
+
+  /**
    * Verify webhook signature
    */
   verifyWebhookSignature(

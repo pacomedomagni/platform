@@ -48,18 +48,18 @@ export default function MarketplaceConnectionsPage() {
   };
 
   useEffect(() => {
-    loadConnections();
-
     // Check for OAuth callback success/error
     const params = new URLSearchParams(window.location.search);
     if (params.get('success') === 'true') {
       toast({ title: 'Success', description: 'eBay store connected successfully!' });
       window.history.replaceState({}, '', '/app/marketplace/connections');
-      loadConnections();
     } else if (params.get('error')) {
       toast({ title: 'Error', description: `Connection failed: ${params.get('error')}`, variant: 'destructive' });
       window.history.replaceState({}, '', '/app/marketplace/connections');
     }
+
+    // Single call to loadConnections on mount (covers both normal load and OAuth callback return)
+    loadConnections();
   }, []);
 
   const loadConnections = async () => {
@@ -354,6 +354,16 @@ function ConnectionCard({
 }) {
   const [status, setStatus] = useState<ConnectionStatus | null>(null);
 
+  const authHeaders = () => {
+    const token = localStorage.getItem('access_token') || '';
+    const tenantId = localStorage.getItem('tenantId') || '';
+    return {
+      Authorization: `Bearer ${token}`,
+      'x-tenant-id': tenantId,
+      'Content-Type': 'application/json',
+    };
+  };
+
   useEffect(() => {
     loadStatus();
   }, [connection.id]);
@@ -361,7 +371,7 @@ function ConnectionCard({
   const loadStatus = async () => {
     try {
       const res = await fetch(`/api/v1/marketplace/connections/${connection.id}/status`, {
-        credentials: 'include',
+        headers: authHeaders(),
       });
       if (res.ok) {
         setStatus(await res.json());

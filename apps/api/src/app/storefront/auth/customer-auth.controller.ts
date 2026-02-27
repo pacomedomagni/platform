@@ -8,10 +8,12 @@ import {
   Body,
   Headers,
   BadRequestException,
-  UnauthorizedException,
+  UseGuards,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { CustomerAuthService } from './customer-auth.service';
+import { CustomerAuthGuard } from './customer-auth.guard';
+import { CurrentCustomer } from './current-customer.decorator';
 import {
   RegisterCustomerDto,
   LoginCustomerDto,
@@ -19,6 +21,7 @@ import {
   ResetPasswordDto,
   UpdateProfileDto,
   ChangePasswordDto,
+  VerifyEmailDto,
   AddAddressDto,
 } from './dto';
 
@@ -47,7 +50,7 @@ export class CustomerAuthController {
    * POST /api/v1/store/auth/login
    */
   @Post('login')
-  @Throttle({ medium: { limit: 10, ttl: 60000 } }) // 10 login attempts per minute
+  @Throttle({ medium: { limit: 5, ttl: 60000 } }) // 5 login attempts per minute
   async login(
     @Headers('x-tenant-id') tenantId: string,
     @Body() dto: LoginCustomerDto
@@ -63,22 +66,16 @@ export class CustomerAuthController {
    * GET /api/v1/store/auth/me
    */
   @Get('me')
+  @UseGuards(CustomerAuthGuard)
   async getProfile(
     @Headers('x-tenant-id') tenantId: string,
-    @Headers('authorization') authHeader: string
+    @CurrentCustomer() customerId: string
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
 
-    const token = this.extractToken(authHeader);
-    const payload = await this.authService.verifyToken(token);
-
-    if (payload.tenantId !== tenantId) {
-      throw new UnauthorizedException('Invalid token');
-    }
-
-    return this.authService.getProfile(tenantId, payload.customerId);
+    return this.authService.getProfile(tenantId, customerId);
   }
 
   /**
@@ -86,23 +83,17 @@ export class CustomerAuthController {
    * PUT /api/v1/store/auth/me
    */
   @Put('me')
+  @UseGuards(CustomerAuthGuard)
   async updateProfile(
     @Headers('x-tenant-id') tenantId: string,
-    @Headers('authorization') authHeader: string,
+    @CurrentCustomer() customerId: string,
     @Body() dto: UpdateProfileDto
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
 
-    const token = this.extractToken(authHeader);
-    const payload = await this.authService.verifyToken(token);
-
-    if (payload.tenantId !== tenantId) {
-      throw new UnauthorizedException('Invalid token');
-    }
-
-    return this.authService.updateProfile(tenantId, payload.customerId, dto);
+    return this.authService.updateProfile(tenantId, customerId, dto);
   }
 
   /**
@@ -110,23 +101,17 @@ export class CustomerAuthController {
    * POST /api/v1/store/auth/change-password
    */
   @Post('change-password')
+  @UseGuards(CustomerAuthGuard)
   async changePassword(
     @Headers('x-tenant-id') tenantId: string,
-    @Headers('authorization') authHeader: string,
+    @CurrentCustomer() customerId: string,
     @Body() dto: ChangePasswordDto
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
 
-    const token = this.extractToken(authHeader);
-    const payload = await this.authService.verifyToken(token);
-
-    if (payload.tenantId !== tenantId) {
-      throw new UnauthorizedException('Invalid token');
-    }
-
-    return this.authService.changePassword(tenantId, payload.customerId, dto);
+    return this.authService.changePassword(tenantId, customerId, dto);
   }
 
   /**
@@ -150,7 +135,7 @@ export class CustomerAuthController {
    * POST /api/v1/store/auth/reset-password
    */
   @Post('reset-password')
-  @Throttle({ medium: { limit: 5, ttl: 60000 } }) // 5 attempts per minute
+  @Throttle({ strict: { limit: 3, ttl: 60000 } }) // 3 attempts per minute
   async resetPassword(
     @Headers('x-tenant-id') tenantId: string,
     @Body() dto: ResetPasswordDto
@@ -168,13 +153,10 @@ export class CustomerAuthController {
   @Post('verify-email')
   async verifyEmail(
     @Headers('x-tenant-id') tenantId: string,
-    @Body() dto: { token: string }
+    @Body() dto: VerifyEmailDto
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
-    }
-    if (!dto.token) {
-      throw new BadRequestException('Verification token required');
     }
     return this.authService.verifyEmail(tenantId, dto.token);
   }
@@ -184,22 +166,16 @@ export class CustomerAuthController {
    * POST /api/v1/store/auth/resend-verification
    */
   @Post('resend-verification')
+  @UseGuards(CustomerAuthGuard)
   async resendVerification(
     @Headers('x-tenant-id') tenantId: string,
-    @Headers('authorization') authHeader: string
+    @CurrentCustomer() customerId: string
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
 
-    const token = this.extractToken(authHeader);
-    const payload = await this.authService.verifyToken(token);
-
-    if (payload.tenantId !== tenantId) {
-      throw new UnauthorizedException('Invalid token');
-    }
-
-    return this.authService.resendVerificationEmail(tenantId, payload.customerId);
+    return this.authService.resendVerificationEmail(tenantId, customerId);
   }
 
   // ============ ADDRESS MANAGEMENT ============
@@ -209,22 +185,16 @@ export class CustomerAuthController {
    * GET /api/v1/store/auth/addresses
    */
   @Get('addresses')
+  @UseGuards(CustomerAuthGuard)
   async getAddresses(
     @Headers('x-tenant-id') tenantId: string,
-    @Headers('authorization') authHeader: string
+    @CurrentCustomer() customerId: string
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
 
-    const token = this.extractToken(authHeader);
-    const payload = await this.authService.verifyToken(token);
-
-    if (payload.tenantId !== tenantId) {
-      throw new UnauthorizedException('Invalid token');
-    }
-
-    return this.authService.getAddresses(tenantId, payload.customerId);
+    return this.authService.getAddresses(tenantId, customerId);
   }
 
   /**
@@ -232,24 +202,18 @@ export class CustomerAuthController {
    * POST /api/v1/store/auth/addresses
    */
   @Post('addresses')
+  @UseGuards(CustomerAuthGuard)
   @Throttle({ medium: { limit: 10, ttl: 60000 } })
   async addAddress(
     @Headers('x-tenant-id') tenantId: string,
-    @Headers('authorization') authHeader: string,
+    @CurrentCustomer() customerId: string,
     @Body() dto: AddAddressDto
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
 
-    const token = this.extractToken(authHeader);
-    const payload = await this.authService.verifyToken(token);
-
-    if (payload.tenantId !== tenantId) {
-      throw new UnauthorizedException('Invalid token');
-    }
-
-    return this.authService.addAddress(tenantId, payload.customerId, dto);
+    return this.authService.addAddress(tenantId, customerId, dto);
   }
 
   /**
@@ -257,10 +221,11 @@ export class CustomerAuthController {
    * PUT /api/v1/store/auth/addresses/:id
    */
   @Put('addresses/:id')
+  @UseGuards(CustomerAuthGuard)
   @Throttle({ medium: { limit: 10, ttl: 60000 } })
   async updateAddress(
     @Headers('x-tenant-id') tenantId: string,
-    @Headers('authorization') authHeader: string,
+    @CurrentCustomer() customerId: string,
     @Param('id') addressId: string,
     @Body() dto: Partial<AddAddressDto>
   ) {
@@ -268,16 +233,9 @@ export class CustomerAuthController {
       throw new BadRequestException('Tenant ID required');
     }
 
-    const token = this.extractToken(authHeader);
-    const payload = await this.authService.verifyToken(token);
-
-    if (payload.tenantId !== tenantId) {
-      throw new UnauthorizedException('Invalid token');
-    }
-
     return this.authService.updateAddress(
       tenantId,
-      payload.customerId,
+      customerId,
       addressId,
       dto
     );
@@ -288,38 +246,17 @@ export class CustomerAuthController {
    * DELETE /api/v1/store/auth/addresses/:id
    */
   @Delete('addresses/:id')
+  @UseGuards(CustomerAuthGuard)
   @Throttle({ medium: { limit: 10, ttl: 60000 } })
   async deleteAddress(
     @Headers('x-tenant-id') tenantId: string,
-    @Headers('authorization') authHeader: string,
+    @CurrentCustomer() customerId: string,
     @Param('id') addressId: string
   ) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
 
-    const token = this.extractToken(authHeader);
-    const payload = await this.authService.verifyToken(token);
-
-    if (payload.tenantId !== tenantId) {
-      throw new UnauthorizedException('Invalid token');
-    }
-
-    return this.authService.deleteAddress(tenantId, payload.customerId, addressId);
-  }
-
-  // ============ HELPERS ============
-
-  private extractToken(authHeader: string): string {
-    if (!authHeader) {
-      throw new UnauthorizedException('No authorization header');
-    }
-
-    const [type, token] = authHeader.split(' ');
-    if (type !== 'Bearer' || !token) {
-      throw new UnauthorizedException('Invalid authorization header');
-    }
-
-    return token;
+    return this.authService.deleteAddress(tenantId, customerId, addressId);
   }
 }

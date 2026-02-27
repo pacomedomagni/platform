@@ -24,11 +24,12 @@ export class DashboardService {
       legalPageCount,
       adminUser,
     ] = await Promise.all([
-      // Total revenue this month
+      // Total revenue this month (only captured payments to match admin dashboard)
       this.prisma.order.aggregate({
         where: {
           tenantId,
           createdAt: { gte: startOfMonth },
+          paymentStatus: 'CAPTURED',
           status: { in: ['CONFIRMED', 'PROCESSING', 'SHIPPED', 'DELIVERED'] },
         },
         _sum: { grandTotal: true },

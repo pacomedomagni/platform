@@ -60,7 +60,7 @@ export function clearTenantCache(): void {
 }
 
 // Base fetch with tenant header
-async function apiFetch<T>(
+export async function apiFetch<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
@@ -122,6 +122,9 @@ export interface Product {
   trackInventory?: boolean;
   tags?: string[];
   createdAt?: string;
+  averageRating?: number;
+  reviewCount?: number;
+  leadTime?: string;
 }
 
 // Alias for backward compatibility
@@ -321,6 +324,9 @@ export const checkoutApi = {
     shippingAddress: Address;
     billingAddress?: Address;
     customerNotes?: string;
+    giftCardCode?: string;
+    giftCardPin?: string;
+    shippingRateId?: string;
   }): Promise<CheckoutResponse> => {
     return apiFetch('/v1/store/checkout', {
       method: 'POST',
@@ -600,6 +606,53 @@ export const paymentsApi = {
   },
 };
 
+// ==================== SHIPPING API ====================
+
+export interface ShippingRate {
+  id: string;
+  name: string;
+  price: number;
+  estimatedDays: string | null;
+  isFree: boolean;
+}
+
+export interface ShippingRatesResponse {
+  rates: ShippingRate[];
+}
+
+export const shippingApi = {
+  getRates: (data: {
+    country: string;
+    state?: string;
+    zipCode?: string;
+    cartTotal: number;
+  }): Promise<ShippingRatesResponse> => {
+    return apiFetch('/v1/store/shipping/calculate', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+};
+
+// ==================== GIFT CARD API ====================
+
+export interface GiftCardBalance {
+  code: string;
+  balance: number;
+  currency: string;
+  expiresAt: string | null;
+  status: string;
+}
+
+export const giftCardApi = {
+  checkBalance: (code: string, pin?: string): Promise<GiftCardBalance> => {
+    return apiFetch('/v1/store/gift-cards/check-balance', {
+      method: 'POST',
+      body: JSON.stringify({ code, pin }),
+    });
+  },
+};
+
 // ==================== I18N API ====================
 
 export interface StoreLanguage {
@@ -622,7 +675,7 @@ export interface LocalizedProduct extends Product {
 
 /**
  * I18n API client
- * Uses the storefront/:storeId/i18n/... route prefix.
+ * Uses the /v1/storefront/:storeId/i18n/... route prefix to match backend controller.
  * The storeId is the resolved tenant UUID.
  */
 async function i18nFetch<T>(
@@ -630,7 +683,7 @@ async function i18nFetch<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const tenantId = await resolveTenantId();
-  return apiFetch(`/storefront/${tenantId}/i18n${path}`, options);
+  return apiFetch(`/v1/storefront/${tenantId}/i18n${path}`, options);
 }
 
 export const i18nApi = {

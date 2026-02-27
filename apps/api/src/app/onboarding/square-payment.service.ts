@@ -105,18 +105,29 @@ export class SquarePaymentService {
   ): Promise<any> {
     const accessToken = await this.squareOAuth.getValidAccessToken(tenantId);
 
+    // Square API requires amount_money for all refunds (including full refunds).
+    // If amount is not provided, we need to fetch the original payment to get the total.
+    let refundAmountCents: number;
+    if (amount !== undefined && amount !== null) {
+      refundAmountCents = Math.round(amount * 100);
+    } else {
+      // Fetch the original payment to get the full amount for a full refund
+      const originalPayment = await this.getPayment(tenantId, paymentId);
+      refundAmountCents = originalPayment?.amount_money?.amount || 0;
+      if (!refundAmountCents) {
+        throw new BadRequestException('Could not determine refund amount from original payment');
+      }
+    }
+
     const body: any = {
       idempotency_key: `refund_${paymentId}_${Date.now()}`,
       payment_id: paymentId,
       reason,
-    };
-
-    if (amount) {
-      body.amount_money = {
-        amount: Math.round(amount * 100),
+      amount_money: {
+        amount: refundAmountCents,
         currency: (currency || 'USD').toUpperCase(),
-      };
-    }
+      },
+    };
 
     const response = await fetch(`${this.apiBase}/v2/refunds`, {
       method: 'POST',

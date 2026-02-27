@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { Prisma, ProductReview } from '@prisma/client';
@@ -182,66 +181,71 @@ export class ReviewsService {
       throw new NotFoundException('Review not found');
     }
 
-    // Check for existing vote - build OR conditions only for provided identifiers
-    const orConditions: any[] = [];
-    if (customerId) orConditions.push({ customerId });
-    if (sessionToken) orConditions.push({ sessionToken });
-
-    if (orConditions.length === 0) {
+    if (!customerId && !sessionToken) {
       throw new BadRequestException('Must be logged in or have a session to vote');
     }
 
-    const existingVote = await this.prisma.reviewVote.findFirst({
-      where: {
-        reviewId,
-        OR: orConditions,
-      },
-    });
-
-    if (existingVote) {
-      // Update existing vote if different
-      if (existingVote.isHelpful !== dto.isHelpful) {
-        await this.prisma.$transaction(async (tx) => {
-          await tx.reviewVote.update({
-            where: { id: existingVote.id },
-            data: { isHelpful: dto.isHelpful },
-          });
-          // Use raw SQL with GREATEST to prevent negative counts
-          if (dto.isHelpful) {
-            await tx.$executeRaw`
-              UPDATE product_reviews
-              SET "helpfulCount" = "helpfulCount" + 1,
-                  "notHelpfulCount" = GREATEST("notHelpfulCount" - 1, 0)
-              WHERE id = ${reviewId}
-            `;
-          } else {
-            await tx.$executeRaw`
-              UPDATE product_reviews
-              SET "helpfulCount" = GREATEST("helpfulCount" - 1, 0),
-                  "notHelpfulCount" = "notHelpfulCount" + 1
-              WHERE id = ${reviewId}
-            `;
-          }
-        });
-      }
-    } else {
-      // Create new vote
-      await this.prisma.$transaction([
-        this.prisma.reviewVote.create({
+    // Use try-catch with unique constraint handling to prevent TOCTOU race
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        // Attempt to create the vote; unique constraint will reject duplicates
+        await tx.reviewVote.create({
           data: {
             reviewId,
             customerId,
             sessionToken,
             isHelpful: dto.isHelpful,
           },
-        }),
-        this.prisma.productReview.update({
+        });
+
+        await tx.productReview.update({
           where: { id: reviewId },
           data: dto.isHelpful
             ? { helpfulCount: { increment: 1 } }
             : { notHelpfulCount: { increment: 1 } },
-        }),
-      ]);
+        });
+      });
+    } catch (error) {
+      // If unique constraint violation, the vote already exists -- try to update it
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        // Find the existing vote to check if it needs updating
+        const orConditions: any[] = [];
+        if (customerId) orConditions.push({ customerId });
+        if (sessionToken) orConditions.push({ sessionToken });
+
+        const existingVote = await this.prisma.reviewVote.findFirst({
+          where: { reviewId, OR: orConditions },
+        });
+
+        if (existingVote && existingVote.isHelpful !== dto.isHelpful) {
+          await this.prisma.$transaction(async (tx) => {
+            await tx.reviewVote.update({
+              where: { id: existingVote.id },
+              data: { isHelpful: dto.isHelpful },
+            });
+            if (dto.isHelpful) {
+              await tx.$executeRaw`
+                UPDATE product_reviews
+                SET "helpfulCount" = "helpfulCount" + 1,
+                    "notHelpfulCount" = GREATEST("notHelpfulCount" - 1, 0)
+                WHERE id = ${reviewId}
+              `;
+            } else {
+              await tx.$executeRaw`
+                UPDATE product_reviews
+                SET "helpfulCount" = GREATEST("helpfulCount" - 1, 0),
+                    "notHelpfulCount" = "notHelpfulCount" + 1
+                WHERE id = ${reviewId}
+              `;
+            }
+          });
+        }
+      } else {
+        throw error;
+      }
     }
 
     return { success: true };

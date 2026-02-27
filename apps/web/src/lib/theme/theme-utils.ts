@@ -4,6 +4,7 @@
  */
 
 import type { Theme, ThemeColors, HSLColor, RGBColor } from './types';
+import { sanitizeCSS } from './theme-engine';
 
 /**
  * Convert hex color to HSL
@@ -216,9 +217,9 @@ export function themeToCSS(theme: Theme): string {
 
   css += '}\n';
 
-  // Add custom CSS if present
+  // Add custom CSS if present (sanitized to prevent injection)
   if (theme.customCSS) {
-    css += `\n${theme.customCSS}\n`;
+    css += `\n${sanitizeCSS(theme.customCSS)}\n`;
   }
 
   return css;

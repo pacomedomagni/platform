@@ -167,7 +167,8 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
   }, [params.id]);
 
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
+    const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
+    return new Intl.NumberFormat(locale, {
       style: 'currency',
       currency: 'USD',
     }).format(amount);
@@ -208,7 +209,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
   const canProcess = order.status === 'CONFIRMED';
   const canShip = order.status === 'PROCESSING' || order.status === 'CONFIRMED';
   const canDeliver = order.status === 'SHIPPED';
-  const canRefund = order.paymentStatus === 'PAID' && order.status !== 'CANCELLED';
+  const canRefund = (order.paymentStatus === 'CAPTURED' || order.paymentStatus === 'PARTIALLY_REFUNDED') && order.status !== 'CANCELLED';
 
   return (
     <div className="p-6 lg:p-8 space-y-6">

@@ -260,7 +260,7 @@ export class OrdersService {
     tenantId: string,
     orderId: string,
     status: string,
-    trackingInfo?: { carrier?: string; trackingNumber?: string }
+    trackingInfo?: { carrier?: string; trackingNumber?: string; adminNotes?: string }
   ) {
     const order = await this.prisma.order.findFirst({
       where: { id: orderId, tenantId },
@@ -294,6 +294,10 @@ export class OrdersService {
       updateData.cancelledAt = new Date();
     }
 
+    if (trackingInfo?.adminNotes !== undefined) {
+      updateData.adminNotes = trackingInfo.adminNotes;
+    }
+
     await this.prisma.order.update({
       where: { id: orderId },
       data: updateData,
@@ -302,6 +306,11 @@ export class OrdersService {
     // Return stock to inventory when cancelling a paid order
     if (status === 'CANCELLED' && ['CAPTURED', 'PARTIALLY_REFUNDED'].includes(order.paymentStatus)) {
       await this.returnStockForOrder(tenantId, orderId);
+    }
+
+    // Release stock reservations when cancelling an unpaid order (PENDING)
+    if (status === 'CANCELLED' && order.paymentStatus === 'PENDING') {
+      await this.releaseStockReservationsForOrder(tenantId, orderId);
     }
 
     // Fire-and-forget transactional emails
@@ -408,6 +417,60 @@ export class OrdersService {
     }
   }
 
+  /**
+   * Release stock reservations for an unpaid order being cancelled.
+   * Unlike returnStockForOrder (which creates a RECEIPT movement for paid orders),
+   * this only decrements reservedQty since actualQty was never decremented.
+   */
+  private async releaseStockReservationsForOrder(tenantId: string, orderId: string) {
+    try {
+      const order = await this.prisma.order.findUnique({
+        where: { id: orderId },
+        include: {
+          items: {
+            include: {
+              product: {
+                include: { item: true },
+              },
+            },
+          },
+        },
+      });
+
+      if (!order || !order.items.length) return;
+
+      const warehouse = await this.prisma.warehouse.findFirst({
+        where: { tenantId, isActive: true },
+        orderBy: { createdAt: 'asc' },
+      });
+
+      if (!warehouse) {
+        this.logger.error(`No active warehouse found for stock release on order ${orderId}`);
+        return;
+      }
+
+      for (const item of order.items) {
+        if (!item.product?.item?.id) continue;
+
+        const itemId = item.product.item.id;
+        const qty = item.quantity;
+
+        // Safe decrement: clamp to 0 to prevent negative reservedQty
+        await this.prisma.$executeRaw`
+          UPDATE warehouse_item_balances
+          SET "reservedQty" = GREATEST("reservedQty" - ${qty}, 0)
+          WHERE "tenantId" = ${tenantId}
+            AND "itemId" = ${itemId}
+            AND "warehouseId" = ${warehouse.id}
+        `;
+      }
+
+      this.logger.log(`Stock reservations released for cancelled unpaid order: ${order.orderNumber}`);
+    } catch (error) {
+      this.logger.error(`Failed to release stock reservations for order ${orderId}:`, error);
+    }
+  }
+
   // ============ EMAIL HELPERS ============
 
   private async sendOrderStatusEmailAsync(orderId: string, template: string) {
@@ -489,8 +552,8 @@ export class OrdersService {
     const capturedPayment = payments?.find(p => p.status === 'CAPTURED');
     const failedPayment = payments?.find(p => p.status === 'FAILED');
 
-    // Calculate total refunded
-    const refundedPayments = payments?.filter(p => ['REFUNDED', 'PARTIALLY_REFUNDED'].includes(p.status)) || [];
+    // Calculate total refunded — match records by type='REFUND' OR status='REFUNDED'
+    const refundedPayments = payments?.filter(p => p.type === 'REFUND' || p.status === 'REFUNDED') || [];
     const totalRefunded = refundedPayments.reduce((sum: number, p: any) => sum + Number(p.amount), 0);
 
     return {

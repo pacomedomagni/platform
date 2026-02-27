@@ -10,8 +10,26 @@ import {
 import { SeedDataService } from './seed-data.service';
 
 const PROVISIONING_KEY_PREFIX = 'provisioning:';
-const PROVISIONING_TTL = 3600; // 1 hour
+// H-TP-3: Increased TTL to 24 hours to prevent status loss for slow provisioning.
+// The getProvisioningStatus method also falls back to DB (tenant.isActive) when
+// Redis key expires, providing persistent status tracking alongside Redis.
+const PROVISIONING_TTL = 86400; // 24 hours
 
+/**
+ * ProvisioningService handles tenant creation and setup.
+ *
+ * M-TP-4: There are two provisioning paths:
+ *
+ * 1. `createTenant()` + `provisionTenantAsync()` - Used by the admin/API provisioning
+ *    endpoint (POST /api/provision). Creates the tenant record first, then runs all
+ *    provisioning steps (user creation, seeding) asynchronously in the background.
+ *    Returns immediately with a tenantId and PENDING status.
+ *
+ * 2. `createTenantWithUser()` + `provisionSeedDataAsync()` - Used by the self-service
+ *    onboarding/signup flow. Creates both the tenant and admin user atomically in a
+ *    single Serializable transaction (so a JWT can be issued immediately). Seed data
+ *    provisioning still runs asynchronously after the transaction commits.
+ */
 @Injectable()
 export class ProvisioningService {
   private readonly logger = new Logger(ProvisioningService.name);
@@ -37,33 +55,37 @@ export class ProvisioningService {
    * Returns immediately with tenantId, actual provisioning happens async
    */
   async createTenant(dto: CreateTenantDto): Promise<{ tenantId: string; status: ProvisioningStatus }> {
-    // Check if domain is already taken
-    const existingTenant = await this.prisma.tenant.findUnique({
-      where: { domain: dto.domain },
-    });
+    // H-TP-2: Wrap in a Serializable transaction (like createTenantWithUser) to prevent
+    // race conditions where two requests could create tenants with the same domain/email.
+    const tenant = await this.prisma.$transaction(async (tx) => {
+      // Check if domain is already taken
+      const existingTenant = await tx.tenant.findUnique({
+        where: { domain: dto.domain },
+      });
 
-    if (existingTenant) {
-      throw new ConflictException(`Domain "${dto.domain}" is already taken`);
-    }
+      if (existingTenant) {
+        throw new ConflictException(`Domain "${dto.domain}" is already taken`);
+      }
 
-    // Check if email is already registered
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email: dto.ownerEmail },
-    });
+      // Check if email is already registered
+      const existingUser = await tx.user.findUnique({
+        where: { email: dto.ownerEmail },
+      });
 
-    if (existingUser) {
-      throw new ConflictException(`Email "${dto.ownerEmail}" is already registered`);
-    }
+      if (existingUser) {
+        throw new ConflictException(`Email "${dto.ownerEmail}" is already registered`);
+      }
 
-    // Create tenant with PENDING status
-    const tenant = await this.prisma.tenant.create({
-      data: {
-        name: dto.businessName,
-        domain: dto.domain,
-        baseCurrency: dto.baseCurrency || 'USD',
-        isActive: false, // Will be activated after provisioning completes
-      },
-    });
+      // Create tenant with PENDING status
+      return tx.tenant.create({
+        data: {
+          name: dto.businessName,
+          domain: dto.domain,
+          baseCurrency: dto.baseCurrency || 'USD',
+          isActive: false, // Will be activated after provisioning completes
+        },
+      });
+    }, { isolationLevel: 'Serializable' });
 
     // Store provisioning state in Redis
     await this.updateProvisioningStatus(tenant.id, {
@@ -301,7 +323,7 @@ export class ProvisioningService {
         estimatedSecondsRemaining: 30,
       });
 
-      // Step 2: Create admin user
+      // Step 2: Create admin user (M-TP-5: skip if user already exists, e.g. on retry)
       await this.updateProvisioningStatus(tenantId, {
         tenantId,
         status: ProvisioningStatus.CREATING_USER,
@@ -310,15 +332,23 @@ export class ProvisioningService {
         estimatedSecondsRemaining: 25,
       });
 
-      const hashedPassword = await bcrypt.hash(dto.ownerPassword, 12);
-      await this.prisma.user.create({
-        data: {
-          email: dto.ownerEmail,
-          password: hashedPassword,
-          tenantId,
-          roles: ['admin', 'user'],
-        },
+      const existingUser = await this.prisma.user.findFirst({
+        where: { tenantId, email: dto.ownerEmail },
       });
+
+      if (!existingUser) {
+        const hashedPassword = await bcrypt.hash(dto.ownerPassword, 12);
+        await this.prisma.user.create({
+          data: {
+            email: dto.ownerEmail,
+            password: hashedPassword,
+            tenantId,
+            roles: ['admin', 'user'],
+          },
+        });
+      } else {
+        this.logger.log(`User ${dto.ownerEmail} already exists for tenant ${tenantId}, skipping creation`);
+      }
 
       // Step 3: Seed Chart of Accounts
       await this.updateProvisioningStatus(tenantId, {

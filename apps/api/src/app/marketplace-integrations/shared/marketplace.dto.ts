@@ -6,6 +6,7 @@ import {
   IsUUID,
   IsEnum,
   IsArray,
+  IsNotEmpty,
   Min,
   Max,
   MaxLength,
@@ -101,9 +102,9 @@ export class CreateDirectListingDto {
   @IsUUID()
   connectionId!: string;
 
-  @IsOptional()
-  @IsUUID()
-  productListingId?: string;
+  @IsString()
+  @IsNotEmpty()
+  productListingId!: string;
 
   @IsOptional()
   @IsUUID()

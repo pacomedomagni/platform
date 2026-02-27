@@ -17,6 +17,7 @@ interface Customer {
   lastOrderDate?: string | null;
   createdAt: string;
   emailVerified?: boolean;
+  isActive?: boolean;
 }
 
 interface CustomerStats {
@@ -50,20 +51,24 @@ export default function CustomersPage() {
       const customerList = res.data.data || [];
       setCustomers(customerList);
 
-      // Calculate stats
-      const now = new Date();
-      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-      const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+      // Use stats from backend if available, otherwise compute locally
+      if (res.data.stats) {
+        setStats(res.data.stats);
+      } else {
+        const now = new Date();
+        const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
 
-      setStats({
-        total: customerList.length,
-        new: customerList.filter((c: Customer) => new Date(c.createdAt) > thirtyDaysAgo).length,
-        highValue: customerList.filter((c: Customer) => (c.totalSpent || 0) > 1000).length,
-        atRisk: customerList.filter(
-          (c: Customer) =>
-            c.lastOrderDate && new Date(c.lastOrderDate) < ninetyDaysAgo
-        ).length,
-      });
+        setStats({
+          total: customerList.length,
+          new: customerList.filter((c: Customer) => new Date(c.createdAt) > thirtyDaysAgo).length,
+          highValue: customerList.filter((c: Customer) => (c.totalSpent || 0) > 500).length,
+          atRisk: customerList.filter(
+            (c: Customer) =>
+              c.lastOrderDate && new Date(c.lastOrderDate) < ninetyDaysAgo
+          ).length,
+        });
+      }
     } catch (error: any) {
       console.error('Failed to load customers:', error);
     } finally {
@@ -98,15 +103,17 @@ export default function CustomersPage() {
     return () => clearTimeout(debounce);
   }, [search, segment]);
 
+  const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
+
   const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat(locale, {
       style: 'currency',
       currency: 'USD',
     }).format(amount);
   };
 
   const formatDate = (date: string) => {
-    return new Date(date).toLocaleDateString('en-US', {
+    return new Date(date).toLocaleDateString(locale, {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
@@ -231,6 +238,7 @@ export default function CustomersPage() {
                 <th className="text-left p-3 font-medium">Customer</th>
                 <th className="text-left p-3 font-medium">Email</th>
                 <th className="text-left p-3 font-medium">Phone</th>
+                <th className="text-center p-3 font-medium">Status</th>
                 <th className="text-right p-3 font-medium">Orders</th>
                 <th className="text-right p-3 font-medium">Total Spent</th>
                 <th className="text-left p-3 font-medium">Last Order</th>
@@ -241,13 +249,13 @@ export default function CustomersPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="p-8 text-center text-muted-foreground">
+                  <td colSpan={9} className="p-8 text-center text-muted-foreground">
                     Loading customers...
                   </td>
                 </tr>
               ) : customers.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-16 text-center">
+                  <td colSpan={9} className="py-16 text-center">
                     <div className="flex flex-col items-center justify-center">
                       <Users className="h-12 w-12 text-slate-300 mb-4" />
                       <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">No customers yet</h3>
@@ -288,6 +296,13 @@ export default function CustomersPage() {
                       </td>
                       <td className="p-3 text-sm text-muted-foreground">
                         {customer.phone || '-'}
+                      </td>
+                      <td className="p-3 text-center">
+                        {customer.isActive === false ? (
+                          <Badge variant="destructive" className="text-xs">Inactive</Badge>
+                        ) : (
+                          <Badge variant="success" className="text-xs">Active</Badge>
+                        )}
                       </td>
                       <td className="p-3 text-right">{customer.orderCount || 0}</td>
                       <td className="p-3 text-right font-medium">

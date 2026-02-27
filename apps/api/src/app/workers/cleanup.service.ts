@@ -198,6 +198,12 @@ export class CleanupService {
   /**
    * Clean up old audit logs (older than 90 days)
    * Runs weekly on Sunday at 4 AM
+   *
+   * Design note: This cleanup is intentionally global (not scoped per tenant).
+   * Audit logs older than 90 days are deleted regardless of tenant because the
+   * retention policy is system-wide. Per-tenant retention would require iterating
+   * all tenants and adds complexity with minimal benefit since the age threshold
+   * applies uniformly.
    */
   @Cron(CronExpression.EVERY_WEEK)
   async cleanupOldAuditLogs() {

@@ -1,5 +1,5 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '@platform/db';
+import { PrismaService, Prisma } from '@platform/db';
 import { SerialStatus } from '@prisma/client';
 import {
   CreateBatchDto,
@@ -90,63 +90,65 @@ export class BatchSerialService {
    * Update a batch
    */
   async updateBatch(ctx: TenantContext, batchId: string, dto: UpdateBatchDto) {
-    const batch = await this.prisma.batch.findFirst({
-      where: { id: batchId, tenantId: ctx.tenantId },
-      include: { item: true },
-    });
+    return this.prisma.$transaction(async (tx) => {
+      const batch = await tx.batch.findFirst({
+        where: { id: batchId, tenantId: ctx.tenantId },
+        include: { item: true },
+      });
 
-    if (!batch) {
-      throw new NotFoundException(`Batch not found`);
-    }
+      if (!batch) {
+        throw new NotFoundException(`Batch not found`);
+      }
 
-    const beforeValues = {
-      mfgDate: batch.mfgDate?.toISOString().split('T')[0] ?? null,
-      expDate: batch.expDate?.toISOString().split('T')[0] ?? null,
-      isActive: batch.isActive,
-    };
+      const beforeValues = {
+        mfgDate: batch.mfgDate?.toISOString().split('T')[0] ?? null,
+        expDate: batch.expDate?.toISOString().split('T')[0] ?? null,
+        isActive: batch.isActive,
+      };
 
-    const updated = await this.prisma.batch.update({
-      where: { id: batchId },
-      data: {
-        mfgDate: dto.mfgDate !== undefined ? (dto.mfgDate ? new Date(dto.mfgDate) : null) : undefined,
-        expDate: dto.expDate !== undefined ? (dto.expDate ? new Date(dto.expDate) : null) : undefined,
-        isActive: dto.isActive,
-      },
-      include: { item: true },
-    });
-
-    const afterValues = {
-      mfgDate: updated.mfgDate?.toISOString().split('T')[0] ?? null,
-      expDate: updated.expDate?.toISOString().split('T')[0] ?? null,
-      isActive: updated.isActive,
-    };
-
-    await this.prisma.auditLog.create({
-      data: {
-        tenantId: ctx.tenantId,
-        userId: ctx.userId,
-        action: 'UPDATE_BATCH',
-        docType: 'Batch',
-        docName: batch.batchNo,
-        meta: {
-          batchId,
-          itemCode: batch.item.code,
-          before: beforeValues,
-          after: afterValues,
+      const updated = await tx.batch.update({
+        where: { id: batchId },
+        data: {
+          mfgDate: dto.mfgDate !== undefined ? (dto.mfgDate ? new Date(dto.mfgDate) : null) : undefined,
+          expDate: dto.expDate !== undefined ? (dto.expDate ? new Date(dto.expDate) : null) : undefined,
+          isActive: dto.isActive,
         },
-      },
-    });
+        include: { item: true },
+      });
 
-    return {
-      id: updated.id,
-      itemCode: updated.item.code,
-      itemName: updated.item.name,
-      batchNo: updated.batchNo,
-      mfgDate: updated.mfgDate?.toISOString().split('T')[0],
-      expDate: updated.expDate?.toISOString().split('T')[0],
-      isActive: updated.isActive,
-      updatedAt: updated.updatedAt,
-    };
+      const afterValues = {
+        mfgDate: updated.mfgDate?.toISOString().split('T')[0] ?? null,
+        expDate: updated.expDate?.toISOString().split('T')[0] ?? null,
+        isActive: updated.isActive,
+      };
+
+      await tx.auditLog.create({
+        data: {
+          tenantId: ctx.tenantId,
+          userId: ctx.userId,
+          action: 'UPDATE_BATCH',
+          docType: 'Batch',
+          docName: batch.batchNo,
+          meta: {
+            batchId,
+            itemCode: batch.item.code,
+            before: beforeValues,
+            after: afterValues,
+          },
+        },
+      });
+
+      return {
+        id: updated.id,
+        itemCode: updated.item.code,
+        itemName: updated.item.name,
+        batchNo: updated.batchNo,
+        mfgDate: updated.mfgDate?.toISOString().split('T')[0],
+        expDate: updated.expDate?.toISOString().split('T')[0],
+        isActive: updated.isActive,
+        updatedAt: updated.updatedAt,
+      };
+    });
   }
 
   /**
@@ -156,7 +158,7 @@ export class BatchSerialService {
     const limit = query.limit || 50;
     const offset = query.offset || 0;
 
-    const where: any = { tenantId: ctx.tenantId };
+    const where: Prisma.BatchWhereInput = { tenantId: ctx.tenantId };
 
     if (query.itemCode) {
       const item = await this.prisma.item.findFirst({
@@ -504,90 +506,92 @@ export class BatchSerialService {
    * Update a serial
    */
   async updateSerial(ctx: TenantContext, serialId: string, dto: UpdateSerialDto) {
-    const serial = await this.prisma.serial.findFirst({
-      where: { id: serialId, tenantId: ctx.tenantId },
-    });
+    return this.prisma.$transaction(async (tx) => {
+      const serial = await tx.serial.findFirst({
+        where: { id: serialId, tenantId: ctx.tenantId },
+      });
 
-    if (!serial) {
-      throw new NotFoundException('Serial not found');
-    }
-
-    const beforeValues = {
-      status: serial.status,
-      warehouseId: serial.warehouseId,
-      locationId: serial.locationId,
-    };
-
-    const updateData: any = {};
-
-    if (dto.status) {
-      updateData.status = dto.status as SerialStatus;
-    }
-
-    if (dto.warehouseCode !== undefined) {
-      if (dto.warehouseCode) {
-        const warehouse = await this.prisma.warehouse.findFirst({
-          where: { tenantId: ctx.tenantId, code: dto.warehouseCode },
-        });
-        if (!warehouse) {
-          throw new BadRequestException(`Warehouse not found: ${dto.warehouseCode}`);
-        }
-        updateData.warehouseId = warehouse.id;
-
-        if (dto.locationCode) {
-          const location = await this.prisma.location.findFirst({
-            where: { tenantId: ctx.tenantId, warehouseId: warehouse.id, code: dto.locationCode },
-          });
-          if (!location) {
-            throw new BadRequestException(`Location not found: ${dto.locationCode}`);
-          }
-          updateData.locationId = location.id;
-        }
-      } else {
-        updateData.warehouseId = null;
-        updateData.locationId = null;
+      if (!serial) {
+        throw new NotFoundException('Serial not found');
       }
-    }
 
-    const updated = await this.prisma.serial.update({
-      where: { id: serialId },
-      data: updateData,
-      include: { item: true, warehouse: true, location: true, batch: true },
-    });
+      const beforeValues = {
+        status: serial.status,
+        warehouseId: serial.warehouseId,
+        locationId: serial.locationId,
+      };
 
-    const afterValues = {
-      status: updated.status,
-      warehouseId: updated.warehouseId,
-      locationId: updated.locationId,
-    };
+      const updateData: Record<string, unknown> = {};
 
-    await this.prisma.auditLog.create({
-      data: {
-        tenantId: ctx.tenantId,
-        userId: ctx.userId,
-        action: 'UPDATE_SERIAL',
-        docType: 'Serial',
-        docName: serial.serialNo,
-        meta: {
-          serialId,
-          serialNo: serial.serialNo,
-          before: beforeValues,
-          after: afterValues,
+      if (dto.status) {
+        updateData.status = dto.status as SerialStatus;
+      }
+
+      if (dto.warehouseCode !== undefined) {
+        if (dto.warehouseCode) {
+          const warehouse = await tx.warehouse.findFirst({
+            where: { tenantId: ctx.tenantId, code: dto.warehouseCode },
+          });
+          if (!warehouse) {
+            throw new BadRequestException(`Warehouse not found: ${dto.warehouseCode}`);
+          }
+          updateData.warehouseId = warehouse.id;
+
+          if (dto.locationCode) {
+            const location = await tx.location.findFirst({
+              where: { tenantId: ctx.tenantId, warehouseId: warehouse.id, code: dto.locationCode },
+            });
+            if (!location) {
+              throw new BadRequestException(`Location not found: ${dto.locationCode}`);
+            }
+            updateData.locationId = location.id;
+          }
+        } else {
+          updateData.warehouseId = null;
+          updateData.locationId = null;
+        }
+      }
+
+      const updated = await tx.serial.update({
+        where: { id: serialId },
+        data: updateData,
+        include: { item: true, warehouse: true, location: true, batch: true },
+      });
+
+      const afterValues = {
+        status: updated.status,
+        warehouseId: updated.warehouseId,
+        locationId: updated.locationId,
+      };
+
+      await tx.auditLog.create({
+        data: {
+          tenantId: ctx.tenantId,
+          userId: ctx.userId,
+          action: 'UPDATE_SERIAL',
+          docType: 'Serial',
+          docName: serial.serialNo,
+          meta: {
+            serialId,
+            serialNo: serial.serialNo,
+            before: beforeValues,
+            after: afterValues,
+          },
         },
-      },
-    });
+      });
 
-    return {
-      id: updated.id,
-      itemCode: updated.item.code,
-      itemName: updated.item.name,
-      serialNo: updated.serialNo,
-      status: updated.status,
-      warehouseCode: updated.warehouse?.code,
-      locationCode: updated.location?.code,
-      batchNo: updated.batch?.batchNo,
-      updatedAt: updated.updatedAt,
-    };
+      return {
+        id: updated.id,
+        itemCode: updated.item.code,
+        itemName: updated.item.name,
+        serialNo: updated.serialNo,
+        status: updated.status,
+        warehouseCode: updated.warehouse?.code,
+        locationCode: updated.location?.code,
+        batchNo: updated.batch?.batchNo,
+        updatedAt: updated.updatedAt,
+      };
+    });
   }
 
   /**
@@ -597,7 +601,7 @@ export class BatchSerialService {
     const limit = query.limit || 50;
     const offset = query.offset || 0;
 
-    const where: any = { tenantId: ctx.tenantId };
+    const where: Prisma.SerialWhereInput = { tenantId: ctx.tenantId };
 
     if (query.itemCode) {
       const item = await this.prisma.item.findFirst({

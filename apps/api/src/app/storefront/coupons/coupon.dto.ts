@@ -28,7 +28,7 @@ export class CreateCouponDto {
   discountType: string;
 
   @IsNumber()
-  @Min(0)
+  @Min(0.01)
   @Type(() => Number)
   discountValue: number;
 
@@ -86,7 +86,7 @@ export class UpdateCouponDto {
   discountType?: string;
 
   @IsNumber()
-  @Min(0)
+  @Min(0.01)
   @IsOptional()
   @Type(() => Number)
   discountValue?: number;

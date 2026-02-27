@@ -24,6 +24,20 @@ type CashFlow = {
   movements: CashMovement[];
 };
 
+const formatCurrency = (amount: number) => {
+  const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+  }
+};
+
 export default function CashFlowPage() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -69,7 +83,7 @@ export default function CashFlowPage() {
       {data && (
         <div className="space-y-3">
           <div className="text-sm text-slate-600">
-            Inflow: {data.cash_inflow} | Outflow: {data.cash_outflow} | Net: {data.net_cash_change}
+            Inflow: {formatCurrency(data.cash_inflow)} | Outflow: {formatCurrency(data.cash_outflow)} | Net: {formatCurrency(data.net_cash_change)}
           </div>
           <ReportCard>
             <ReportTable>
@@ -90,9 +104,9 @@ export default function CashFlowPage() {
                     <td className="p-3">{row.posting_date}</td>
                     <td className="p-3">{row.voucher_type} {row.voucher_no}</td>
                     <td className="p-3">{row.account}</td>
-                    <td className="p-3 text-right">{row.debit}</td>
-                    <td className="p-3 text-right">{row.credit}</td>
-                    <td className="p-3 text-right">{row.net_change}</td>
+                    <td className="p-3 text-right">{formatCurrency(row.debit)}</td>
+                    <td className="p-3 text-right">{formatCurrency(row.credit)}</td>
+                    <td className="p-3 text-right">{formatCurrency(row.net_change)}</td>
                   </tr>
                 ))}
               </tbody>

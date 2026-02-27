@@ -2,6 +2,7 @@ import { Injectable, Logger, BadRequestException, OnModuleDestroy } from '@nestj
 import * as crypto from 'crypto';
 import { PrismaService } from '@platform/db';
 import { EbayStoreService } from './ebay-store.service';
+import { MarketplaceAuditService } from '../shared/marketplace-audit.service';
 import eBayApi from 'ebay-api';
 
 /**
@@ -15,7 +16,8 @@ export class EbayAuthService implements OnModuleDestroy {
 
   constructor(
     private ebayStore: EbayStoreService,
-    private prisma: PrismaService
+    private prisma: PrismaService,
+    private audit: MarketplaceAuditService
   ) {
     // Clean up expired OAuth states every 10 minutes
     this.cleanupInterval = setInterval(() => this.cleanupExpiredStates(), 10 * 60 * 1000);
@@ -35,11 +37,8 @@ export class EbayAuthService implements OnModuleDestroy {
       throw new BadRequestException('eBay API credentials not configured');
     }
 
-    // Verify connection exists and belongs to tenant
-    const connection = await this.ebayStore.getConnection(connectionId);
-    if (connection.tenantId !== tenantId) {
-      throw new BadRequestException('Connection not found');
-    }
+    // Verify connection exists and belongs to tenant (getConnection already filters by tenantId)
+    await this.ebayStore.getConnection(connectionId, tenantId);
 
     // Generate state for CSRF protection
     const state = this.generateState();
@@ -55,7 +54,7 @@ export class EbayAuthService implements OnModuleDestroy {
       },
     });
 
-    // Generate OAuth URL
+    // Generate OAuth URL using URLSearchParams for proper encoding
     const appId = process.env['EBAY_APP_ID'];
     const ruName = process.env['EBAY_RU_NAME'];
     const scopes = [
@@ -74,12 +73,15 @@ export class EbayAuthService implements OnModuleDestroy {
       'https://api.ebay.com/oauth/api_scope/commerce.identity.readonly',
     ];
 
-    const authUrl = `https://auth.ebay.com/oauth2/authorize?` +
-      `client_id=${appId}&` +
-      `response_type=code&` +
-      `redirect_uri=${encodeURIComponent(ruName)}&` +
-      `scope=${encodeURIComponent(scopes.join(' '))}&` +
-      `state=${state}`;
+    const params = new URLSearchParams({
+      client_id: appId,
+      response_type: 'code',
+      redirect_uri: ruName,
+      scope: scopes.join(' '),
+      state,
+    });
+
+    const authUrl = `https://auth.ebay.com/oauth2/authorize?${params.toString()}`;
 
     this.logger.log(`Generated OAuth URL for connection ${connectionId}`);
     return authUrl;
@@ -115,13 +117,21 @@ export class EbayAuthService implements OnModuleDestroy {
         accessTokenExpiry: new Date(Date.now() + tokens.expires_in * 1000),
       });
 
-      // Fetch and save business policies
-      await this.ebayStore.fetchAndSaveBusinessPolicies(connectionId);
+      // Fetch and save business policies (pass tenantId explicitly since OAuth callback has no CLS context)
+      await this.ebayStore.fetchAndSaveBusinessPolicies(connectionId, tenantId);
 
       // Clean up state from database
       await this.prisma.oAuthState.delete({ where: { id: state } });
 
       this.logger.log(`Successfully connected eBay store for connection ${connectionId}`);
+
+      // Audit log: OAuth connected
+      try {
+        const connection = await this.ebayStore.getConnection(connectionId, tenantId);
+        await this.audit.logOAuthConnected(connectionId, connection.name, 'EBAY');
+      } catch {
+        // Non-critical: do not fail the callback if audit logging fails
+      }
 
       return {
         success: true,
@@ -129,7 +139,7 @@ export class EbayAuthService implements OnModuleDestroy {
       };
     } catch (error) {
       this.logger.error(`OAuth callback failed for connection ${connectionId}`, error);
-      throw error;
+      throw new BadRequestException('OAuth connection failed. Please try again.');
     }
   }
 
@@ -156,7 +166,7 @@ export class EbayAuthService implements OnModuleDestroy {
     if (!response.ok) {
       const errorText = await response.text();
       this.logger.error(`Token exchange failed: ${response.status} - ${errorText}`);
-      throw new Error(`Failed to exchange code for tokens: ${response.status}`);
+      throw new Error('Failed to exchange authorization code for tokens. Please try again.');
     }
 
     return response.json();
