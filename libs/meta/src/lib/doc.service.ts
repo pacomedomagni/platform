@@ -58,7 +58,7 @@ export class DocService {
     const tableName = this.getTableName(docType);
     
     // 0. Validate Payload
-    await this.validationService.validate(docType, data);
+    await this.validationService.validate(docType, data, tenantId);
 
     // 0.1 Hook: beforeSave
     const processedData = await this.hookService.trigger(docType, 'beforeSave', { ...data }, user);
@@ -98,7 +98,7 @@ export class DocService {
 
     const childDocCache = new Map<
       string,
-      { allowed: Set<string>; tableName: string }
+      { allowed: Set<string>; tableName: string; requiredFields: string[] }
     >();
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -107,7 +107,7 @@ export class DocService {
         standardFields.tenantId = tenantId;
         const columns = Object.keys(standardFields);
         const values = Object.values(standardFields);
-        
+
         let parentDoc: any;
 
         if (columns.length === 0) {
@@ -117,10 +117,10 @@ export class DocService {
             const safeColumns = columns.map(assertSafeColumnName);
             const colStr = safeColumns.map(c => `"${c}"`).join(', ');
             const valPlaceholders = columns.map((_, i) => `$${i + 1}`).join(', ');
-            
+
             const sql = `
-                INSERT INTO "${tableName}" (${colStr}) 
-                VALUES (${valPlaceholders}) 
+                INSERT INTO "${tableName}" (${colStr})
+                VALUES (${valPlaceholders})
                 RETURNING *;
             `;
             const result = await tx.$queryRawUnsafe(sql, ...values);
@@ -136,6 +136,7 @@ export class DocService {
 
                  let cached = childDocCache.get(childDocType);
                  if (!cached) {
+                   // L-4: Fetch child field metadata once and reuse for both allowed-fields and required-fields validation
                    const childMeta = await this.getDocFieldMeta(childDocType);
                    const allowed = new Set<string>([
                      'name',
@@ -147,16 +148,16 @@ export class DocService {
                      'tenantId',
                      ...childMeta.filter((f) => f.type !== 'Table').map((f) => f.name),
                    ]);
-                   cached = { allowed, tableName: this.getTableName(childDocType) };
+                   const requiredFields = childMeta
+                     .filter(f => f.required && f.type !== 'Table')
+                     .map(f => f.name);
+                   cached = { allowed, tableName: this.getTableName(childDocType), requiredFields };
                    childDocCache.set(childDocType, cached);
                  }
                  const childTableName = cached.tableName;
 
                  // H-DT-6: Validate each child row against its DocType field definitions
-                 const childFieldDefs = await this.getDocFieldMeta(childDocType);
-                 const requiredFields = childFieldDefs
-                   .filter(f => f.required && f.type !== 'Table')
-                   .map(f => f.name);
+                 const requiredFields = cached.requiredFields;
 
                  for (let ci = 0; ci < children.length; ci++) {
                    const child = children[ci];
@@ -223,39 +224,40 @@ export class DocService {
     if (!tenantId) throw new BadRequestException('Missing tenantId');
 
     const tableName = this.getTableName(docType);
-    const result = await this.prisma.$transaction(async (tx) => {
-      await this.setTenant(tx, tenantId);
-      return tx.$queryRawUnsafe(`
-          SELECT * FROM "${tableName}" WHERE name = $1 LIMIT 1;
-      `, name);
-    });
-    
-    const doc = (result as any[])[0];
-    if (!doc) throw new NotFoundException(`${docType} ${name} not found`);
 
-    // Fetch Children
+    // M-8: Fetch parent and children inside the same transaction for consistency
     const childFields = await this.prisma.docField.findMany({
         where: { docTypeName: docType, type: 'Table' }
     });
 
-    for (const field of childFields) {
-        if (field.options) {
-            await this.assertDocTypeExists(field.options);
-            const childTableName = this.getTableName(field.options);
-            const children = await this.prisma.$transaction(async (tx) => {
-              await this.setTenant(tx, tenantId);
-              return tx.$queryRawUnsafe(`
-                  SELECT * FROM "${childTableName}" 
+    const doc = await this.prisma.$transaction(async (tx) => {
+      await this.setTenant(tx, tenantId);
+      const result = await tx.$queryRawUnsafe(`
+          SELECT * FROM "${tableName}" WHERE name = $1 LIMIT 1;
+      `, name);
+
+      const parentDoc = (result as any[])[0];
+      if (!parentDoc) throw new NotFoundException(`${docType} ${name} not found`);
+
+      // Fetch Children inside the same transaction
+      for (const field of childFields) {
+          if (field.options) {
+              await this.assertDocTypeExists(field.options);
+              const childTableName = this.getTableName(field.options);
+              const children = await tx.$queryRawUnsafe(`
+                  SELECT * FROM "${childTableName}"
                   WHERE ( "parentId" = $1 OR "parent" = $2 )
                     AND parentfield = $3
                     AND parenttype = $4
                   ORDER BY idx ASC
-              `, doc.id, doc.name ?? name, field.name, docType);
-            });
-            
-            doc[field.name] = children;
-        }
-    }
+              `, parentDoc.id, parentDoc.name ?? name, field.name, docType);
+
+              parentDoc[field.name] = children;
+          }
+      }
+
+      return parentDoc;
+    });
 
     return doc;
   }
@@ -321,9 +323,12 @@ export class DocService {
     // 0. Separate Fields
     const { id, creation, modified, ...rest } = processedData;
 
+    // H-5: Exclude user-supplied tenantId to prevent tenant spoofing in updates
+    delete rest.tenantId;
+
     const standardFields: any = {};
     const childTables: any = {};
-    
+
     for (const key of Object.keys(rest)) {
         assertSafeColumnName(key);
         if (Array.isArray(rest[key])) {
@@ -344,7 +349,7 @@ export class DocService {
 
     const childDocCache = new Map<
       string,
-      { allowed: Set<string>; tableName: string }
+      { allowed: Set<string>; tableName: string; requiredFields: string[] }
     >();
 
         const result = await this.prisma.$transaction(async (tx) => {
@@ -353,7 +358,7 @@ export class DocService {
         let parentDoc: any;
         standardFields.tenantId = tenantId;
         const columns = Object.keys(standardFields);
-        
+
         if (columns.length > 0) {
             const updates: string[] = [];
             const values: any[] = [];
@@ -368,14 +373,14 @@ export class DocService {
             values.push(name); // WHERE clause param
 
             const sql = `
-                UPDATE "${tableName}" 
-                SET ${updates.join(', ')}, modified = NOW() 
+                UPDATE "${tableName}"
+                SET ${updates.join(', ')}, modified = NOW()
                 WHERE name = $${i}
                 RETURNING *;
             `;
             const result = await tx.$queryRawUnsafe(sql, ...values);
             parentDoc = (result as any[])[0];
-            
+
             if (!parentDoc) throw new NotFoundException(`${docType} ${name} not found`);
         } else {
             // No standard fields changed, fetch current to ensure existence and return
@@ -397,6 +402,7 @@ export class DocService {
 
                    let cached = childDocCache.get(childDocType);
                    if (!cached) {
+                     // L-4: Fetch child field metadata once and reuse for both allowed-fields and required-fields validation
                      const childMeta = await this.getDocFieldMeta(childDocType);
                      const allowed = new Set<string>([
                        'name',
@@ -408,16 +414,16 @@ export class DocService {
                        'tenantId',
                        ...childMeta.filter((f) => f.type !== 'Table').map((f) => f.name),
                      ]);
-                     cached = { allowed, tableName: this.getTableName(childDocType) };
+                     const requiredFields = childMeta
+                       .filter(f => f.required && f.type !== 'Table')
+                       .map(f => f.name);
+                     cached = { allowed, tableName: this.getTableName(childDocType), requiredFields };
                      childDocCache.set(childDocType, cached);
                    }
                    const childTableName = cached.tableName;
 
                    // H-DT-6: Validate each child row against its DocType field definitions
-                   const childFieldDefs = await this.getDocFieldMeta(childDocType);
-                   const requiredFields = childFieldDefs
-                     .filter(f => f.required && f.type !== 'Table')
-                     .map(f => f.name);
+                   const requiredFields = cached.requiredFields;
 
                    for (let ci = 0; ci < children.length; ci++) {
                      const child = children[ci];

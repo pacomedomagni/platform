@@ -29,8 +29,7 @@ export class DashboardController {
    */
   @Get('revenue')
   async getRevenue(@Tenant() tenantId: string) {
-    const summary = await this.dashboardService.getSummary(tenantId);
-    return summary.revenue;
+    return this.dashboardService.getRevenue(tenantId);
   }
 
   /**
@@ -38,8 +37,7 @@ export class DashboardController {
    */
   @Get('orders')
   async getOrders(@Tenant() tenantId: string) {
-    const summary = await this.dashboardService.getSummary(tenantId);
-    return summary.orders;
+    return this.dashboardService.getOrders(tenantId);
   }
 
   /**
@@ -47,7 +45,6 @@ export class DashboardController {
    */
   @Get('inventory')
   async getInventory(@Tenant() tenantId: string) {
-    const summary = await this.dashboardService.getSummary(tenantId);
-    return summary.inventory;
+    return this.dashboardService.getInventory(tenantId);
   }
 }

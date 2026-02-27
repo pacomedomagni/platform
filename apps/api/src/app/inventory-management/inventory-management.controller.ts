@@ -100,11 +100,16 @@ export class InventoryManagementController {
     @Request() req: RequestWithUser,
     @Param('itemCode') itemCode: string,
     @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
   ) {
+    const parsedLimit = limit ? parseInt(limit, 10) : 20;
+    const clampedLimit = Math.min(Number.isNaN(parsedLimit) ? 20 : parsedLimit, 500);
+    const parsedOffset = offset ? parseInt(offset, 10) : 0;
     return this.stockMovement.getItemMovements(
       this.getContext(tenantId, req),
       itemCode,
-      limit ? parseInt(limit, 10) : 20,
+      clampedLimit,
+      Number.isNaN(parsedOffset) ? 0 : parsedOffset,
     );
   }
 

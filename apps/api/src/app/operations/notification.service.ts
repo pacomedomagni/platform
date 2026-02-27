@@ -159,6 +159,9 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
   ): Promise<NotificationRecord[]> {
     if (userIds.length === 0) return [];
 
+    // H-4: Capture timestamp before createMany to scope the subsequent findMany
+    const beforeCreate = new Date();
+
     // M-NT-1: Use createMany instead of looping individual creates
     await this.prisma.notification.createMany({
       data: userIds.map(userId => ({
@@ -176,12 +179,14 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
     });
 
     // Fetch the created notifications for return value and real-time subscriptions
+    // H-4: Filter by createdAt >= beforeCreate to ensure only the just-created records are returned
     const notifications = await this.prisma.notification.findMany({
       where: {
         tenantId: ctx.tenantId,
         userId: { in: userIds },
         type: dto.type,
         title: dto.title,
+        createdAt: { gte: beforeCreate },
       },
       orderBy: { createdAt: 'desc' },
       take: userIds.length,
@@ -243,6 +248,18 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
       ],
     };
 
+    // L-5: Build unreadCount where clause independently, only using tenant/user filters
+    // (not the user's isRead filter which would skew the count)
+    const unreadWhere: Prisma.NotificationWhereInput = {
+      tenantId: ctx.tenantId,
+      ...(query.userId && { userId: query.userId }),
+      isRead: false,
+      OR: [
+        { expiresAt: null },
+        { expiresAt: { gt: new Date() } },
+      ],
+    };
+
     const [data, total, unreadCount] = await Promise.all([
       this.prisma.notification.findMany({
         where,
@@ -252,7 +269,7 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
       }),
       this.prisma.notification.count({ where }),
       this.prisma.notification.count({
-        where: { ...where, isRead: false },
+        where: unreadWhere,
       }),
     ]);
 

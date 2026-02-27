@@ -90,19 +90,33 @@ export class CustomerAuthService implements OnModuleInit {
     // Hash password
     const passwordHash = await bcrypt.hash(dto.password, SALT_ROUNDS);
 
-    // Create customer
-    const customer = await this.prisma.storeCustomer.create({
-      data: {
-        tenantId,
-        email: dto.email.toLowerCase(),
-        passwordHash,
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        phone: dto.phone,
-        acceptsMarketing: dto.acceptsMarketing ?? false,
-        isActive: true,
-      },
-    });
+    // H4: Wrap create in try-catch for P2002 race condition (concurrent registration with same email)
+    let customer;
+    try {
+      customer = await this.prisma.storeCustomer.create({
+        data: {
+          tenantId,
+          email: dto.email.toLowerCase(),
+          passwordHash,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          phone: dto.phone,
+          acceptsMarketing: dto.acceptsMarketing ?? false,
+          isActive: true,
+        },
+      });
+    } catch (error: any) {
+      // Unique constraint violation - another request registered this email concurrently
+      if (error?.code === 'P2002') {
+        this.logger.warn(`Concurrent registration attempt for email in tenant ${tenantId}`);
+        return {
+          customer: null,
+          token: null,
+          message: 'Registration initiated. Please check your email for verification.',
+        };
+      }
+      throw error;
+    }
 
     // Link any guest orders placed with the same email to this new account
     await this.prisma.order.updateMany({
@@ -245,7 +259,7 @@ export class CustomerAuthService implements OnModuleInit {
     const passwordHash = await bcrypt.hash(dto.newPassword, SALT_ROUNDS);
 
     // Increment tokenVersion to revoke existing tokens + invalidate pending reset tokens
-    await this.prisma.$transaction([
+    const [updatedCustomer] = await this.prisma.$transaction([
       this.prisma.storeCustomer.update({
         where: { id: customerId },
         data: { passwordHash, tokenVersion: { increment: 1 } },
@@ -256,7 +270,10 @@ export class CustomerAuthService implements OnModuleInit {
       }),
     ]);
 
-    return { success: true, message: 'Password updated successfully' };
+    // H3: Return a new JWT token with the updated tokenVersion so the frontend can update its stored token
+    const newToken = this.generateToken(customerId, tenantId, updatedCustomer.tokenVersion ?? 0);
+
+    return { success: true, message: 'Password updated successfully', token: newToken };
   }
 
   /**
@@ -597,19 +614,34 @@ export class CustomerAuthService implements OnModuleInit {
         });
       }
 
+      // M10: When unsetting isDefault on the current default, auto-promote another address
+      if (dto.isDefault === false && existing.isDefault) {
+        const anotherAddress = await tx.storeAddress.findFirst({
+          where: { tenantId, customerId, id: { not: addressId } },
+          orderBy: { createdAt: 'asc' },
+        });
+        if (anotherAddress) {
+          await tx.storeAddress.update({
+            where: { id: anotherAddress.id },
+            data: { isDefault: true },
+          });
+        }
+      }
+
+      // M9: Use undefined checks (not falsy checks) so empty strings can be set intentionally
       const address = await tx.storeAddress.update({
         where: { id: addressId },
         data: {
-          ...(dto.label && { label: dto.label }),
+          ...(dto.label !== undefined && { label: dto.label }),
           ...(dto.firstName !== undefined && { firstName: dto.firstName }),
           ...(dto.lastName !== undefined && { lastName: dto.lastName }),
           ...(dto.company !== undefined && { company: dto.company }),
-          ...(dto.addressLine1 && { addressLine1: dto.addressLine1 }),
+          ...(dto.addressLine1 !== undefined && { addressLine1: dto.addressLine1 }),
           ...(dto.addressLine2 !== undefined && { addressLine2: dto.addressLine2 }),
-          ...(dto.city && { city: dto.city }),
+          ...(dto.city !== undefined && { city: dto.city }),
           ...(dto.state !== undefined && { state: dto.state }),
-          ...(dto.postalCode && { postalCode: dto.postalCode }),
-          ...(dto.country && { country: dto.country }),
+          ...(dto.postalCode !== undefined && { postalCode: dto.postalCode }),
+          ...(dto.country !== undefined && { country: dto.country }),
           ...(dto.phone !== undefined && { phone: dto.phone }),
           ...(dto.isDefault !== undefined && { isDefault: dto.isDefault }),
         },

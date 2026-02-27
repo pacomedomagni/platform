@@ -255,14 +255,22 @@ export class ReviewsService {
 
   async listReviewsAdmin(
     tenantId: string,
-    options: { page?: number; limit?: number; status?: string; productId?: string } = {}
+    options: { page?: number; limit?: number; status?: string; productId?: string; search?: string } = {}
   ) {
-    const { page = 1, limit = 20, status, productId } = options;
+    const { page = 1, limit = 20, status, productId, search } = options;
     const skip = (page - 1) * limit;
 
     const where: Prisma.ProductReviewWhereInput = { tenantId };
     if (status) where.status = status;
     if (productId) where.productListingId = productId;
+    // L1: Server-side search for admin reviews list
+    if (search) {
+      where.OR = [
+        { title: { contains: search, mode: 'insensitive' } },
+        { content: { contains: search, mode: 'insensitive' } },
+        { reviewerName: { contains: search, mode: 'insensitive' } },
+      ];
+    }
 
     const [reviews, total] = await Promise.all([
       this.prisma.productReview.findMany({
@@ -302,8 +310,10 @@ export class ReviewsService {
       throw new NotFoundException('Review not found');
     }
 
-    const updatedReview = await this.prisma.productReview.update({
-      where: { id: reviewId },
+    // M3: Include tenantId in the where clause for defense in depth
+    // Use updateMany with tenantId, then fetch the updated record
+    await this.prisma.productReview.updateMany({
+      where: { id: reviewId, tenantId },
       data: {
         status: dto.status,
         moderatedAt: new Date(),
@@ -311,6 +321,14 @@ export class ReviewsService {
         moderationNotes: dto.notes,
       },
     });
+
+    const updatedReview = await this.prisma.productReview.findFirst({
+      where: { id: reviewId, tenantId },
+    });
+
+    if (!updatedReview) {
+      throw new NotFoundException('Review not found after update');
+    }
 
     // Update product rating stats when approval status changes
     if (dto.status === 'approved' || dto.status === 'rejected') {
@@ -329,12 +347,17 @@ export class ReviewsService {
       throw new NotFoundException('Review not found');
     }
 
-    return this.prisma.productReview.update({
-      where: { id: reviewId },
+    // M4: Include tenantId in the where clause for defense in depth
+    await this.prisma.productReview.updateMany({
+      where: { id: reviewId, tenantId },
       data: {
         adminResponse: dto.response,
         adminRespondedAt: new Date(),
       },
+    });
+
+    return this.prisma.productReview.findFirst({
+      where: { id: reviewId, tenantId },
     });
   }
 
@@ -347,7 +370,8 @@ export class ReviewsService {
       throw new NotFoundException('Review not found');
     }
 
-    await this.prisma.productReview.delete({ where: { id: reviewId } });
+    // M2: Use deleteMany with tenantId scope for defense in depth
+    await this.prisma.productReview.deleteMany({ where: { id: reviewId, tenantId } });
 
     // Update product rating stats
     await this.updateProductRatingStats(tenantId, review.productListingId);

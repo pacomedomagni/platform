@@ -46,8 +46,9 @@ async function apiFetch<T>(
   return response.json();
 }
 
+// L3: Use crypto.randomUUID() instead of Math.random() for better entropy
 function generateSessionToken(): string {
-  const token = Math.random().toString(36).substring(2) + Date.now().toString(36);
+  const token = crypto.randomUUID();
   localStorage.setItem('session_token', token);
   return token;
 }

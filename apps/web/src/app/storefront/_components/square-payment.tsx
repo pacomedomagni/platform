@@ -86,6 +86,9 @@ export function SquarePayment({
   const [cardReady, setCardReady] = useState(false);
   const cardRef = useRef<SquareCard | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // L4: Stabilize onError reference to prevent useEffect re-runs
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
 
   useEffect(() => {
     let cancelled = false;
@@ -111,7 +114,7 @@ export function SquarePayment({
         if (!cancelled) {
           const msg = err instanceof Error ? err.message : 'Failed to initialize payment form';
           setMessage(msg);
-          onError(msg);
+          onErrorRef.current(msg);
         }
       } finally {
         if (!cancelled) {
@@ -129,7 +132,7 @@ export function SquarePayment({
         cardRef.current = null;
       }
     };
-  }, [applicationId, locationId, onError]);
+  }, [applicationId, locationId]);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {

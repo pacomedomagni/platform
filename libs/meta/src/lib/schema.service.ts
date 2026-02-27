@@ -237,7 +237,7 @@ export class SchemaService implements OnModuleInit {
         await this.prisma.$executeRawUnsafe(`
             CREATE TABLE "${tableName}" (
                 "id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                "tenantId" UUID,
+                "tenantId" UUID NOT NULL,
                 "name" VARCHAR(255), 
                 "creation" TIMESTAMP DEFAULT NOW(),
                 "modified" TIMESTAMP DEFAULT NOW(),
@@ -303,7 +303,7 @@ export class SchemaService implements OnModuleInit {
     if (column.length === 0) {
       this.logger.log(`Adding tenantId column to ${tableName}`);
       await this.prisma.$executeRawUnsafe(`
-        ALTER TABLE "${tableName}" ADD COLUMN "tenantId" UUID;
+        ALTER TABLE "${tableName}" ADD COLUMN "tenantId" UUID NOT NULL;
       `);
     }
 

@@ -9,6 +9,7 @@ import {
   Query,
   UseGuards,
   Request,
+  BadRequestException,
 } from '@nestjs/common';
 import { I18nService } from './i18n.service';
 import { StoreAdminGuard } from '@platform/auth';
@@ -364,6 +365,9 @@ export class I18nPublicController {
       this.getContext(storeId)
     );
     const languageCode = lang ?? defaultLang?.languageCode ?? 'en';
+    if (!keys) {
+      throw new BadRequestException('keys parameter is required');
+    }
     const contentKeys = keys.split(',').map((k) => k.trim());
 
     return this.i18nService.getContents(

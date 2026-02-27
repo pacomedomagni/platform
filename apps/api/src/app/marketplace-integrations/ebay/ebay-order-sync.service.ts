@@ -7,11 +7,10 @@ import {
   OnModuleDestroy,
 } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
-import { ClsService } from 'nestjs-cls';
 import { EbayStoreService } from './ebay-store.service';
 import { EbayClientService } from './ebay-client.service';
 import { MarketplaceAuditService } from '../shared/marketplace-audit.service';
-import { SyncType, SyncDirection, SyncLogStatus, SyncStatus } from '../shared/marketplace.types';
+import { SyncType, SyncDirection, SyncLogStatus, SyncStatus, ListingStatus } from '../shared/marketplace.types';
 import { Prisma } from '@prisma/client';
 const Decimal = Prisma.Decimal;
 
@@ -33,7 +32,6 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     private prisma: PrismaService,
-    private cls: ClsService,
     private ebayStore: EbayStoreService,
     private ebayClient: EbayClientService,
     private audit: MarketplaceAuditService
@@ -311,7 +309,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
           itemsSuccess,
           itemsFailed,
           completedAt: new Date(),
-          errorMessage: error.message || 'Order sync failed',
+          errorMessage: error?.message || String(error) || 'Order sync failed',
           details: 'Order sync failed with an unexpected error',
         },
       });
@@ -334,7 +332,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
       offset?: number;
     }
   ) {
-    const where: any = { tenantId };
+    const where: Prisma.MarketplaceOrderWhereInput = { tenantId };
     if (connectionId) where.connectionId = connectionId;
     if (filters?.fulfillmentStatus) where.fulfillmentStatus = filters.fulfillmentStatus;
     if (filters?.paymentStatus) where.paymentStatus = filters.paymentStatus;
@@ -445,7 +443,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
         where: { id: orderId },
         data: {
           syncStatus: SyncStatus.ERROR,
-          errorMessage: `Fulfillment failed: ${error.message}`,
+          errorMessage: `Fulfillment failed: ${error?.message || String(error)}`,
         },
       });
 
@@ -514,7 +512,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
             where: {
               connectionId: connection.id,
               tenantId: connection.tenantId,
-              status: 'published',
+              status: ListingStatus.PUBLISHED,
               externalOfferId: { not: null },
               warehouseId: { not: null },
             },

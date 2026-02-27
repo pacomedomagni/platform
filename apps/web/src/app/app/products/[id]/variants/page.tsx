@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button, Card, Input, Label, Badge, Spinner, ConfirmDialog, toast } from '@platform/ui';
 import { Plus, Edit2, Trash2, Package, DollarSign, Image as ImageIcon } from 'lucide-react';
@@ -27,11 +27,7 @@ export default function ProductVariantsPage() {
   const [editingVariant, setEditingVariant] = useState<ProductVariant | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; variantId: string | null }>({ open: false, variantId: null });
 
-  useEffect(() => {
-    loadData();
-  }, [productId]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setIsLoading(true);
       const [variantsData, attributesData] = await Promise.all([
@@ -45,7 +41,11 @@ export default function ProductVariantsPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [productId]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
 
   const handleDelete = (variantId: string) => {
     setDeleteConfirm({ open: true, variantId });

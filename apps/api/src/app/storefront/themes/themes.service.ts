@@ -16,7 +16,8 @@ import { getAllPresets, getPresetBySlug } from './presets';
 @Injectable()
 export class ThemesService implements OnModuleInit {
   private readonly logger = new Logger(ThemesService.name);
-  private activeThemeCache = new Map<string, any>();
+  private activeThemeCache = new Map<string, { data: any; timestamp: number }>();
+  private readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -57,10 +58,14 @@ export class ThemesService implements OnModuleInit {
    * Get the currently active theme for a tenant
    */
   async getActiveTheme(tenantId: string) {
-    // Check cache first
+    // Check cache first (with TTL expiration)
     const cached = this.activeThemeCache.get(tenantId);
+    if (cached && Date.now() - cached.timestamp < this.CACHE_TTL_MS) {
+      return cached.data;
+    }
+    // Expired or missing -- remove stale entry
     if (cached) {
-      return cached;
+      this.activeThemeCache.delete(tenantId);
     }
 
     const activeTheme = await this.prisma.storeTheme.findFirst({
@@ -82,8 +87,8 @@ export class ThemesService implements OnModuleInit {
       };
     }
 
-    // Cache the active theme
-    this.activeThemeCache.set(tenantId, activeTheme);
+    // Cache the active theme with timestamp for TTL expiration
+    this.activeThemeCache.set(tenantId, { data: activeTheme, timestamp: Date.now() });
 
     return activeTheme;
   }
@@ -410,7 +415,12 @@ export class ThemesService implements OnModuleInit {
   }
 
   /**
-   * Seed preset themes (run on module init)
+   * Seed preset themes (run on module init).
+   *
+   * Optimised to avoid N+1 queries:
+   *  1. Fetch all existing preset slugs per tenant in a single query.
+   *  2. Batch-insert missing presets with createMany.
+   *  3. Only activate a default theme when none is already active.
    */
   async seedPresets() {
     try {
@@ -422,35 +432,49 @@ export class ThemesService implements OnModuleInit {
         select: { id: true },
       });
 
-      for (const tenant of tenants) {
-        for (const preset of presets) {
-          // Check if preset already exists for this tenant
-          const existing = await this.prisma.storeTheme.findFirst({
-            where: {
-              tenantId: tenant.id,
-              slug: preset.slug,
-              isPreset: true,
-            },
-          });
+      if (tenants.length === 0) {
+        this.logger.log('No tenants found -- skipping theme seeding');
+        return;
+      }
 
-          if (!existing) {
-            await this.prisma.storeTheme.create({
-              data: {
-                tenantId: tenant.id,
-                ...preset,
-                colors: preset.colors as any,
-              },
-            });
-            this.logger.log(`Created preset theme '${preset.name}' for tenant ${tenant.id}`);
-          }
+      // Fetch all existing preset themes in one query
+      const existingPresets = await this.prisma.storeTheme.findMany({
+        where: { isPreset: true },
+        select: { tenantId: true, slug: true },
+      });
+
+      // Build a set for O(1) lookups: "tenantId::slug"
+      const existingSet = new Set(
+        existingPresets.map((p) => `${p.tenantId}::${p.slug}`)
+      );
+
+      for (const tenant of tenants) {
+        // Determine which presets are missing for this tenant
+        const missing = presets.filter(
+          (preset) => !existingSet.has(`${tenant.id}::${preset.slug}`)
+        );
+
+        if (missing.length > 0) {
+          // Batch-insert all missing presets at once
+          await this.prisma.storeTheme.createMany({
+            data: missing.map((preset) => ({
+              tenantId: tenant.id,
+              ...preset,
+              colors: preset.colors as any,
+            })),
+            skipDuplicates: true,
+          });
+          this.logger.log(
+            `Created ${missing.length} preset theme(s) for tenant ${tenant.id}`
+          );
         }
 
-        // Ensure at least one theme is active
-        const activeTheme = await this.prisma.storeTheme.findFirst({
+        // Ensure at least one theme is active (single query check)
+        const hasActive = await this.prisma.storeTheme.count({
           where: { tenantId: tenant.id, isActive: true },
         });
 
-        if (!activeTheme) {
+        if (hasActive === 0) {
           // Activate the modern theme by default
           const modernTheme = await this.prisma.storeTheme.findFirst({
             where: { tenantId: tenant.id, slug: 'modern' },
@@ -493,6 +517,8 @@ export class ThemesService implements OnModuleInit {
       .replace(/behavior\s*:/gi, '')
       .replace(/@import\b/gi, '')
       .replace(/url\s*\(\s*['"]?\s*javascript:/gi, 'url(')
-      .replace(/-moz-binding\s*:/gi, '');
+      .replace(/-moz-binding\s*:/gi, '')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
   }
 }

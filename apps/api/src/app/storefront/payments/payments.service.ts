@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { StripeService } from './stripe.service';
+import { StripeConnectService } from '../../onboarding/stripe-connect.service';
 import { SquarePaymentService } from '../../onboarding/square-payment.service';
 import { EmailService } from '@platform/email';
 import { StockMovementService } from '../../inventory-management/stock-movement.service';
@@ -18,6 +19,7 @@ export class PaymentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly stripeService: StripeService,
+    private readonly stripeConnectService: StripeConnectService,
     private readonly squarePaymentService: SquarePaymentService,
     private readonly stockMovementService: StockMovementService,
     private readonly failedOperationsService: FailedOperationsService,
@@ -159,8 +161,9 @@ export class PaymentsService {
       return;
     }
 
-    // PAY-6: Verify payment amount matches order total
-    const expectedAmountCents = Math.round(Number(order.grandTotal) * 100);
+    // PAY-6: Verify payment amount matches order total (accounting for gift card discount)
+    const giftCardApplied = Number(order.giftCardDiscount || 0);
+    const expectedAmountCents = Math.round((Number(order.grandTotal) - giftCardApplied) * 100);
     if (Math.abs(paymentIntent.amount - expectedAmountCents) > 1) {
       this.logger.error(
         `Payment amount mismatch for order ${order.orderNumber}: ` +
@@ -832,12 +835,31 @@ export class PaymentsService {
     const existingRefundCount = existingRefunds.length;
     const idempotencyKey = `refund_${tenantId}_${orderId}_${amount || 'full'}_${existingRefundCount + 1}`;
 
-    const refund = await this.stripeService.createRefund(
-      order.stripePaymentIntentId,
-      amount,
-      reason,
-      idempotencyKey
-    );
+    // Check if tenant uses Stripe Connect (has a connected account)
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { stripeConnectAccountId: true },
+    });
+
+    let refund: Stripe.Refund;
+
+    if (tenant?.stripeConnectAccountId) {
+      // Use Stripe Connect service for connected account refunds
+      refund = await this.stripeConnectService.createConnectedRefund(
+        order.stripePaymentIntentId,
+        tenant.stripeConnectAccountId,
+        amount,
+        idempotencyKey,
+      );
+    } else {
+      // Use direct Stripe service for platform refunds
+      refund = await this.stripeService.createRefund(
+        order.stripePaymentIntentId,
+        amount,
+        reason,
+        idempotencyKey
+      );
+    }
 
     // Record will be created via webhook, but we can return preliminary info
     return {
@@ -990,7 +1012,9 @@ export class PaymentsService {
       throw new BadRequestException('Square location not configured');
     }
 
-    const amount = Number(order.grandTotal);
+    // M3: Subtract gift card discount from the amount charged to Square
+    const giftCardApplied = Number(order.giftCardDiscount || 0);
+    const amount = Number(order.grandTotal) - giftCardApplied;
     const platformFee =
       amount * (Number(tenant.platformFeePercent) / 100) + Number(tenant.platformFeeFixed);
 

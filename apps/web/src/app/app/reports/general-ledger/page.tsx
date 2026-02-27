@@ -22,10 +22,26 @@ type LedgerData = {
   account: string;
   from_date: string;
   to_date: string;
+  opening_balance: number;
   entries: LedgerEntry[];
   total_debit: number;
   total_credit: number;
   closing_balance: number;
+};
+
+// TODO: Currency is hardcoded to USD. Make configurable via tenant settings or shared constant.
+const formatCurrency = (amount: number) => {
+  const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
+  try {
+    return new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+  }
 };
 
 export default function GeneralLedgerPage() {
@@ -83,7 +99,7 @@ export default function GeneralLedgerPage() {
       {data && (
         <div className="space-y-3">
           <div className="text-sm text-slate-600">
-            Total Debit: {data.total_debit} | Total Credit: {data.total_credit} | Closing: {data.closing_balance}
+            Opening: {formatCurrency(data.opening_balance)} | Total Debit: {formatCurrency(data.total_debit)} | Total Credit: {formatCurrency(data.total_credit)} | Closing: {formatCurrency(data.closing_balance)}
           </div>
           <ReportCard>
             <ReportTable>
@@ -107,10 +123,10 @@ export default function GeneralLedgerPage() {
                     <td className="p-3">{row.voucher_type} {row.voucher_no}</td>
                     <td className="p-3">{row.party ?? '-'}</td>
                     <td className="p-3">{row.against ?? '-'}</td>
-                    <td className="p-3 text-right">{row.debit}</td>
-                    <td className="p-3 text-right">{row.credit}</td>
+                    <td className="p-3 text-right">{formatCurrency(row.debit)}</td>
+                    <td className="p-3 text-right">{formatCurrency(row.credit)}</td>
                     <td className="p-3">{row.remarks ?? '-'}</td>
-                    <td className="p-3 text-right">{row.balance}</td>
+                    <td className="p-3 text-right">{formatCurrency(row.balance)}</td>
                   </tr>
                 ))}
               </tbody>

@@ -14,17 +14,19 @@ import {
 import { loadStripe, Stripe } from '@stripe/stripe-js';
 import { paymentsApi } from '../../../lib/store-api';
 
-// Stripe promise - loaded once
-let stripePromise: Promise<Stripe | null> | null = null;
+// M7: Cache stripePromise per public key so different tenants get different instances
+const stripePromiseCache = new Map<string, Promise<Stripe | null>>();
 
 async function getStripePromise() {
-  if (!stripePromise) {
-    const config = await paymentsApi.getConfig();
-    if (config.publicKey) {
-      stripePromise = loadStripe(config.publicKey);
-    }
-  }
-  return stripePromise;
+  const config = await paymentsApi.getConfig();
+  if (!config.publicKey) return null;
+
+  const cached = stripePromiseCache.get(config.publicKey);
+  if (cached) return cached;
+
+  const promise = loadStripe(config.publicKey);
+  stripePromiseCache.set(config.publicKey, promise);
+  return promise;
 }
 
 interface PaymentFormProps {
@@ -66,18 +68,10 @@ function PaymentForm({ clientSecret, orderId, orderNumber, onSuccess, onError }:
       } else if (paymentIntent && paymentIntent.status === 'succeeded') {
         onSuccess();
       } else if (paymentIntent && paymentIntent.status === 'requires_action') {
-        // 3D Secure or other authentication
-        const { error: confirmError } = await stripe.confirmPayment({
-          elements,
-          confirmParams: {
-            return_url: `${window.location.origin}/storefront/order-confirmation?order=${orderNumber || orderId || ''}`,
-          },
-        });
-        
-        if (confirmError) {
-          setMessage(confirmError.message || 'Payment authentication failed');
-          onError(confirmError.message || 'Payment authentication failed');
-        }
+        // M6: The first confirmPayment call with redirect: 'if_required' already
+        // handles 3DS inline. A second confirmPayment call would force a full-page
+        // redirect. Instead, just inform the user that authentication is still pending.
+        setMessage('Additional authentication is required. Please follow the prompts.');
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Payment failed';

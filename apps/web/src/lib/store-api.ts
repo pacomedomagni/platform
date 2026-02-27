@@ -376,8 +376,9 @@ export interface Customer {
 }
 
 export interface AuthResponse {
-  customer: Customer;
-  token: string;
+  customer: Customer | null;
+  token: string | null;
+  message?: string;
 }
 
 export interface CustomerAddress {
@@ -434,7 +435,7 @@ export const authApi = {
     });
   },
 
-  changePassword: (currentPassword: string, newPassword: string): Promise<void> => {
+  changePassword: (currentPassword: string, newPassword: string): Promise<{ success: boolean; message: string; token?: string }> => {
     return apiFetch('/v1/store/auth/change-password', {
       method: 'POST',
       body: JSON.stringify({ currentPassword, newPassword }),
@@ -646,10 +647,9 @@ export interface GiftCardBalance {
 
 export const giftCardApi = {
   checkBalance: (code: string, pin?: string): Promise<GiftCardBalance> => {
-    return apiFetch('/v1/store/gift-cards/check-balance', {
-      method: 'POST',
-      body: JSON.stringify({ code, pin }),
-    });
+    const params = new URLSearchParams({ code });
+    if (pin) params.set('pin', pin);
+    return apiFetch(`/v1/store/gift-cards/check?${params}`);
   },
 };
 

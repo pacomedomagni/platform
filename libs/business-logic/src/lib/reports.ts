@@ -126,16 +126,26 @@ export class ReportsService {
      * Generate General Ledger Report for an account
      */
     async getGeneralLedger(tenantId: string, account: string, fromDate: string, toDate: string) {
-        const entries = await this.prisma.$transaction(async (tx) => {
+        const { entries, openingBalance } = await this.prisma.$transaction(async (tx) => {
             await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
             const accountRow = await tx.account.findUnique({
                 where: { tenantId_code: { tenantId, code: account } },
                 select: { id: true },
             });
-            if (!accountRow) return [];
+            if (!accountRow) return { entries: [], openingBalance: 0 };
 
-            return tx.$queryRawUnsafe<any[]>(`
-                SELECT 
+            // Compute opening balance: sum all GL entries BEFORE fromDate
+            const openingResult = await tx.$queryRawUnsafe<[{ balance: number }]>(`
+                SELECT COALESCE(SUM(gl."debitBc" - gl."creditBc"), 0)::float as balance
+                FROM "gl_entries" gl
+                WHERE gl."tenantId" = $1
+                  AND gl."accountId" = $2
+                  AND gl."postingDate" < $3
+            `, tenantId, accountRow.id, new Date(`${fromDate}T00:00:00.000Z`));
+            const opening = Number(openingResult[0]?.balance || 0);
+
+            const rows = await tx.$queryRawUnsafe<any[]>(`
+                SELECT
                     gl."postingDate" as posting_date,
                     gl."voucherType" as voucher_type,
                     gl."voucherNo" as voucher_no,
@@ -148,9 +158,11 @@ export class ReportsService {
                   AND gl."postingDate" BETWEEN $3 AND $4
                 ORDER BY gl."postingDate", gl."postingTs"
             `, tenantId, accountRow.id, new Date(`${fromDate}T00:00:00.000Z`), new Date(`${toDate}T00:00:00.000Z`));
+
+            return { entries: rows, openingBalance: opening };
         });
 
-        let runningBalance = 0;
+        let runningBalance = openingBalance;
         const entriesWithBalance = entries.map(entry => {
             runningBalance += (entry.debit || 0) - (entry.credit || 0);
             return {
@@ -166,6 +178,7 @@ export class ReportsService {
             account,
             from_date: fromDate,
             to_date: toDate,
+            opening_balance: openingBalance,
             entries: entriesWithBalance,
             total_debit: totalDebit,
             total_credit: totalCredit,
@@ -247,6 +260,7 @@ export class ReportsService {
     async getReceivableAging(tenantId: string, asOfDate: string) {
         const invoices = await this.prisma.$transaction(async (tx) => {
             await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+            // toSafeTableName sanitizes input to [A-Za-z0-9_] only, preventing SQL injection
             const invoiceTable = toSafeTableName('Invoice');
             return tx.$queryRawUnsafe<any[]>(`
                 SELECT 
@@ -303,6 +317,7 @@ export class ReportsService {
     async getPayableAging(tenantId: string, asOfDate: string) {
         const invoices = await this.prisma.$transaction(async (tx) => {
             await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+            // toSafeTableName sanitizes input to [A-Za-z0-9_] only, preventing SQL injection
             const invoiceTable = toSafeTableName('Purchase Invoice');
             return tx.$queryRawUnsafe<any[]>(`
                 SELECT 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button, Input, Card } from '@platform/ui';
 import api from '../../../../lib/api';
 import { ReportAlert, ReportFilters, ReportPage } from '../../reports/_components/report-shell';
@@ -14,7 +14,6 @@ import {
   Download,
   BarChart3,
   PieChart,
-  Calendar,
   RefreshCw,
 } from 'lucide-react';
 
@@ -111,11 +110,24 @@ export default function AnalyticsDashboardPage() {
     }
   };
 
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
-    loadDashboard();
+    // Validate dates before firing requests
+    if (!startDate || !endDate || new Date(startDate) > new Date(endDate)) return;
+
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      loadDashboard();
+    }, 300);
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startDate, endDate, groupBy]);
 
+  // TODO: Currency is hardcoded to USD. Make configurable via tenant settings or shared constant.
   const formatCurrency = (amount: number) => {
     const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
     try {

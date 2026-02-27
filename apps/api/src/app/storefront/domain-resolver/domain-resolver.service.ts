@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import Redis from 'ioredis';
 
@@ -11,7 +11,7 @@ export interface ResolvedTenant {
 }
 
 @Injectable()
-export class DomainResolverService {
+export class DomainResolverService implements OnModuleDestroy {
   private readonly logger = new Logger(DomainResolverService.name);
   private readonly redis: Redis;
   private readonly platformDomain: string;
@@ -22,7 +22,17 @@ export class DomainResolverService {
       port: parseInt(process.env['REDIS_PORT'] || '6379', 10),
       password: process.env['REDIS_PASSWORD'],
     });
+
+    // M-1: Add error handler to prevent unhandled connection errors from crashing the process
+    this.redis.on('error', (err) => {
+      this.logger.error(`Redis connection error: ${err.message}`);
+    });
+
     this.platformDomain = process.env['DOMAIN'] || 'noslag.com';
+  }
+
+  async onModuleDestroy() {
+    await this.redis.disconnect();
   }
 
   /**

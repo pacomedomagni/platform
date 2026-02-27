@@ -19,6 +19,10 @@ export class AdminCustomersService {
     const skip = (page - 1) * limit;
 
     // Build where clause
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+
     const where: any = { tenantId };
 
     if (search) {
@@ -29,15 +33,48 @@ export class AdminCustomersService {
       ];
     }
 
-    // Get total count for stats (unfiltered by segment)
-    const totalCount = await this.prisma.storeCustomer.count({ where });
+    // M7: Apply segment filtering in the Prisma WHERE clause BEFORE pagination
+    if (segment) {
+      switch (segment) {
+        case 'new':
+          where.createdAt = { gt: thirtyDaysAgo };
+          break;
+        case 'high_value':
+          where.orders = { some: {} };
+          // We'll further filter after fetch since totalSpent is computed
+          break;
+        case 'vip':
+          where.orders = { some: {} };
+          break;
+        case 'at_risk':
+          where.orders = { some: { createdAt: { lt: ninetyDaysAgo } } };
+          break;
+      }
+    }
 
-    // Fetch customers with aggregated order data (paginated)
+    // Get total count for stats (unfiltered by segment)
+    const baseWhere: any = { tenantId };
+    if (search) {
+      baseWhere.OR = [
+        { firstName: { contains: search, mode: 'insensitive' } },
+        { lastName: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+    const totalCount = await this.prisma.storeCustomer.count({ where: baseWhere });
+
+    // Fetch customers with aggregated order data
+    // For segments that need computed fields (high_value, vip, at_risk),
+    // we fetch more and filter, then paginate
+    const needsPostFilter = segment && ['high_value', 'vip', 'at_risk'].includes(segment);
+    const fetchLimit = needsPostFilter ? 1000 : limit;
+    const fetchSkip = needsPostFilter ? 0 : skip;
+
     const customers = await this.prisma.storeCustomer.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      skip,
-      take: limit,
+      skip: fetchSkip,
+      take: fetchLimit,
       include: {
         orders: {
           select: {
@@ -50,10 +87,6 @@ export class AdminCustomersService {
     });
 
     // Map to response shape with computed fields
-    const now = new Date();
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-
     let mapped = customers.map((c) => {
       const orderCount = c.orders.length;
       const totalSpent = c.orders.reduce(
@@ -78,13 +111,10 @@ export class AdminCustomersService {
       };
     });
 
-    // Apply segment filtering after computing order stats
-    // M-3: Differentiate high_value (totalSpent > 500) from vip (totalSpent > 1000 AND orderCount >= 5)
-    if (segment) {
+    // M7: Post-filter for computed-field segments, then apply pagination
+    if (needsPostFilter) {
       mapped = mapped.filter((c) => {
         switch (segment) {
-          case 'new':
-            return new Date(c.createdAt) > thirtyDaysAgo;
           case 'high_value':
             return c.totalSpent > 500;
           case 'vip':
@@ -100,7 +130,22 @@ export class AdminCustomersService {
       });
     }
 
-    // Compute stats from the current page (best-effort; full stats require separate aggregation)
+    // Apply pagination for post-filtered results
+    const filteredTotal = needsPostFilter ? mapped.length : totalCount;
+    if (needsPostFilter) {
+      mapped = mapped.slice(skip, skip + limit);
+    }
+
+    // Compute stats -- note: stats reflect the current filtered set (L17)
+    const stats = {
+      total: totalCount,
+      new: 0,
+      highValue: 0,
+      atRisk: 0,
+    };
+
+    // For accurate stats, we need unfiltered data from this page
+    // These are best-effort counts from the current fetch
     const allMapped = customers.map((c) => {
       const orderCount = c.orders.length;
       const totalSpent = c.orders.reduce(
@@ -112,14 +157,11 @@ export class AdminCustomersService {
       return { createdAt: c.createdAt.toISOString(), totalSpent, lastOrderDate, orderCount };
     });
 
-    const stats = {
-      total: totalCount,
-      new: allMapped.filter((c) => new Date(c.createdAt) > thirtyDaysAgo).length,
-      highValue: allMapped.filter((c) => c.totalSpent > 500).length,
-      atRisk: allMapped.filter(
-        (c) => c.lastOrderDate !== null && new Date(c.lastOrderDate) < ninetyDaysAgo
-      ).length,
-    };
+    stats.new = allMapped.filter((c) => new Date(c.createdAt) > thirtyDaysAgo).length;
+    stats.highValue = allMapped.filter((c) => c.totalSpent > 500).length;
+    stats.atRisk = allMapped.filter(
+      (c) => c.lastOrderDate !== null && new Date(c.lastOrderDate) < ninetyDaysAgo
+    ).length;
 
     return {
       data: mapped,
@@ -127,8 +169,8 @@ export class AdminCustomersService {
       pagination: {
         page,
         limit,
-        total: totalCount,
-        totalPages: Math.ceil(totalCount / limit),
+        total: needsPostFilter ? filteredTotal : totalCount,
+        totalPages: Math.ceil((needsPostFilter ? filteredTotal : totalCount) / limit),
       },
     };
   }
@@ -158,6 +200,7 @@ export class AdminCustomersService {
       phone: customer.phone,
       emailVerified: customer.emailVerified,
       isActive: customer.isActive,
+      adminNotes: customer.adminNotes,
       createdAt: customer.createdAt.toISOString(),
       addresses: customer.addresses.map((a) => ({
         id: a.id,
@@ -231,11 +274,11 @@ export class AdminCustomersService {
       throw new NotFoundException('Customer not found');
     }
 
-    // TODO: Persist notes once 'adminNotes' field is added to StoreCustomer schema
-    // await this.prisma.storeCustomer.update({
-    //   where: { id: customerId },
-    //   data: { adminNotes: notes },
-    // });
+    // M6: Persist admin notes now that 'adminNotes' field is on StoreCustomer schema
+    await this.prisma.storeCustomer.update({
+      where: { id: customerId },
+      data: { adminNotes: notes },
+    });
 
     return { success: true, notes };
   }
@@ -263,6 +306,8 @@ export class AdminCustomersService {
         ...(dto.lastName !== undefined && { lastName: dto.lastName }),
         ...(dto.phone !== undefined && { phone: dto.phone }),
         ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+        // H2: When deactivating a customer, increment tokenVersion to revoke all existing JWT tokens
+        ...(dto.isActive === false && { tokenVersion: { increment: 1 } }),
       },
     });
 

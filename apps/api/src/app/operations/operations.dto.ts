@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsDateString, IsEnum, IsInt, Min, IsArray, IsObject } from 'class-validator';
+import { IsString, IsOptional, IsDateString, IsEnum, IsInt, Min, IsArray, IsObject, IsIn } from 'class-validator';
 
 // ==========================================
 // Audit Log DTOs
@@ -120,8 +120,21 @@ export class UpdateWebhookDto {
 // Background Job DTOs
 // ==========================================
 
+// M-7: Known job types for validation
+const KNOWN_JOB_TYPES = [
+  'import.products',
+  'import.customers',
+  'import.inventory',
+  'import.orders',
+  'webhook.retry',
+  'email.send',
+  'report.generate',
+  'cleanup',
+];
+
 export class CreateJobDto {
   @IsString()
+  @IsIn(KNOWN_JOB_TYPES, { message: `Job type must be one of: ${KNOWN_JOB_TYPES.join(', ')}` })
   type!: string;
 
   @IsObject()

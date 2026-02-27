@@ -52,6 +52,9 @@ export default function StockMovementsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [pagination, setPagination] = useState<{ total: number; limit: number; offset: number } | null>(null);
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 50;
 
   // Filters
   const [warehouseCode, setWarehouseCode] = useState('');
@@ -66,6 +69,7 @@ export default function StockMovementsPage() {
     movementType: 'receipt' as 'receipt' | 'issue' | 'transfer' | 'adjustment',
     itemCode: '',
     warehouseCode: '',
+    toWarehouseCode: '',
     fromLocationCode: '',
     toLocationCode: '',
     quantity: 1,
@@ -85,6 +89,8 @@ export default function StockMovementsPage() {
             movementType: movementType || undefined,
             fromDate: fromDate || undefined,
             toDate: toDate || undefined,
+            limit: PAGE_SIZE,
+            offset: page * PAGE_SIZE,
           },
         }),
         api.get('/v1/inventory-management/movements/summary', {
@@ -97,6 +103,13 @@ export default function StockMovementsPage() {
       // Backend returns { data: [...], total, limit, offset }
       setMovements(movementsRes.data.data || []);
       setSummary(summaryRes.data || null);
+      if (movementsRes.data.total !== undefined) {
+        setPagination({
+          total: movementsRes.data.total,
+          limit: movementsRes.data.limit || PAGE_SIZE,
+          offset: movementsRes.data.offset || 0,
+        });
+      }
     } catch (e: unknown) {
       const err = e as { response?: { data?: { message?: string } } };
       setError(err?.response?.data?.message || 'Failed to load stock movements');
@@ -112,7 +125,7 @@ export default function StockMovementsPage() {
       const payload = {
         movementType: formData.movementType,
         warehouseCode: formData.warehouseCode,
-        toWarehouseCode: formData.movementType === 'transfer' ? formData.warehouseCode : undefined,
+        toWarehouseCode: formData.movementType === 'transfer' ? formData.toWarehouseCode : undefined,
         reference: formData.reference || undefined,
         remarks: formData.remarks || undefined,
         items: [
@@ -130,6 +143,7 @@ export default function StockMovementsPage() {
         movementType: 'receipt',
         itemCode: '',
         warehouseCode: '',
+        toWarehouseCode: '',
         fromLocationCode: '',
         toLocationCode: '',
         quantity: 1,
@@ -143,6 +157,7 @@ export default function StockMovementsPage() {
     }
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadMovements depends on filter state; we only want initial load
   useEffect(() => {
     loadMovements();
   }, []);
@@ -276,6 +291,32 @@ export default function StockMovementsPage() {
             })}
           </tbody>
         </ReportTable>
+        {/* Pagination Controls */}
+        {pagination && pagination.total > PAGE_SIZE && (
+          <div className="flex items-center justify-between border-t p-3">
+            <span className="text-sm text-muted-foreground">
+              Showing {page * PAGE_SIZE + 1}-{Math.min((page + 1) * PAGE_SIZE, pagination.total)} of {pagination.total}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setPage((p) => Math.max(0, p - 1)); loadMovements(); }}
+                disabled={page === 0}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setPage((p) => p + 1); loadMovements(); }}
+                disabled={(page + 1) * PAGE_SIZE >= pagination.total}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
       </ReportCard>
 
       {/* Create Movement Modal */}
@@ -320,7 +361,9 @@ export default function StockMovementsPage() {
                 />
               </div>
               <div>
-                <label className="text-sm font-medium text-muted-foreground">Warehouse Code</label>
+                <label className="text-sm font-medium text-muted-foreground">
+                  {formData.movementType === 'transfer' ? 'Source Warehouse Code' : 'Warehouse Code'}
+                </label>
                 <Input
                   className="mt-1"
                   value={formData.warehouseCode}
@@ -328,6 +371,18 @@ export default function StockMovementsPage() {
                 />
               </div>
             </div>
+
+            {formData.movementType === 'transfer' && (
+              <div>
+                <label className="text-sm font-medium text-muted-foreground">Destination Warehouse Code</label>
+                <Input
+                  className="mt-1"
+                  value={formData.toWarehouseCode}
+                  onChange={(e) => setFormData({ ...formData, toWarehouseCode: e.target.value })}
+                  placeholder="Must be different from source warehouse"
+                />
+              </div>
+            )}
 
             {formData.movementType === 'transfer' && (
               <div className="grid grid-cols-2 gap-4">

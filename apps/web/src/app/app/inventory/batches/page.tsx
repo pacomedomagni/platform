@@ -54,6 +54,9 @@ export default function BatchTrackingPage() {
   const [error, setError] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingBatch, setEditingBatch] = useState<BatchRecord | null>(null);
+  const [pagination, setPagination] = useState<{ total: number; limit: number; offset: number } | null>(null);
+  const [batchPage, setBatchPage] = useState(0);
+  const PAGE_SIZE = 50;
 
   // Filters
   const [itemCode, setItemCode] = useState('');
@@ -80,6 +83,8 @@ export default function BatchTrackingPage() {
             itemCode: itemCode || undefined,
             includeExpired: includeExpired || undefined,
             withStock: true,
+            limit: PAGE_SIZE,
+            offset: batchPage * PAGE_SIZE,
           },
         }),
         api.get('/v1/inventory-management/batches/expiring', {
@@ -88,6 +93,13 @@ export default function BatchTrackingPage() {
       ]);
       setBatches(batchesRes.data.data || []);
       setExpiringBatches(expiringRes.data || []);
+      if (batchesRes.data.total !== undefined) {
+        setPagination({
+          total: batchesRes.data.total,
+          limit: batchesRes.data.limit || PAGE_SIZE,
+          offset: batchesRes.data.offset || 0,
+        });
+      }
     } catch (e: unknown) {
       const err = e as { response?: { data?: { message?: string } } };
       setError(err?.response?.data?.message || 'Failed to load batches');
@@ -99,7 +111,9 @@ export default function BatchTrackingPage() {
   const createBatch = async () => {
     setError(null);
     try {
-      await api.post('/v1/inventory-management/batches', formData);
+      // Only send fields that match CreateBatchDto (exclude isActive which is not part of the create DTO)
+      const { isActive, ...createPayload } = formData;
+      await api.post('/v1/inventory-management/batches', createPayload);
       setShowCreateModal(false);
       resetForm();
       loadBatches();
@@ -144,6 +158,7 @@ export default function BatchTrackingPage() {
     });
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadBatches depends on filter state; we only want initial load
   useEffect(() => {
     loadBatches();
   }, []);
@@ -269,6 +284,32 @@ export default function BatchTrackingPage() {
             })}
           </tbody>
         </ReportTable>
+        {/* Pagination Controls */}
+        {pagination && pagination.total > PAGE_SIZE && (
+          <div className="flex items-center justify-between border-t p-3">
+            <span className="text-sm text-muted-foreground">
+              Showing {batchPage * PAGE_SIZE + 1}-{Math.min((batchPage + 1) * PAGE_SIZE, pagination.total)} of {pagination.total}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setBatchPage((p) => Math.max(0, p - 1)); loadBatches(); }}
+                disabled={batchPage === 0}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setBatchPage((p) => p + 1); loadBatches(); }}
+                disabled={(batchPage + 1) * PAGE_SIZE >= pagination.total}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
       </ReportCard>
 
       {/* Create/Edit Modal */}

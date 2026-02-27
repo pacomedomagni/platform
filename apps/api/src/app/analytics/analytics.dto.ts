@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsDateString, IsEnum, IsInt, Min, IsArray } from 'class-validator';
+import { IsString, IsOptional, IsDateString, IsEnum, IsInt, Min } from 'class-validator';
 
 // ==========================================
 // Enums for validation
@@ -24,10 +24,12 @@ export enum GroupByEnum {
 
 export class DateRangeDto {
   @IsDateString()
-  startDate!: string;
+  @IsOptional()
+  startDate?: string;
 
   @IsDateString()
-  endDate!: string;
+  @IsOptional()
+  endDate?: string;
 }
 
 export class AnalyticsPeriodDto {
@@ -70,37 +72,9 @@ export class CustomerAnalyticsDto extends DateRangeDto {
   cohortMonths?: number;
 }
 
-export class InventoryReportDto {
-  @IsInt()
-  @Min(1)
-  @IsOptional()
-  lowStockThreshold?: number;
-
-  @IsInt()
-  @Min(1)
-  @IsOptional()
-  deadStockDays?: number;
-
-  @IsString()
-  @IsOptional()
-  categoryId?: string;
-}
-
 export enum ExportFormatEnum {
   CSV = 'csv',
   JSON = 'json',
-  PDF = 'pdf',
-}
-
-export class ExportReportDto {
-  @IsEnum(ExportFormatEnum)
-  format!: 'csv' | 'json' | 'pdf';
-
-  @IsString()
-  reportType!: string;
-
-  @IsOptional()
-  filters?: Record<string, unknown>;
 }
 
 // ==========================================

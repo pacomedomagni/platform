@@ -219,7 +219,7 @@ export class EbayListingsService {
   }) {
     const tenantId = this.cls.get('tenantId');
 
-    const where: any = { tenantId };
+    const where: Prisma.MarketplaceListingWhereInput = { tenantId };
     if (filters?.connectionId) where.connectionId = filters.connectionId;
     if (filters?.status) where.status = filters.status;
 
@@ -520,7 +520,7 @@ export class EbayListingsService {
         data: {
           status: ListingStatus.ERROR,
           syncStatus: SyncStatus.ERROR,
-          errorMessage: error.message || 'Failed to publish listing',
+          errorMessage: error?.message || String(error) || 'Failed to publish listing',
         },
       });
 
@@ -578,7 +578,7 @@ export class EbayListingsService {
         where: { id: listingId },
         data: {
           syncStatus: SyncStatus.ERROR,
-          errorMessage: `Inventory sync failed: ${error.message}`,
+          errorMessage: `Inventory sync failed: ${error?.message || String(error)}`,
         },
       });
     }

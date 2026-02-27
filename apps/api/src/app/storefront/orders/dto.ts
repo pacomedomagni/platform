@@ -8,6 +8,10 @@ export class ListOrdersDto {
   status?: string;
 
   @IsOptional()
+  @IsString()
+  paymentStatus?: string;
+
+  @IsOptional()
   @IsDateString()
   dateFrom?: string;
 

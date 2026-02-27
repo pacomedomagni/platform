@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, Button } from '@platform/ui';
 import { Download, RefreshCw, Package, Clock, Truck, CheckCircle } from 'lucide-react';
 import api from '../../../lib/api';
@@ -42,7 +42,7 @@ export default function OrdersPage() {
   const [paymentStatus, setPaymentStatus] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(true);
 
-  const loadOrders = async () => {
+  const loadOrders = useCallback(async () => {
     try {
       const params: any = {};
       if (search) params.search = search;
@@ -52,7 +52,9 @@ export default function OrdersPage() {
       const res = await api.get('/v1/store/orders/admin/all', { params });
       setOrders(res.data.data || []);
 
-      // Calculate stats
+      // M7: Note — stats are calculated from the current page of results only,
+      // not the full dataset. For accurate global stats, consider fetching from
+      // a separate lightweight aggregation endpoint (e.g., GET /orders/admin/stats).
       const allOrders = res.data.data || [];
       setStats({
         pending: allOrders.filter((o: Order) => o.status === 'PENDING').length,
@@ -65,7 +67,7 @@ export default function OrdersPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [search, status, paymentStatus]);
 
   const handleExportCSV = async () => {
     try {
@@ -98,7 +100,7 @@ export default function OrdersPage() {
 
   useEffect(() => {
     loadOrders();
-  }, [search, status, paymentStatus]);
+  }, [loadOrders]);
 
   // Auto-refresh every 30 seconds
   useEffect(() => {
@@ -109,7 +111,7 @@ export default function OrdersPage() {
     }, 30000);
 
     return () => clearInterval(interval);
-  }, [autoRefresh, search, status, paymentStatus]);
+  }, [autoRefresh, loadOrders]);
 
   const statCards = [
     {

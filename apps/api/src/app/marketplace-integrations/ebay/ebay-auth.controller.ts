@@ -34,7 +34,7 @@ export class EbayAuthController {
       return res.redirect(authUrl);
     } catch (error) {
       return res.status(400).json({
-        error: error.message || 'Failed to initiate OAuth flow'
+        error: error?.message || 'Failed to initiate OAuth flow'
       });
     }
   }

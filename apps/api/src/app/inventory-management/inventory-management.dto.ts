@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsDateString, IsEnum, IsArray, ValidateNested, IsBoolean, Min, Max, ArrayMinSize } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsDateString, IsEnum, IsArray, ValidateNested, IsBoolean, Min, Max, ArrayMinSize, ArrayMaxSize } from 'class-validator';
 import { Type } from 'class-transformer';
 
 // ==========================================
@@ -199,6 +199,8 @@ export class CreateSerialBulkDto {
   itemCode!: string;
 
   @IsArray()
+  @ArrayMinSize(1, { message: 'At least one serial number is required' })
+  @ArrayMaxSize(1000, { message: 'Cannot create more than 1000 serials at once' })
   @IsString({ each: true })
   serialNos!: string[];
 
@@ -291,9 +293,6 @@ export class UpdateWarehouseDto {
 }
 
 export class CreateLocationDto {
-  @IsString()
-  warehouseCode!: string;
-
   @IsString()
   code!: string;
 

@@ -213,8 +213,17 @@ export class WebhookService {
 
     this.logger.debug(`Created webhook ${webhook.id} for tenant ${ctx.tenantId}`);
 
-    // Return full secret only on create (includes the plaintext secret)
-    return webhook;
+    // Return only specific fields on create — include secret so the user can store it,
+    // but exclude tenantId and other internal fields from the response.
+    return {
+      id: webhook.id,
+      name: webhook.name,
+      url: webhook.url,
+      events: webhook.events,
+      secret: webhook.secret,
+      status: webhook.status,
+      createdAt: webhook.createdAt,
+    };
   }
 
   /**
@@ -290,7 +299,8 @@ export class WebhookService {
     await this.findOneInternal(ctx, webhookId); // Ensure webhook exists and belongs to tenant
 
     const page = options.page || 1;
-    const limit = options.limit || 20;
+    // L-1: Cap limit to 500 to prevent unbounded queries
+    const limit = Math.min(options.limit || 20, 500);
     const skip = (page - 1) * limit;
 
     const [data, total] = await Promise.all([

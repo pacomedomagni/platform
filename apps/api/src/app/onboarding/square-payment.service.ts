@@ -1,6 +1,9 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { SquareOAuthService } from './square-oauth.service';
 
+// L3: Centralized Square API version constant
+const SQUARE_API_VERSION = '2024-12-18';
+
 @Injectable()
 export class SquarePaymentService {
   private readonly logger = new Logger(SquarePaymentService.name);
@@ -54,7 +57,7 @@ export class SquarePaymentService {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
-        'Square-Version': '2024-12-18',
+        'Square-Version': SQUARE_API_VERSION,
       },
       body: JSON.stringify(body),
     });
@@ -81,7 +84,7 @@ export class SquarePaymentService {
     const response = await fetch(`${this.apiBase}/v2/payments/${paymentId}`, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        'Square-Version': '2024-12-18',
+        'Square-Version': SQUARE_API_VERSION,
       },
     });
 
@@ -120,7 +123,7 @@ export class SquarePaymentService {
     }
 
     const body: any = {
-      idempotency_key: `refund_${paymentId}_${Date.now()}`,
+      idempotency_key: `refund_${paymentId}`,
       payment_id: paymentId,
       reason,
       amount_money: {
@@ -134,7 +137,7 @@ export class SquarePaymentService {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
-        'Square-Version': '2024-12-18',
+        'Square-Version': SQUARE_API_VERSION,
       },
       body: JSON.stringify(body),
     });

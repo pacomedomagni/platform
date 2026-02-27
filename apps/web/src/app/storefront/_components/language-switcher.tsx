@@ -76,7 +76,8 @@ export function LanguageSwitcher() {
                 .filter((l) => l.isEnabled)
                 .map((language) => {
                   const isSelected =
-                    selectedLanguage?.languageCode === language.languageCode;
+                    selectedLanguage?.languageCode === language.languageCode &&
+                    selectedLanguage?.countryCode === language.countryCode;
                   return (
                     <button
                       key={language.languageCode}

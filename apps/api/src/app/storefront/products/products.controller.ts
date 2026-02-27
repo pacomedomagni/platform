@@ -53,9 +53,11 @@ export class ProductsController {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
+    const parsedLimit = limit ? parseInt(limit, 10) : 8;
+    const clampedLimit = Math.min(Number.isNaN(parsedLimit) ? 8 : parsedLimit, 50);
     return this.productsService.getFeaturedProducts(
       tenantId,
-      limit ? parseInt(limit, 10) : 8
+      clampedLimit,
     );
   }
 

@@ -1,4 +1,4 @@
-import { Injectable, Logger, ConflictException, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, ConflictException, NotFoundException, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import * as bcrypt from 'bcrypt';
 import Redis from 'ioredis';
@@ -31,7 +31,7 @@ const PROVISIONING_TTL = 86400; // 24 hours
  *    provisioning still runs asynchronously after the transaction commits.
  */
 @Injectable()
-export class ProvisioningService {
+export class ProvisioningService implements OnModuleDestroy {
   private readonly logger = new Logger(ProvisioningService.name);
   private redis: Redis;
 
@@ -48,6 +48,15 @@ export class ProvisioningService {
       port: redisPort,
       password: redisPassword,
     });
+
+    // M-1: Add error handler to prevent unhandled connection errors from crashing the process
+    this.redis.on('error', (err) => {
+      this.logger.error(`Redis connection error: ${err.message}`);
+    });
+  }
+
+  async onModuleDestroy() {
+    await this.redis.disconnect();
   }
 
   /**
@@ -423,11 +432,11 @@ export class ProvisioningService {
         error: error instanceof Error ? error.message : 'Unknown error',
       });
 
-      // Deactivate tenant
+      // L-6: Deactivate tenant defensively with .catch() like provisionSeedDataAsync does
       await this.prisma.tenant.update({
         where: { id: tenantId },
         data: { isActive: false },
-      });
+      }).catch((e) => this.logger.error(`Failed to deactivate tenant ${tenantId}:`, e));
 
       throw error;
     }

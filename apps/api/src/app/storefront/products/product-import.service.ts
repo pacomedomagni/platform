@@ -32,6 +32,9 @@ export class ProductImportService {
 
     // L-IE-7: Store file content in the payload JSON field instead of abusing
     // the errors field, which is intended for error reporting.
+    // NOTE: Known limitation -- CSV content is stored in the database (payload JSON field).
+    // This is acceptable for files up to 5MB. For larger files, consider streaming to
+    // object storage (e.g. S3) and storing a reference URL instead.
     await this.prisma.productImportJob.update({
       where: { id: job.id },
       data: {
@@ -125,6 +128,24 @@ export class ProductImportService {
         const isPublished =
           row.isPublished !== 'false' && row.is_published !== 'false';
 
+        // Resolve category by name or slug if provided
+        let categoryId: string | undefined;
+        if (category) {
+          const foundCategory = await this.prisma.productCategory.findFirst({
+            where: {
+              tenantId: job.tenantId,
+              OR: [
+                { name: { equals: category, mode: 'insensitive' } },
+                { slug: category },
+              ],
+              isActive: true,
+            },
+          });
+          if (foundCategory) {
+            categoryId = foundCategory.id;
+          }
+        }
+
         await this.productsService.createSimpleProduct(job.tenantId, {
           name,
           price,
@@ -132,6 +153,7 @@ export class ProductImportService {
           compareAtPrice: compareAtPrice
             ? parseFloat(compareAtPrice)
             : undefined,
+          categoryId,
           isFeatured,
           isPublished,
         });

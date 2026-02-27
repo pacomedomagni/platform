@@ -18,7 +18,7 @@ export function ProductPrice({
   return (
     <div className="flex items-center gap-4">
       <p className="text-2xl font-semibold text-foreground">{formatPrice(price)}</p>
-      {compareAtPrice && (
+      {compareAtPrice && compareAtPrice > price && (
         <p className="text-sm text-muted-foreground line-through">{formatPrice(compareAtPrice)}</p>
       )}
     </div>

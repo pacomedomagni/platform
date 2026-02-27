@@ -2,6 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '@platform/db';
 import { OperationType, OperationStatus, Prisma, FailedOperation } from '@prisma/client';
+import { StockMovementService } from '../inventory-management/stock-movement.service';
+import { WebhookService } from '../operations/webhook.service';
+import { EmailService } from '@platform/email';
 
 interface CreateFailedOperationDto {
   tenantId: string;
@@ -21,7 +24,12 @@ interface CreateFailedOperationDto {
 export class FailedOperationsService {
   private readonly logger = new Logger(FailedOperationsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly stockMovementService: StockMovementService,
+    private readonly webhookService: WebhookService,
+    private readonly emailService: EmailService,
+  ) {}
 
   /**
    * Record a failed operation for retry
@@ -71,18 +79,24 @@ export class FailedOperationsService {
       const now = new Date();
       const batchSize = 50;
 
-      // Find operations ready for retry
-      const operations = await this.prisma.failedOperation.findMany({
-        where: {
-          status: {
-            in: [OperationStatus.PENDING, OperationStatus.RETRYING],
-          },
-          nextRetryAt: { lte: now },
-          attemptCount: { lt: 5 },
-        },
-        take: batchSize,
-        orderBy: { nextRetryAt: 'asc' },
-      });
+      // M-5: Use SELECT FOR UPDATE SKIP LOCKED to atomically claim operations,
+      // preventing duplicate processing across distributed workers
+      const operations = await this.prisma.$queryRaw<FailedOperation[]>`
+        UPDATE failed_operations
+        SET status = ${OperationStatus.RETRYING}::"OperationStatus",
+            "attemptCount" = "attemptCount" + 1,
+            "lastAttemptAt" = ${now}
+        WHERE id IN (
+          SELECT id FROM failed_operations
+          WHERE status IN (${OperationStatus.PENDING}::"OperationStatus", ${OperationStatus.RETRYING}::"OperationStatus")
+            AND "nextRetryAt" <= ${now}
+            AND "attemptCount" < 5
+          ORDER BY "nextRetryAt" ASC
+          LIMIT ${batchSize}
+          FOR UPDATE SKIP LOCKED
+        )
+        RETURNING *
+      `;
 
       if (operations.length === 0) {
         this.logger.log('No failed operations to retry');
@@ -97,17 +111,7 @@ export class FailedOperationsService {
 
       for (const operation of operations) {
         try {
-          // Mark as retrying
-          await this.prisma.failedOperation.update({
-            where: { id: operation.id },
-            data: {
-              status: OperationStatus.RETRYING,
-              attemptCount: { increment: 1 },
-              lastAttemptAt: now,
-            },
-          });
-
-          // Execute the operation based on type
+          // Execute the operation based on type (already marked as RETRYING by the claim query)
           await this.executeOperation(operation);
 
           // Mark as succeeded
@@ -224,12 +228,6 @@ export class FailedOperationsService {
       return;
     }
 
-    // Import StockMovementService dynamically to avoid circular dependency
-    const { StockMovementService } = await import(
-      '../inventory-management/stock-movement.service'
-    );
-    const stockMovementService = new StockMovementService(this.prisma);
-
     const warehouse = await this.prisma.warehouse.findUnique({
       where: { id: warehouseId },
     });
@@ -239,7 +237,7 @@ export class FailedOperationsService {
     }
 
     // Issue stock via stock movement service
-    await stockMovementService.createMovement(
+    await this.stockMovementService.createMovement(
       { tenantId: operation.tenantId },
       {
         movementType: 'ISSUE' as any,
@@ -260,6 +258,15 @@ export class FailedOperationsService {
   private async retryCouponTracking(operation: FailedOperation): Promise<void> {
     const payload = operation.payload as any;
     const { couponId, customerId, orderId } = payload;
+
+    // H-3: Idempotency check - if couponUsage already exists for this order+coupon, skip
+    const existingUsage = await this.prisma.couponUsage.findFirst({
+      where: { orderId, couponId },
+    });
+    if (existingUsage) {
+      this.logger.log(`Coupon usage already recorded for order ${orderId} and coupon ${couponId}, marking as resolved`);
+      return;
+    }
 
     await this.prisma.$transaction([
       // Increment coupon usage
@@ -293,15 +300,7 @@ export class FailedOperationsService {
       throw new Error('Email payload missing emailOptions');
     }
 
-    const { EmailService } = await import('@platform/email');
-    const { EmailTemplateService } = await import('@platform/email');
-    const templateService = new EmailTemplateService();
-    const emailService = new EmailService(
-      emailOptions.smtpOptions || { smtp: {} },
-      templateService,
-    );
-
-    await emailService.send(emailOptions);
+    await this.emailService.send(emailOptions);
 
     this.logger.log(`Successfully retried email send for ${operation.referenceId}`);
   }
@@ -317,11 +316,6 @@ export class FailedOperationsService {
       throw new Error('Webhook payload missing webhookId or event');
     }
 
-    const { WebhookService } = await import(
-      '../operations/webhook.service'
-    );
-    const webhookService = new WebhookService(this.prisma);
-
     const webhook = await this.prisma.webhook.findUnique({
       where: { id: webhookId },
     });
@@ -330,7 +324,7 @@ export class FailedOperationsService {
       throw new Error(`Webhook ${webhookId} not found`);
     }
 
-    await webhookService.triggerEvent(
+    await this.webhookService.triggerEvent(
       { tenantId: operation.tenantId },
       {
         event: webhookEvent.event,

@@ -62,6 +62,7 @@ export class AuditLogService {
       endDate?: Date;
       userId?: string;
       docType?: string;
+      docName?: string;
       action?: string;
       limit?: number;
       offset?: number;
@@ -77,6 +78,8 @@ export class AuditLogService {
 
     if (filters.userId) where.userId = filters.userId;
     if (filters.docType) where.docType = filters.docType;
+    // L-10: Support docName filter from AuditLogQueryDto
+    if (filters.docName) where.docName = filters.docName;
     if (filters.action) where.action = filters.action;
 
     const [logs, total] = await Promise.all([
@@ -185,7 +188,11 @@ export class AuditLogService {
           this.escapeCsvField(String(log.userId || '')),
           this.escapeCsvField(log.createdAt.toISOString()),
         ].join(',');
-        res.write(row + '\n');
+        // M-2: Handle backpressure - if write returns false, wait for drain
+        const canContinue = res.write(row + '\n');
+        if (!canContinue) {
+          await new Promise<void>((resolve) => res.once('drain', resolve));
+        }
       }
 
       totalWritten += logs.length;

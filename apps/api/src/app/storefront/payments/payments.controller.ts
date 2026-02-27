@@ -13,23 +13,11 @@ import {
 } from '@nestjs/common';
 import { Request } from 'express';
 import { PaymentsService } from './payments.service';
-import { CreateRefundDto } from './dto';
+import { CreateRefundDto, SquarePaymentDto } from './dto';
 import { StoreAdminGuard } from '@platform/auth';
 import { SquarePaymentService } from '../../onboarding/square-payment.service';
 import { CustomerAuthService } from '../auth/customer-auth.service';
-import { IsString, IsNumber, IsOptional } from 'class-validator';
-
-class SquarePaymentDto {
-  @IsString()
-  orderId!: string;
-
-  @IsString()
-  sourceId!: string; // Card nonce from Square Web Payments SDK
-
-  @IsOptional()
-  @IsNumber()
-  amount?: number;
-}
+import { CustomerAuthGuard } from '../auth/customer-auth.guard';
 
 @Controller('store/payments')
 export class PaymentsController {
@@ -57,6 +45,9 @@ export class PaymentsController {
     @Req() request: RawBodyRequest<Request>,
     @Headers('stripe-signature') signature: string
   ) {
+    if (!signature) {
+      throw new BadRequestException('Missing stripe-signature header');
+    }
     if (!request.rawBody) {
       throw new BadRequestException('Raw body is required');
     }
@@ -117,6 +108,7 @@ export class PaymentsController {
    * POST /api/v1/store/payments/square
    */
   @Post('square')
+  @UseGuards(CustomerAuthGuard)
   async processSquarePayment(
     @Headers('x-tenant-id') tenantId: string,
     @Body() dto: SquarePaymentDto,

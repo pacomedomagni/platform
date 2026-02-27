@@ -319,7 +319,7 @@ export class CheckoutService {
       });
 
       // ============ GIFT CARD REDEMPTION (inside transaction for automatic rollback) ============
-      let giftCardAmountApplied = 0;
+      let giftCardDiscount = 0;
       let giftCardTransactionId: string | null = null;
       let chargeAmount = Number(order.grandTotal);
 
@@ -341,15 +341,15 @@ export class CheckoutService {
               chargeAmount,
             );
 
-            giftCardAmountApplied = redemption.amountRedeemed;
+            giftCardDiscount = redemption.amountRedeemed;
             giftCardTransactionId = redemption.transactionId;
-            chargeAmount = chargeAmount - giftCardAmountApplied;
+            chargeAmount = chargeAmount - giftCardDiscount;
 
             // Store gift card amount on the order for retry logic
             await tx.order.update({
               where: { id: order.id },
               data: {
-                giftCardAmountApplied,
+                giftCardDiscount,
               },
             });
 
@@ -371,7 +371,7 @@ export class CheckoutService {
             { err: error, orderId: order.id, giftCardCode: dto.giftCardCode },
             'Gift card redemption failed, proceeding with full payment',
           );
-          giftCardAmountApplied = 0;
+          giftCardDiscount = 0;
           giftCardTransactionId = null;
           chargeAmount = Number(order.grandTotal);
         }
@@ -379,7 +379,7 @@ export class CheckoutService {
 
       return {
         order,
-        giftCardAmountApplied,
+        giftCardDiscount,
         giftCardTransactionId,
         chargeAmount,
         couponRemoved: (cart as any).couponRemoved || null,
@@ -387,7 +387,7 @@ export class CheckoutService {
       };
     }, { timeout: 30000 });
 
-    const { order: result, giftCardAmountApplied, giftCardTransactionId, chargeAmount, couponRemoved, couponRemoveReason } = txResult;
+    const { order: result, giftCardDiscount, giftCardTransactionId, chargeAmount, couponRemoved, couponRemoveReason } = txResult;
 
     // Create payment intent — route through connected account if tenant has one
     let stripeClientSecret: string | null = null;
@@ -414,7 +414,7 @@ export class CheckoutService {
           orderNumber: result.orderNumber,
           tenantId,
           customerEmail: dto.email,
-          ...(giftCardAmountApplied > 0 && { giftCardAmountApplied: String(giftCardAmountApplied) }),
+          ...(giftCardDiscount > 0 && { giftCardDiscount: String(giftCardDiscount) }),
         };
 
         // Determine currency from tenant configuration
@@ -482,7 +482,7 @@ export class CheckoutService {
     }
 
     const response = this.mapOrderToCheckoutResponse(result, stripeClientSecret, paymentProvider, {
-      giftCardAmountApplied: giftCardAmountApplied > 0 ? giftCardAmountApplied : null,
+      giftCardDiscount: giftCardDiscount > 0 ? giftCardDiscount : null,
       giftCardTransactionId,
     });
 
@@ -555,8 +555,8 @@ export class CheckoutService {
     const retryCurrency = (order.currency || 'usd').toLowerCase();
 
     // Subtract any gift card amount already applied to this order
-    const giftCardAmountApplied = Number(order.giftCardAmountApplied || 0);
-    const chargeAmount = Math.max(Number(order.grandTotal) - giftCardAmountApplied, 0);
+    const giftCardDiscount = Number(order.giftCardDiscount || 0);
+    const chargeAmount = Math.max(Number(order.grandTotal) - giftCardDiscount, 0);
 
     if (chargeAmount <= 0) {
       // Gift card covers the full amount — no external payment needed
@@ -570,8 +570,8 @@ export class CheckoutService {
       return { clientSecret: null, paymentProvider: 'gift_card', orderId: order.id };
     }
 
-    if (giftCardAmountApplied > 0) {
-      metadata.giftCardAmountApplied = String(giftCardAmountApplied);
+    if (giftCardDiscount > 0) {
+      metadata.giftCardDiscount = String(giftCardDiscount);
     }
 
     if (
@@ -805,7 +805,7 @@ export class CheckoutService {
       }
 
       // Reverse gift card transaction if one was applied
-      const giftCardAmount = Number(order.giftCardAmountApplied || 0);
+      const giftCardAmount = Number(order.giftCardDiscount || 0);
       if (giftCardAmount > 0) {
         try {
           // Find the gift card transaction for this order and reverse it
@@ -886,7 +886,7 @@ export class CheckoutService {
     order: any,
     clientSecret: string | null,
     paymentProvider?: string,
-    giftCard?: { giftCardAmountApplied: number | null; giftCardTransactionId: string | null },
+    giftCard?: { giftCardDiscount: number | null; giftCardTransactionId: string | null },
   ) {
     return {
       id: order.id,
@@ -938,7 +938,7 @@ export class CheckoutService {
       shippingMethod: order.shippingMethod || null,
       stripePaymentIntentId: order.stripePaymentIntentId,
       clientSecret: clientSecret,
-      giftCardAmountApplied: giftCard?.giftCardAmountApplied ?? null,
+      giftCardDiscount: giftCard?.giftCardDiscount ?? null,
       giftCardTransactionId: giftCard?.giftCardTransactionId ?? null,
     };
   }

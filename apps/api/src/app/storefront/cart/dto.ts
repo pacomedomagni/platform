@@ -1,11 +1,11 @@
-import { IsString, IsOptional, IsNumber, IsUUID, Min, Max } from 'class-validator';
+import { IsString, IsOptional, IsNotEmpty, IsNumber, IsInt, IsUUID, Min, Max, MaxLength } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class AddToCartDto {
   @IsUUID()
   productId: string;
 
-  @IsNumber()
+  @IsInt()
   @Type(() => Number)
   @Min(1)
   @Max(100)
@@ -22,6 +22,8 @@ export class UpdateCartItemDto {
 
 export class ApplyCouponDto {
   @IsString()
+  @IsNotEmpty()
+  @MaxLength(50)
   code: string;
 }
 
@@ -54,7 +56,7 @@ export class CartResponseDto {
 }
 
 export class MergeCartDto {
-  @IsOptional()
+  @IsNotEmpty()
   @IsString()
-  sessionToken?: string;
+  sessionToken: string;
 }

@@ -1,7 +1,6 @@
 import {
   Controller,
   Post,
-  Headers,
   BadRequestException,
   UseGuards,
   UseInterceptors,
@@ -10,6 +9,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { StoreAdminGuard } from '@platform/auth';
 import { StorageService } from '@platform/storage';
+import { Tenant } from '../../tenant.middleware';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const ALLOWED_IMAGE_TYPES = [
@@ -31,7 +31,7 @@ export class UploadController {
     }),
   )
   async uploadFile(
-    @Headers('x-tenant-id') tenantId: string,
+    @Tenant() tenantId: string,
     @UploadedFile() file: Express.Multer.File,
   ) {
     if (!tenantId) {

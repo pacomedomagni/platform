@@ -422,8 +422,9 @@ export class CartService {
    */
   async applyCoupon(tenantId: string, cartId: string, code: string) {
     return this.prisma.$transaction(async (tx) => {
+      // M9: Only allow coupon application to active carts
       const cart = await tx.cart.findFirst({
-        where: { id: cartId, tenantId },
+        where: { id: cartId, tenantId, status: 'active' },
       });
 
       if (!cart) {
@@ -932,98 +933,6 @@ export class CartService {
   }
 
   /**
-   * Recalculate cart totals
-   * Issue #6: Uses ShippingService zone/rate system when configured.
-   */
-  private async recalculateCart(cartId: string) {
-    const cart = await this.prisma.cart.findUnique({
-      where: { id: cartId },
-      include: {
-        items: {
-          include: {
-            product: true,
-          },
-        },
-      },
-    });
-
-    if (!cart) return;
-
-    // PAY-12: Fetch tenant-specific rates (fall back to defaults)
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: cart.tenantId },
-      select: { defaultTaxRate: true, defaultShippingRate: true, freeShippingThreshold: true },
-    });
-    const taxRate = tenant ? Number(tenant.defaultTaxRate) : DEFAULT_TAX_RATE;
-    const shippingRate = tenant ? Number(tenant.defaultShippingRate) : DEFAULT_SHIPPING_RATE;
-    const freeThreshold = tenant ? Number(tenant.freeShippingThreshold) : FREE_SHIPPING_THRESHOLD;
-
-    // PAY-11: Calculate in integer cents to avoid floating-point errors
-    let subtotalCents = 0;
-    for (const item of cart.items) {
-      subtotalCents += Math.round(Number(item.price) * 100) * item.quantity;
-    }
-
-    // Issue #6: Try ShippingService zone-based rates first, fall back to flat-rate
-    let shippingCents: number;
-    const shippingFromZones = await this.calculateShippingFromZones(
-      cart.tenantId,
-      subtotalCents / 100,
-      cart.shippingAddressId,
-    );
-
-    if (shippingFromZones !== null) {
-      shippingCents = Math.round(shippingFromZones * 100);
-    } else {
-      shippingCents = subtotalCents >= Math.round(freeThreshold * 100) ? 0 : Math.round(shippingRate * 100);
-    }
-
-    // Calculate discount in cents
-    let discountCents = 0;
-    if (cart.couponCode) {
-      const coupon = await this.prisma.coupon.findFirst({
-        where: { tenantId: cart.tenantId, code: cart.couponCode },
-      });
-
-      if (coupon) {
-        if (coupon.discountType === 'percentage') {
-          discountCents = Math.round(subtotalCents * (Number(coupon.discountValue) / 100));
-        } else {
-          discountCents = Math.round(Number(coupon.discountValue) * 100);
-        }
-
-        if (coupon.maximumDiscount) {
-          discountCents = Math.min(discountCents, Math.round(Number(coupon.maximumDiscount) * 100));
-        }
-
-        discountCents = Math.min(discountCents, subtotalCents);
-      }
-    }
-
-    // Calculate tax in cents (on subtotal - discount)
-    const taxableCents = subtotalCents - discountCents;
-    const taxCents = Math.round(taxableCents * taxRate);
-
-    // Calculate grand total in cents
-    const grandTotalCents = subtotalCents - discountCents + shippingCents + taxCents;
-
-    // Convert back to dollars for storage
-    await this.prisma.cart.update({
-      where: { id: cartId },
-      data: {
-        subtotal: subtotalCents / 100,
-        shippingTotal: shippingCents / 100,
-        taxTotal: taxCents / 100,
-        discountAmount: discountCents / 100,
-        grandTotal: grandTotalCents / 100,
-        lastActivityAt: new Date(),
-        // PAY-14: Extend expiry on activity
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
-    });
-  }
-
-  /**
    * Recalculate cart totals within a transaction
    * Used by transactional methods to avoid nested transactions
    *
@@ -1060,6 +969,9 @@ export class CartService {
     }
 
     // Issue #6: Try ShippingService zone-based rates first, fall back to flat-rate
+    // NOTE: calculateShippingFromZones uses this.prisma (non-tx) because ShippingService
+    // doesn't accept a transaction client. This is acceptable since shipping zones/rates
+    // are read-only reference data unlikely to change mid-transaction.
     let shippingCents: number;
     const shippingFromZones = await this.calculateShippingFromZones(
       cart.tenantId,
@@ -1141,12 +1053,19 @@ export class CartService {
         return null;
       }
 
-      // Use ShippingService to calculate rates with a default country.
+      // M5: Use tenant's default country instead of hardcoded 'US'.
       // At cart level we don't have the full address yet, so we use
       // a broad calculation. The exact rate will be finalized at checkout
       // when the shipping address is known.
+      // Limitation: If the tenant has no defaultCountry set, we fall back to 'US'.
+      const tenant = await this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { defaultCountry: true },
+      });
+      const country = tenant?.defaultCountry || 'US';
+
       const result = await this.shippingService.calculateShipping(tenantId, {
-        country: 'US', // Default; refined at checkout with actual address
+        country,
         cartTotal,
       });
 
@@ -1178,17 +1097,21 @@ export class CartService {
       },
       orderBy: { createdAt: 'asc' as const },
     },
+    // M6: Include tenant to avoid extra query in mapCartToResponse
+    tenant: {
+      select: {
+        freeShippingThreshold: true,
+      },
+    },
   };
 
-  private async mapCartToResponse(cart: CartWithRelations) {
+  private mapCartToResponse(cart: CartWithRelations & { tenant?: { freeShippingThreshold: any } | null }) {
     const subtotal = Number(cart.subtotal);
 
-    // Fetch tenant-specific free shipping threshold (fall back to default constant)
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: cart.tenantId },
-      select: { freeShippingThreshold: true },
-    });
-    const freeThreshold = tenant ? Number(tenant.freeShippingThreshold) : FREE_SHIPPING_THRESHOLD;
+    // M6: Use tenant data included via cartInclude to avoid extra query
+    const freeThreshold = cart.tenant
+      ? Number(cart.tenant.freeShippingThreshold)
+      : FREE_SHIPPING_THRESHOLD;
 
     return {
       id: cart.id,

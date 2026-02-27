@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Upload, X, Loader2, Image as ImageIcon, Sparkles, Package, Shirt, Coffee, Gift } from 'lucide-react';
+import { ArrowLeft, Upload, X, Loader2, Sparkles, Package, Shirt, Coffee, Gift } from 'lucide-react';
 import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
 
 interface Category {
@@ -169,14 +169,14 @@ export default function NewProductPage() {
     try {
       const headers = getHeaders();
       const body: Record<string, any> = {
-        displayName: displayName.trim(),
+        name: displayName.trim(),
         price: parseFloat(price),
         isPublished: publish,
         isFeatured,
       };
 
       if (description.trim()) {
-        body.shortDescription = description.trim();
+        body.description = description.trim();
       }
       if (compareAtPrice) {
         body.compareAtPrice = parseFloat(compareAtPrice);
@@ -424,7 +424,7 @@ export default function NewProductPage() {
               <div className="mt-4 flex flex-wrap gap-3">
                 {images.map((url, idx) => (
                   <div
-                    key={idx}
+                    key={url}
                     className="group relative h-24 w-24 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-600"
                   >
                     <img

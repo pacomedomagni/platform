@@ -314,13 +314,14 @@ export class EmailPreferencesService {
     });
 
     if (!customer) {
+      // M8: Use a random password hash instead of empty string to prevent login without registration
       customer = await this.prisma.storeCustomer.create({
         data: {
           tenantId,
           email: normalizedEmail,
           firstName: null,
           lastName: null,
-          password: '',
+          passwordHash: crypto.randomBytes(32).toString('hex'),
         },
       });
     }

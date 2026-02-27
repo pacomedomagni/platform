@@ -130,16 +130,33 @@ export class WishlistService {
       }
     }
 
-    return this.prisma.wishlist.create({
-      data: {
-        tenantId,
-        customerId,
-        name: dto.name || 'My Wishlist',
-        isPublic: dto.isPublic ?? false,
-        shareToken: dto.isPublic ? crypto.randomBytes(16).toString('hex') : null,
-        isDefault: !dto.name, // First unnamed wishlist is default
-      },
-    });
+    // L4: Catch P2002 race condition like getOrCreateDefaultWishlist
+    try {
+      return await this.prisma.wishlist.create({
+        data: {
+          tenantId,
+          customerId,
+          name: dto.name || 'My Wishlist',
+          isPublic: dto.isPublic ?? false,
+          shareToken: dto.isPublic ? crypto.randomBytes(16).toString('hex') : null,
+          isDefault: !dto.name, // First unnamed wishlist is default
+        },
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        // Another request created this wishlist concurrently; return the existing one
+        const existing = await this.prisma.wishlist.findFirst({
+          where: { tenantId, customerId, isDefault: !dto.name },
+        });
+        if (existing) {
+          return existing;
+        }
+      }
+      throw error;
+    }
   }
 
   async updateWishlist(tenantId: string, customerId: string, wishlistId: string, dto: CreateWishlistDto) {
@@ -424,8 +441,9 @@ export class WishlistService {
       name: wishlist.name,
       isDefault: wishlist.isDefault,
       isPublic: wishlist.isPublic,
-      shareToken: wishlist.shareToken,
-      shareUrl: wishlist.shareToken ? `/wishlist/shared/${wishlist.shareToken}` : null,
+      // L2: Only expose shareToken for public wishlists to prevent leaking private tokens
+      shareToken: wishlist.isPublic ? wishlist.shareToken : null,
+      shareUrl: wishlist.isPublic && wishlist.shareToken ? `/wishlist/shared/${wishlist.shareToken}` : null,
       ownerName: wishlist.name || 'Wishlist',
       items: wishlist.items?.map((item) => ({
         id: item.id,

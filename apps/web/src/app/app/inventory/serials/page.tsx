@@ -65,6 +65,9 @@ export default function SerialTrackingPage() {
   const [showBulkModal, setShowBulkModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [editingSerial, setEditingSerial] = useState<SerialRecord | null>(null);
+  const [pagination, setPagination] = useState<{ total: number; limit: number; offset: number } | null>(null);
+  const [serialPage, setSerialPage] = useState(0);
+  const PAGE_SIZE = 50;
 
   // Filters
   const [itemCode, setItemCode] = useState('');
@@ -102,9 +105,18 @@ export default function SerialTrackingPage() {
           warehouseCode: warehouseCode || undefined,
           status: status || undefined,
           search: searchSerial || undefined,
+          limit: PAGE_SIZE,
+          offset: serialPage * PAGE_SIZE,
         },
       });
       setSerials(res.data.data || []);
+      if (res.data.total !== undefined) {
+        setPagination({
+          total: res.data.total,
+          limit: res.data.limit || PAGE_SIZE,
+          offset: res.data.offset || 0,
+        });
+      }
     } catch (e: unknown) {
       const err = e as { response?: { data?: { message?: string } } };
       setError(err?.response?.data?.message || 'Failed to load serials');
@@ -171,7 +183,13 @@ export default function SerialTrackingPage() {
     if (!editingSerial) return;
     setError(null);
     try {
-      await api.put(`/v1/inventory-management/serials/${editingSerial.id}`, formData);
+      // Only send fields that match UpdateSerialDto: status, warehouseCode, locationCode, batchNo
+      const updatePayload: Record<string, unknown> = {};
+      if (formData.status) updatePayload.status = formData.status;
+      if (formData.warehouseCode !== undefined) updatePayload.warehouseCode = formData.warehouseCode;
+      if (formData.locationCode !== undefined) updatePayload.locationCode = formData.locationCode;
+      if (formData.batchNo !== undefined) updatePayload.batchNo = formData.batchNo;
+      await api.put(`/v1/inventory-management/serials/${editingSerial.id}`, updatePayload);
       setEditingSerial(null);
       resetForm();
       loadSerials();
@@ -210,6 +228,7 @@ export default function SerialTrackingPage() {
     setShowHistoryModal(true);
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadSerials depends on filter state; we only want initial load
   useEffect(() => {
     loadSerials();
   }, []);
@@ -329,6 +348,32 @@ export default function SerialTrackingPage() {
             })}
           </tbody>
         </ReportTable>
+        {/* Pagination Controls */}
+        {pagination && pagination.total > PAGE_SIZE && (
+          <div className="flex items-center justify-between border-t p-3">
+            <span className="text-sm text-muted-foreground">
+              Showing {serialPage * PAGE_SIZE + 1}-{Math.min((serialPage + 1) * PAGE_SIZE, pagination.total)} of {pagination.total}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setSerialPage((p) => Math.max(0, p - 1)); loadSerials(); }}
+                disabled={serialPage === 0}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { setSerialPage((p) => p + 1); loadSerials(); }}
+                disabled={(serialPage + 1) * PAGE_SIZE >= pagination.total}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
       </ReportCard>
 
       {/* Create/Edit Modal */}

@@ -108,7 +108,7 @@ export class DashboardService {
           where: {
             tenantId,
             paymentStatus: 'CAPTURED',
-            createdAt: { gte: lastMonthStart, lt: lastMonthEnd },
+            createdAt: { gte: lastMonthStart, lt: thisMonthStart },
           },
           _sum: { grandTotal: true },
         }),
@@ -188,7 +188,9 @@ export class DashboardService {
     outOfStock: InventoryAlert[];
     totalActive: number;
   }> {
-    // Get items with warehouse balances (limit to 200 to prevent loading all items)
+    // Get items with warehouse balances.
+    // NOTE: Limited to 500 items to prevent loading entire catalog. For tenants
+    // with more stock items, consider a raw COUNT query or cursor-based pagination.
     const itemsWithStock = await this.db.item.findMany({
       where: {
         tenantId,
@@ -200,7 +202,7 @@ export class DashboardService {
           select: { actualQty: true },
         },
       },
-      take: 200,
+      take: 500,
     });
 
     const lowStock: InventoryAlert[] = [];
@@ -239,7 +241,9 @@ export class DashboardService {
 
     return {
       lowStock: lowStock.slice(0, 10), // Limit to top 10
+      lowStockCount: lowStock.length,
       outOfStock: outOfStock.slice(0, 10),
+      outOfStockCount: outOfStock.length,
       totalActive: itemsWithStock.length,
     };
   }
@@ -455,8 +459,8 @@ export class DashboardService {
 
     return {
       urgentOrders,
-      lowStockCount: inventory.lowStock.length,
-      outOfStockCount: inventory.outOfStock.length,
+      lowStockCount: inventory.lowStockCount,
+      outOfStockCount: inventory.outOfStockCount,
       pendingPayments,
       unshippedOrders,
     };

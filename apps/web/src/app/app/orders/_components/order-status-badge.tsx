@@ -36,6 +36,7 @@ export function PaymentStatusBadge({ status, className }: PaymentStatusBadgeProp
   const statusMap: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning'; label: string }> = {
     PENDING: { variant: 'warning', label: 'Payment Pending' },
     PAID: { variant: 'success', label: 'Paid' },
+    CAPTURED: { variant: 'success', label: 'Paid' },
     FAILED: { variant: 'destructive', label: 'Failed' },
     REFUNDED: { variant: 'secondary', label: 'Refunded' },
     PARTIALLY_REFUNDED: { variant: 'secondary', label: 'Partially Refunded' },

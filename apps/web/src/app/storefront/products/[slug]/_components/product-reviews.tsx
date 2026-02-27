@@ -2,9 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { Button, Card, Badge, Spinner } from '@platform/ui';
-import { ThumbsUp, ThumbsDown, Star, Filter, ChevronDown, ShieldCheck, Image as ImageIcon } from 'lucide-react';
+import { ThumbsUp, ThumbsDown, Star, Filter, ChevronDown, ShieldCheck } from 'lucide-react';
 import { reviewsApi, Review, ReviewsResponse } from '@/lib/reviews-api';
-import { formatCurrency } from '../../../_lib/format';
 import { WriteReview } from './write-review';
 
 interface ProductReviewsProps {
@@ -44,6 +43,9 @@ export function ProductReviews({ productId, productSlug }: ProductReviewsProps) 
     }
   };
 
+  // Client-side dedup via votedReviews set prevents double-voting within a session.
+  // Server-side rate limiting and deduplication (per session token / IP) is handled
+  // by the reviews API to prevent abuse across sessions.
   const handleVote = async (reviewId: string, isHelpful: boolean) => {
     if (votedReviews.has(reviewId)) return;
 

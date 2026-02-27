@@ -25,15 +25,24 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [pagination, setPagination] = useState<{ total: number; limit: number; offset: number; hasMore: boolean } | null>(null);
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 20;
 
-  const fetchProducts = useCallback(async () => {
+  const fetchProducts = useCallback(async (searchTerm?: string, pageOffset?: number) => {
     setLoading(true);
     setError(null);
     try {
       const token = localStorage.getItem('access_token');
       const tenantId = localStorage.getItem('tenantId');
 
-      const res = await fetch('/api/v1/store/admin/products', {
+      const params = new URLSearchParams();
+      const currentSearch = searchTerm !== undefined ? searchTerm : search;
+      if (currentSearch) params.set('search', currentSearch);
+      params.set('limit', String(PAGE_SIZE));
+      params.set('offset', String(pageOffset !== undefined ? pageOffset : page * PAGE_SIZE));
+
+      const res = await fetch(`/api/v1/store/admin/products?${params.toString()}`, {
         headers: {
           Authorization: `Bearer ${token}`,
           'x-tenant-id': tenantId || '',
@@ -46,21 +55,31 @@ export default function ProductsPage() {
 
       const data = await res.json();
       setProducts(data.data || data || []);
+      if (data.pagination) {
+        setPagination(data.pagination);
+      }
     } catch (err: any) {
       console.error('Failed to load products:', err);
       setError(err.message || 'Something went wrong');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [search, page]);
 
   useEffect(() => {
-    fetchProducts();
-  }, [fetchProducts]);
+    fetchProducts(search, page * PAGE_SIZE);
+  }, [page]);
 
-  const filteredProducts = products.filter((p) =>
-    p.displayName?.toLowerCase().includes(search.toLowerCase())
-  );
+  // Debounced server-side search
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setPage(0);
+      fetchProducts(search, 0);
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [search]);
+
+  const filteredProducts = products;
 
   const formatCurrency = (amount: number) => {
     const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
@@ -248,6 +267,31 @@ export default function ProductsPage() {
               </tbody>
             </table>
           </div>
+
+          {/* Pagination Controls */}
+          {pagination && (
+            <div className="flex items-center justify-between border-t border-slate-200 px-5 py-3 dark:border-slate-700">
+              <span className="text-sm text-slate-500">
+                Showing {page * PAGE_SIZE + 1}-{Math.min((page + 1) * PAGE_SIZE, pagination.total)} of {pagination.total}
+              </span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  disabled={page === 0}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() => setPage((p) => p + 1)}
+                  disabled={!pagination.hasMore}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

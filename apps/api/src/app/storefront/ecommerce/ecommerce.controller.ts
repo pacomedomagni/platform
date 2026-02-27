@@ -275,7 +275,8 @@ export class EcommerceController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('status') status?: string,
-    @Query('productId') productId?: string
+    @Query('productId') productId?: string,
+    @Query('search') search?: string
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
     return this.reviewsService.listReviewsAdmin(tenantId, {
@@ -283,6 +284,7 @@ export class EcommerceController {
       limit: limit ? parseInt(limit, 10) : 20,
       status,
       productId,
+      search,
     });
   }
 

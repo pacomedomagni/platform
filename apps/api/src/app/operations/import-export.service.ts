@@ -449,17 +449,21 @@ export class ImportExportService {
     const data = await this.getExportData(ctx, entityType, filters);
     const filename = `${entityType}-export-${new Date().toISOString().split('T')[0]}.csv`;
 
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
     if (data.length === 0) {
-      res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      res.send('');
+      res.end('');
       return;
     }
 
     const headers = Object.keys(data[0]);
-    const csvRows: string[] = [];
 
-    csvRows.push(headers.map(h => `"${h}"`).join(','));
+    // M-3: Stream rows via res.write() instead of accumulating in memory
+    const canContinueHeader = res.write(headers.map(h => `"${h}"`).join(',') + '\n');
+    if (!canContinueHeader) {
+      await new Promise<void>((resolve) => res.once('drain', resolve));
+    }
 
     for (const row of data) {
       const values = headers.map(h => {
@@ -475,12 +479,13 @@ export class ImportExportService {
         }
         return `"${val}"`;
       });
-      csvRows.push(values.join(','));
+      const canContinue = res.write(values.join(',') + '\n');
+      if (!canContinue) {
+        await new Promise<void>((resolve) => res.once('drain', resolve));
+      }
     }
 
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.send(csvRows.join('\n'));
+    res.end();
   }
 
   /**
@@ -636,25 +641,43 @@ export class ImportExportService {
       if (filters.endDate) (where.createdAt as any).lte = filters.endDate;
     }
 
-    const orders = await this.prisma.order.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      include: { items: true },
-    });
+    // H-1: Chunked iteration with take: 1000 to avoid loading all records into memory
+    const CHUNK_SIZE = 1000;
+    const results: Record<string, unknown>[] = [];
+    let skip = 0;
 
-    return orders.map(o => ({
-      orderNumber: o.orderNumber,
-      customerEmail: o.email,
-      status: o.status,
-      paymentStatus: o.paymentStatus,
-      subtotal: Number(o.subtotal),
-      tax: Number(o.taxTotal),
-      shipping: Number(o.shippingTotal),
-      discount: Number(o.discountTotal),
-      total: Number(o.grandTotal),
-      itemCount: o.items.length,
-      createdAt: o.createdAt.toISOString(),
-    }));
+    while (true) {
+      const orders = await this.prisma.order.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        include: { items: true },
+        take: CHUNK_SIZE,
+        skip,
+      });
+
+      if (orders.length === 0) break;
+
+      for (const o of orders) {
+        results.push({
+          orderNumber: o.orderNumber,
+          customerEmail: o.email,
+          status: o.status,
+          paymentStatus: o.paymentStatus,
+          subtotal: Number(o.subtotal),
+          tax: Number(o.taxTotal),
+          shipping: Number(o.shippingTotal),
+          discount: Number(o.discountTotal),
+          total: Number(o.grandTotal),
+          itemCount: o.items.length,
+          createdAt: o.createdAt.toISOString(),
+        });
+      }
+
+      skip += CHUNK_SIZE;
+      if (orders.length < CHUNK_SIZE) break;
+    }
+
+    return results;
   }
 
   // ==========================================

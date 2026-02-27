@@ -1154,6 +1154,8 @@ model ProductListing {
   averageRating Decimal? @default(0) @db.Decimal(3, 2)
   reviewCount   Int      @default(0)
 
+  deletedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1194,10 +1196,6 @@ model StoreCustomer {
   emailVerified   Boolean   @default(false)
   emailVerifiedAt DateTime?
 
-  // Password reset (DEPRECATED: use PasswordReset model instead. Remove in a future migration.)
-  resetToken    String? // @deprecated - superseded by PasswordReset table
-  resetTokenExp DateTime? // @deprecated - superseded by PasswordReset table
-
   // Marketing preferences
   acceptsMarketing Boolean @default(false)
 
@@ -1214,6 +1212,9 @@ model StoreCustomer {
   lastLoginAt  DateTime?
   isActive     Boolean   @default(true)
   tokenVersion Int       @default(0)
+
+  // M6: Admin notes field for internal customer notes
+  adminNotes String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1446,6 +1447,9 @@ model Order {
   status        OrderStatus   @default(PENDING)
   paymentStatus PaymentStatus @default(PENDING)
 
+  // Payment info
+  paymentMethod String? // "gift_card" | "card" | "square" etc.
+
   // Stripe integration
   stripePaymentIntentId String?
   stripeChargeId        String?
@@ -1535,6 +1539,7 @@ model Payment {
   amount   Decimal @db.Decimal(18, 2)
   currency String  @default("USD")
   method   String  @default("card") // card, paypal, bank_transfer, gift_card, etc.
+  type     String? // "PAYMENT" | "REFUND" — distinguishes payment vs refund records
 
   // Status
   status PaymentStatus @default(PENDING)

@@ -38,6 +38,11 @@ export class StockMovementService {
       throw new BadRequestException('At least one item is required');
     }
 
+    // Validate source and destination warehouses are different for transfers
+    if (dto.movementType === MovementType.TRANSFER && dto.warehouseCode === dto.toWarehouseCode) {
+      throw new BadRequestException('Source and destination warehouses must be different');
+    }
+
     // Validate quantity signs based on movement type
     for (const item of dto.items) {
       if (dto.movementType === MovementType.RECEIPT && item.quantity <= 0) {
@@ -54,7 +59,9 @@ export class StockMovementService {
       }
     }
 
-    // Retry logic for FIFO layer lock contention (max 3 attempts)
+    // Retry logic for transaction serialization failures (max 3 attempts)
+    // Only retry on Prisma P2034 (transaction serialization failure), NOT on
+    // "Insufficient FIFO layers" which is a legitimate data condition.
     const MAX_RETRIES = 3;
     let lastError: Error | null = null;
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
@@ -62,11 +69,9 @@ export class StockMovementService {
         return await this._executeMovementTransaction(ctx, dto, postingDate, postingTs);
       } catch (error) {
         lastError = error as Error;
-        // Only retry on FIFO layer contention errors
-        if (error instanceof BadRequestException &&
-            (error as BadRequestException).message.includes('Insufficient FIFO layers') &&
-            attempt < MAX_RETRIES - 1) {
-          this.logger.warn(`FIFO layer contention on attempt ${attempt + 1}, retrying...`);
+        const prismaError = error as { code?: string };
+        if (prismaError.code === 'P2034' && attempt < MAX_RETRIES - 1) {
+          this.logger.warn(`Transaction serialization failure on attempt ${attempt + 1}, retrying...`);
           continue;
         }
         throw error;
@@ -87,9 +92,9 @@ export class StockMovementService {
     return this.prisma.$transaction(async (tx) => {
       // Set RLS tenant context
       await tx.$executeRaw`SELECT set_config('app.tenant', ${ctx.tenantId}, true)`;
-      // Validate warehouse
+      // Validate warehouse (exclude soft-deleted)
       const warehouse = await tx.warehouse.findFirst({
-        where: { tenantId: ctx.tenantId, code: dto.warehouseCode },
+        where: { tenantId: ctx.tenantId, code: dto.warehouseCode, deletedAt: null },
       });
       if (!warehouse) {
         throw new BadRequestException(`Warehouse not found: ${dto.warehouseCode}`);
@@ -98,14 +103,14 @@ export class StockMovementService {
         throw new BadRequestException(`Warehouse is inactive: ${dto.warehouseCode}`);
       }
 
-      // Validate destination warehouse for transfers
+      // Validate destination warehouse for transfers (exclude soft-deleted)
       let toWarehouse = null;
       if (dto.movementType === MovementType.TRANSFER) {
         if (!dto.toWarehouseCode) {
           throw new BadRequestException('Destination warehouse required for transfers');
         }
         toWarehouse = await tx.warehouse.findFirst({
-          where: { tenantId: ctx.tenantId, code: dto.toWarehouseCode },
+          where: { tenantId: ctx.tenantId, code: dto.toWarehouseCode, deletedAt: null },
         });
         if (!toWarehouse) {
           throw new BadRequestException(`Destination warehouse not found: ${dto.toWarehouseCode}`);
@@ -166,7 +171,7 @@ export class StockMovementService {
 
         if (itemDto.locationCode) {
           fromLocation = await tx.location.findFirst({
-            where: { tenantId: ctx.tenantId, warehouseId: warehouse.id, code: itemDto.locationCode },
+            where: { tenantId: ctx.tenantId, warehouseId: warehouse.id, code: itemDto.locationCode, deletedAt: null },
           });
           if (!fromLocation) {
             throw new BadRequestException(`Location not found: ${itemDto.locationCode}`);
@@ -176,7 +181,7 @@ export class StockMovementService {
         if (itemDto.toLocationCode) {
           const targetWarehouse = toWarehouse || warehouse;
           toLocation = await tx.location.findFirst({
-            where: { tenantId: ctx.tenantId, warehouseId: targetWarehouse.id, code: itemDto.toLocationCode },
+            where: { tenantId: ctx.tenantId, warehouseId: targetWarehouse.id, code: itemDto.toLocationCode, deletedAt: null },
           });
           if (!toLocation) {
             throw new BadRequestException(`Destination location not found: ${itemDto.toLocationCode}`);
@@ -453,11 +458,15 @@ export class StockMovementService {
         await this.updateWarehouseBalance(tx, ctx.tenantId, item.id, warehouse.id, qty);
 
         // Update bin (location) balance if location specified
-        if (fromLocation) {
+        // For non-transfer movements, only update one location to avoid double-counting
+        if (dto.movementType !== MovementType.TRANSFER) {
+          const locationForBin = fromLocation || toLocation;
+          if (locationForBin) {
+            await this.updateBinBalance(tx, ctx.tenantId, item.id, warehouse.id, locationForBin.id, qty, batch?.id ?? null);
+          }
+        } else if (fromLocation) {
+          // For transfers, update source location bin balance (destination handled below)
           await this.updateBinBalance(tx, ctx.tenantId, item.id, warehouse.id, fromLocation.id, qty, batch?.id ?? null);
-        }
-        if (toLocation && dto.movementType !== MovementType.TRANSFER) {
-          await this.updateBinBalance(tx, ctx.tenantId, item.id, warehouse.id, toLocation.id, qty, batch?.id ?? null);
         }
 
         // For transfers, create the receiving entry
@@ -715,28 +724,43 @@ export class StockMovementService {
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.tenant', ${ctx.tenantId}, true)`;
 
-      const where: Prisma.StockLedgerEntryWhereInput = { tenantId: ctx.tenantId };
-      if (startDate || endDate) {
-        const dateFilter: { gte?: Date; lte?: Date } = {};
-        if (startDate) dateFilter.gte = startDate;
-        if (endDate) dateFilter.lte = endDate;
-        where.postingDate = dateFilter;
+      // Build date filter conditions for raw SQL
+      const dateConditions: ReturnType<typeof Prisma.sql>[] = [];
+      if (startDate) {
+        dateConditions.push(Prisma.sql`AND "postingDate" >= ${startDate}`);
       }
+      if (endDate) {
+        dateConditions.push(Prisma.sql`AND "postingDate" <= ${endDate}`);
+      }
+      const dateClause = dateConditions.length > 0
+        ? Prisma.sql`${Prisma.join(dateConditions, ' ')}`
+        : Prisma.empty;
 
-      const entries = await tx.stockLedgerEntry.findMany({
-        where,
-        select: { voucherType: true, qty: true, stockValueDifference: true },
-      });
+      // Use GROUP BY to avoid loading all records into memory
+      const results = await tx.$queryRaw<Array<{
+        voucherType: string;
+        count: bigint;
+        totalQty: Prisma.Decimal;
+        totalValue: Prisma.Decimal;
+      }>>`
+        SELECT
+          "voucherType",
+          COUNT(*)::bigint AS "count",
+          COALESCE(SUM(ABS("qty")), 0) AS "totalQty",
+          COALESCE(SUM(ABS("stockValueDifference")), 0) AS "totalValue"
+        FROM "stock_ledger_entries"
+        WHERE "tenantId" = ${ctx.tenantId}
+        ${dateClause}
+        GROUP BY "voucherType"
+      `;
 
       const summary: Record<string, { count: number; totalQty: number; totalValue: number }> = {};
-
-      for (const entry of entries) {
-        if (!summary[entry.voucherType]) {
-          summary[entry.voucherType] = { count: 0, totalQty: 0, totalValue: 0 };
-        }
-        summary[entry.voucherType].count++;
-        summary[entry.voucherType].totalQty += Math.abs(Number(entry.qty));
-        summary[entry.voucherType].totalValue += Math.abs(Number(entry.stockValueDifference));
+      for (const row of results) {
+        summary[row.voucherType] = {
+          count: Number(row.count),
+          totalQty: Number(row.totalQty),
+          totalValue: Number(row.totalValue),
+        };
       }
 
       return summary;
@@ -746,7 +770,7 @@ export class StockMovementService {
   /**
    * Get recent movements for an item
    */
-  async getItemMovements(ctx: TenantContext, itemCode: string, limit = 20) {
+  async getItemMovements(ctx: TenantContext, itemCode: string, limit = 20, offset = 0) {
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.tenant', ${ctx.tenantId}, true)`;
 
@@ -756,6 +780,11 @@ export class StockMovementService {
       if (!item) {
         throw new NotFoundException(`Item not found: ${itemCode}`);
       }
+
+      // Count total entries for pagination
+      const total = await tx.stockLedgerEntry.count({
+        where: { tenantId: ctx.tenantId, itemId: item.id },
+      });
 
       const entries = await tx.stockLedgerEntry.findMany({
         where: { tenantId: ctx.tenantId, itemId: item.id },
@@ -767,10 +796,43 @@ export class StockMovementService {
         },
         orderBy: { postingTs: 'desc' },
         take: limit,
+        skip: offset,
       });
 
-      // Calculate running balance
-      let runningQty = 0;
+      // Compute the starting balance by summing all entries BEFORE the current page.
+      // Since we order by postingTs DESC, entries before the current page are those
+      // with an offset > (offset + limit - 1), i.e., older entries that we skip past.
+      // We need the sum of ALL entries minus those on later pages (i.e., sum of entries
+      // from index 0..total, then subtract entries on pages after ours).
+      // Simpler: sum all qty, then subtract the qty of entries that come AFTER this page
+      // in DESC order (i.e., those at offset 0..offset-1 in DESC = newer entries).
+      let startingBalance = 0;
+      if (offset > 0) {
+        // Sum all entries that are newer than the current page (offset 0..offset-1 in DESC order)
+        // These are the entries we've already paginated past. The starting balance for our page
+        // is the total sum minus the sum of those newer entries.
+        const totalSumResult = await tx.stockLedgerEntry.aggregate({
+          where: { tenantId: ctx.tenantId, itemId: item.id },
+          _sum: { qty: true },
+        });
+        const totalSum = Number(totalSumResult._sum.qty || 0);
+
+        // Sum of the entries on this page and all entries after (older)
+        // = total - sum of entries before this page in DESC order
+        const newerEntries = await tx.stockLedgerEntry.findMany({
+          where: { tenantId: ctx.tenantId, itemId: item.id },
+          orderBy: { postingTs: 'desc' },
+          take: offset,
+          select: { qty: true },
+        });
+        const newerSum = newerEntries.reduce((sum, e) => sum + Number(e.qty), 0);
+
+        // Starting balance = total - newer entries sum
+        startingBalance = totalSum - newerSum;
+      }
+
+      // Calculate running balance starting from the oldest entry in this page
+      let runningQty = startingBalance;
       const movements = entries.reverse().map(e => {
         runningQty += Number(e.qty);
         return {
@@ -789,6 +851,9 @@ export class StockMovementService {
         itemCode: item.code,
         itemName: item.name,
         movements,
+        total,
+        limit,
+        offset,
       };
     });
   }

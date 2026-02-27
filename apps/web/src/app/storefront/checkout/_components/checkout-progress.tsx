@@ -3,13 +3,12 @@
 import { Check } from 'lucide-react';
 
 interface CheckoutProgressProps {
-  currentStep: 'info' | 'payment' | 'confirmation';
+  currentStep: 'info' | 'payment';
 }
 
 const steps = [
   { id: 'info', name: 'Contact & Shipping', number: 1 },
   { id: 'payment', name: 'Payment', number: 2 },
-  { id: 'confirmation', name: 'Confirmation', number: 3 },
 ];
 
 export function CheckoutProgress({ currentStep }: CheckoutProgressProps) {

@@ -31,6 +31,8 @@ export class BatchSerialService {
    */
   async createBatch(ctx: TenantContext, dto: CreateBatchDto) {
     return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.tenant', ${ctx.tenantId}, true)`;
+
       const item = await tx.item.findFirst({
         where: { tenantId: ctx.tenantId, code: dto.itemCode },
       });
@@ -66,7 +68,7 @@ export class BatchSerialService {
         data: {
           tenantId: ctx.tenantId,
           userId: ctx.userId,
-          action: 'create',
+          action: 'create_batch',
           docType: 'Batch',
           docName: batch.batchNo,
           meta: { itemCode: dto.itemCode, batchNo: dto.batchNo },
@@ -91,6 +93,8 @@ export class BatchSerialService {
    */
   async updateBatch(ctx: TenantContext, batchId: string, dto: UpdateBatchDto) {
     return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.tenant', ${ctx.tenantId}, true)`;
+
       const batch = await tx.batch.findFirst({
         where: { id: batchId, tenantId: ctx.tenantId },
         include: { item: true },
@@ -126,7 +130,7 @@ export class BatchSerialService {
         data: {
           tenantId: ctx.tenantId,
           userId: ctx.userId,
-          action: 'UPDATE_BATCH',
+          action: 'update_batch',
           docType: 'Batch',
           docName: batch.batchNo,
           meta: {
@@ -155,155 +159,172 @@ export class BatchSerialService {
    * Query batches
    */
   async queryBatches(ctx: TenantContext, query: BatchQueryDto) {
-    const limit = query.limit || 50;
-    const offset = query.offset || 0;
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.tenant', ${ctx.tenantId}, true)`;
 
-    const where: Prisma.BatchWhereInput = { tenantId: ctx.tenantId };
+      const limit = query.limit || 50;
+      const offset = query.offset || 0;
 
-    if (query.itemCode) {
-      const item = await this.prisma.item.findFirst({
-        where: { tenantId: ctx.tenantId, code: query.itemCode },
-      });
-      if (item) {
-        where.itemId = item.id;
+      const where: Prisma.BatchWhereInput = { tenantId: ctx.tenantId };
+
+      if (query.itemCode) {
+        const item = await tx.item.findFirst({
+          where: { tenantId: ctx.tenantId, code: query.itemCode },
+        });
+        // If item code doesn't match, force no results instead of silently dropping the filter
+        where.itemId = item ? item.id : 'NO_MATCH';
       }
-    }
 
-    if (!query.includeExpired) {
-      where.OR = [
-        { expDate: null },
-        { expDate: { gt: new Date() } },
-      ];
-    }
+      if (!query.includeExpired) {
+        where.OR = [
+          { expDate: null },
+          { expDate: { gt: new Date() } },
+        ];
+      }
 
-    const [batches, total] = await Promise.all([
-      this.prisma.batch.findMany({
-        where,
-        include: {
-          item: true,
-          binBalances: query.withStock ? {
-            select: { actualQty: true, reservedQty: true },
-          } : false,
-        },
-        orderBy: [{ item: { code: 'asc' } }, { expDate: 'asc' }],
-        take: limit,
-        skip: offset,
-      }),
-      this.prisma.batch.count({ where }),
-    ]);
+      const [batches, total] = await Promise.all([
+        tx.batch.findMany({
+          where,
+          include: {
+            item: true,
+            binBalances: query.withStock ? {
+              select: { actualQty: true, reservedQty: true },
+            } : false,
+          },
+          orderBy: [{ item: { code: 'asc' } }, { expDate: 'asc' }],
+          take: limit,
+          skip: offset,
+        }),
+        tx.batch.count({ where }),
+      ]);
 
-    return {
-      data: batches.map(b => {
-        const totalQty = query.withStock && b.binBalances
-          ? b.binBalances.reduce((sum, bb) => sum + Number(bb.actualQty), 0)
-          : undefined;
-        const reservedQty = query.withStock && b.binBalances
-          ? b.binBalances.reduce((sum, bb) => sum + Number(bb.reservedQty), 0)
-          : undefined;
+      return {
+        data: batches.map(b => {
+          const totalQty = query.withStock && b.binBalances
+            ? b.binBalances.reduce((sum, bb) => sum + Number(bb.actualQty), 0)
+            : undefined;
+          const reservedQty = query.withStock && b.binBalances
+            ? b.binBalances.reduce((sum, bb) => sum + Number(bb.reservedQty), 0)
+            : undefined;
 
-        return {
-          id: b.id,
-          itemCode: b.item.code,
-          itemName: b.item.name,
-          batchNo: b.batchNo,
-          mfgDate: b.mfgDate?.toISOString().split('T')[0],
-          expDate: b.expDate?.toISOString().split('T')[0],
-          isActive: b.isActive,
-          isExpired: b.expDate ? b.expDate < new Date() : false,
-          daysToExpiry: b.expDate
-            ? Math.ceil((b.expDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
-            : null,
-          ...(query.withStock ? { totalQty, reservedQty, availableQty: (totalQty || 0) - (reservedQty || 0) } : {}),
-        };
-      }),
-      total,
-      limit,
-      offset,
-    };
+          return {
+            id: b.id,
+            itemCode: b.item.code,
+            itemName: b.item.name,
+            batchNo: b.batchNo,
+            mfgDate: b.mfgDate?.toISOString().split('T')[0],
+            expDate: b.expDate?.toISOString().split('T')[0],
+            isActive: b.isActive,
+            isExpired: b.expDate ? b.expDate < new Date() : false,
+            daysToExpiry: b.expDate
+              ? Math.ceil((b.expDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+              : null,
+            ...(query.withStock ? { totalQty, reservedQty, availableQty: (totalQty || 0) - (reservedQty || 0) } : {}),
+          };
+        }),
+        total,
+        limit,
+        offset,
+      };
+    });
   }
 
   /**
    * Get batch details with stock by location
    */
   async getBatchDetails(ctx: TenantContext, batchId: string) {
-    const batch = await this.prisma.batch.findFirst({
-      where: { id: batchId, tenantId: ctx.tenantId },
-      include: {
-        item: true,
-        binBalances: {
-          include: { warehouse: true, location: true },
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.tenant', ${ctx.tenantId}, true)`;
+
+      const batch = await tx.batch.findFirst({
+        where: { id: batchId, tenantId: ctx.tenantId },
+        include: {
+          item: true,
+          binBalances: {
+            include: { warehouse: true, location: true },
+          },
+          serials: {
+            take: 100,
+            orderBy: { serialNo: 'asc' },
+          },
+          _count: {
+            select: { serials: true },
+          },
         },
-        serials: true,
-      },
+      });
+
+      if (!batch) {
+        throw new NotFoundException('Batch not found');
+      }
+
+      return {
+        id: batch.id,
+        itemCode: batch.item.code,
+        itemName: batch.item.name,
+        batchNo: batch.batchNo,
+        mfgDate: batch.mfgDate?.toISOString().split('T')[0],
+        expDate: batch.expDate?.toISOString().split('T')[0],
+        isActive: batch.isActive,
+        isExpired: batch.expDate ? batch.expDate < new Date() : false,
+        stockByLocation: batch.binBalances.map(bb => ({
+          warehouseCode: bb.warehouse.code,
+          locationCode: bb.location.code,
+          actualQty: Number(bb.actualQty),
+          reservedQty: Number(bb.reservedQty),
+          availableQty: Number(bb.actualQty) - Number(bb.reservedQty),
+        })),
+        serialCount: (batch as any)._count.serials,
+        serials: batch.serials.map(s => ({
+          serialNo: s.serialNo,
+          status: s.status,
+        })),
+      };
     });
-
-    if (!batch) {
-      throw new NotFoundException('Batch not found');
-    }
-
-    return {
-      id: batch.id,
-      itemCode: batch.item.code,
-      itemName: batch.item.name,
-      batchNo: batch.batchNo,
-      mfgDate: batch.mfgDate?.toISOString().split('T')[0],
-      expDate: batch.expDate?.toISOString().split('T')[0],
-      isActive: batch.isActive,
-      isExpired: batch.expDate ? batch.expDate < new Date() : false,
-      stockByLocation: batch.binBalances.map(bb => ({
-        warehouseCode: bb.warehouse.code,
-        locationCode: bb.location.code,
-        actualQty: Number(bb.actualQty),
-        reservedQty: Number(bb.reservedQty),
-        availableQty: Number(bb.actualQty) - Number(bb.reservedQty),
-      })),
-      serialCount: batch.serials.length,
-      serials: batch.serials.slice(0, 100).map(s => ({
-        serialNo: s.serialNo,
-        status: s.status,
-      })),
-    };
   }
 
   /**
    * Get expiring batches
    */
   async getExpiringBatches(ctx: TenantContext, daysAhead = 30) {
-    const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + daysAhead);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.tenant', ${ctx.tenantId}, true)`;
 
-    const batches = await this.prisma.batch.findMany({
-      where: {
-        tenantId: ctx.tenantId,
-        isActive: true,
-        expDate: {
-          not: null,
-          lte: expiryDate,
-          gt: new Date(),
+      const expiryDate = new Date();
+      expiryDate.setDate(expiryDate.getDate() + daysAhead);
+
+      const batches = await tx.batch.findMany({
+        where: {
+          tenantId: ctx.tenantId,
+          isActive: true,
+          expDate: {
+            not: null,
+            lte: expiryDate,
+            gt: new Date(),
+          },
         },
-      },
-      include: {
-        item: true,
-        binBalances: {
-          select: { actualQty: true },
+        include: {
+          item: true,
+          binBalances: {
+            select: { actualQty: true },
+          },
         },
-      },
-      orderBy: { expDate: 'asc' },
+        orderBy: { expDate: 'asc' },
+      });
+
+      return batches
+        .filter(b => b.binBalances.some(bb => Number(bb.actualQty) > 0))
+        .map(b => ({
+          id: b.id,
+          itemCode: b.item.code,
+          itemName: b.item.name,
+          batchNo: b.batchNo,
+          expDate: b.expDate?.toISOString().split('T')[0],
+          daysToExpiry: b.expDate
+            ? Math.ceil((b.expDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+            : null,
+          stockQty: b.binBalances.reduce((sum, bb) => sum + Number(bb.actualQty), 0),
+        }));
     });
-
-    return batches
-      .filter(b => b.binBalances.some(bb => Number(bb.actualQty) > 0))
-      .map(b => ({
-        id: b.id,
-        itemCode: b.item.code,
-        itemName: b.item.name,
-        batchNo: b.batchNo,
-        expDate: b.expDate?.toISOString().split('T')[0],
-        daysToExpiry: b.expDate
-          ? Math.ceil((b.expDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
-          : null,
-        stockQty: b.binBalances.reduce((sum, bb) => sum + Number(bb.actualQty), 0),
-      }));
   }
 
   // ==========================================
@@ -315,6 +336,8 @@ export class BatchSerialService {
    */
   async createSerial(ctx: TenantContext, dto: CreateSerialDto) {
     return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.tenant', ${ctx.tenantId}, true)`;
+
       const item = await tx.item.findFirst({
         where: { tenantId: ctx.tenantId, code: dto.itemCode },
       });
@@ -387,7 +410,7 @@ export class BatchSerialService {
         data: {
           tenantId: ctx.tenantId,
           userId: ctx.userId,
-          action: 'create',
+          action: 'create_serial',
           docType: 'Serial',
           docName: serial.serialNo,
           meta: { itemCode: dto.itemCode, serialNo: dto.serialNo },
@@ -413,6 +436,8 @@ export class BatchSerialService {
    */
   async createSerialsBulk(ctx: TenantContext, dto: CreateSerialBulkDto) {
     return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.tenant', ${ctx.tenantId}, true)`;
+
       const item = await tx.item.findFirst({
         where: { tenantId: ctx.tenantId, code: dto.itemCode },
       });
@@ -488,7 +513,7 @@ export class BatchSerialService {
         data: {
           tenantId: ctx.tenantId,
           userId: ctx.userId,
-          action: 'bulk_create',
+          action: 'bulk_create_serial',
           docType: 'Serial',
           docName: `${dto.serialNos.length} serials`,
           meta: { itemCode: dto.itemCode, count: dto.serialNos.length },
@@ -507,6 +532,8 @@ export class BatchSerialService {
    */
   async updateSerial(ctx: TenantContext, serialId: string, dto: UpdateSerialDto) {
     return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.tenant', ${ctx.tenantId}, true)`;
+
       const serial = await tx.serial.findFirst({
         where: { id: serialId, tenantId: ctx.tenantId },
       });
@@ -568,7 +595,7 @@ export class BatchSerialService {
         data: {
           tenantId: ctx.tenantId,
           userId: ctx.userId,
-          action: 'UPDATE_SERIAL',
+          action: 'update_serial',
           docType: 'Serial',
           docName: serial.serialNo,
           meta: {
@@ -598,113 +625,119 @@ export class BatchSerialService {
    * Query serials
    */
   async querySerials(ctx: TenantContext, query: SerialQueryDto) {
-    const limit = query.limit || 50;
-    const offset = query.offset || 0;
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.tenant', ${ctx.tenantId}, true)`;
 
-    const where: Prisma.SerialWhereInput = { tenantId: ctx.tenantId };
+      const limit = query.limit || 50;
+      const offset = query.offset || 0;
 
-    if (query.itemCode) {
-      const item = await this.prisma.item.findFirst({
-        where: { tenantId: ctx.tenantId, code: query.itemCode },
-      });
-      if (item) {
-        where.itemId = item.id;
+      const where: Prisma.SerialWhereInput = { tenantId: ctx.tenantId };
+
+      if (query.itemCode) {
+        const item = await tx.item.findFirst({
+          where: { tenantId: ctx.tenantId, code: query.itemCode },
+        });
+        // If item code doesn't match, force no results instead of silently dropping the filter
+        where.itemId = item ? item.id : 'NO_MATCH';
       }
-    }
 
-    if (query.warehouseCode) {
-      const warehouse = await this.prisma.warehouse.findFirst({
-        where: { tenantId: ctx.tenantId, code: query.warehouseCode },
-      });
-      if (warehouse) {
-        where.warehouseId = warehouse.id;
+      if (query.warehouseCode) {
+        const warehouse = await tx.warehouse.findFirst({
+          where: { tenantId: ctx.tenantId, code: query.warehouseCode },
+        });
+        // If warehouse code doesn't match, force no results instead of silently dropping the filter
+        where.warehouseId = warehouse ? warehouse.id : 'NO_MATCH';
       }
-    }
 
-    if (query.status) {
-      where.status = query.status as SerialStatus;
-    }
+      if (query.status) {
+        where.status = query.status as SerialStatus;
+      }
 
-    if (query.search) {
-      where.serialNo = { contains: query.search, mode: 'insensitive' };
-    }
+      if (query.search) {
+        where.serialNo = { contains: query.search, mode: 'insensitive' };
+      }
 
-    const [serials, total] = await Promise.all([
-      this.prisma.serial.findMany({
-        where,
-        include: {
-          item: true,
-          warehouse: true,
-          location: true,
-          batch: true,
-        },
-        orderBy: { serialNo: 'asc' },
-        take: limit,
-        skip: offset,
-      }),
-      this.prisma.serial.count({ where }),
-    ]);
+      const [serials, total] = await Promise.all([
+        tx.serial.findMany({
+          where,
+          include: {
+            item: true,
+            warehouse: true,
+            location: true,
+            batch: true,
+          },
+          orderBy: { serialNo: 'asc' },
+          take: limit,
+          skip: offset,
+        }),
+        tx.serial.count({ where }),
+      ]);
 
-    return {
-      data: serials.map(s => ({
-        id: s.id,
-        itemCode: s.item.code,
-        itemName: s.item.name,
-        serialNo: s.serialNo,
-        status: s.status,
-        warehouseCode: s.warehouse?.code,
-        locationCode: s.location?.code,
-        batchNo: s.batch?.batchNo,
-        createdAt: s.createdAt,
-      })),
-      total,
-      limit,
-      offset,
-    };
+      return {
+        data: serials.map(s => ({
+          id: s.id,
+          itemCode: s.item.code,
+          itemName: s.item.name,
+          serialNo: s.serialNo,
+          status: s.status,
+          warehouseCode: s.warehouse?.code,
+          locationCode: s.location?.code,
+          batchNo: s.batch?.batchNo,
+          createdAt: s.createdAt,
+        })),
+        total,
+        limit,
+        offset,
+      };
+    });
   }
 
   /**
    * Get serial history (ledger entries)
    */
   async getSerialHistory(ctx: TenantContext, serialNo: string) {
-    const serial = await this.prisma.serial.findFirst({
-      where: { tenantId: ctx.tenantId, serialNo },
-      include: {
-        item: true,
-        warehouse: true,
-        location: true,
-        batch: true,
-        ledgerEntries: {
-          include: {
-            ledgerEntry: {
-              include: { warehouse: true },
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT set_config('app.tenant', ${ctx.tenantId}, true)`;
+
+      const serial = await tx.serial.findFirst({
+        where: { tenantId: ctx.tenantId, serialNo },
+        include: {
+          item: true,
+          warehouse: true,
+          location: true,
+          batch: true,
+          ledgerEntries: {
+            include: {
+              ledgerEntry: {
+                include: { warehouse: true },
+              },
             },
+            orderBy: { createdAt: 'desc' },
           },
-          orderBy: { createdAt: 'desc' },
         },
-      },
+      });
+
+      if (!serial) {
+        throw new NotFoundException(`Serial not found: ${serialNo}`);
+      }
+
+      return {
+        id: serial.id,
+        itemCode: serial.item.code,
+        itemName: serial.item.name,
+        serialNo: serial.serialNo,
+        status: serial.status,
+        currentWarehouse: serial.warehouse?.code,
+        currentLocation: serial.location?.code,
+        batchNo: serial.batch?.batchNo,
+        history: serial.ledgerEntries.map(le => ({
+          date: le.ledgerEntry.postingDate.toISOString().split('T')[0],
+          voucherType: le.ledgerEntry.voucherType,
+          voucherNo: le.ledgerEntry.voucherNo,
+          warehouse: le.ledgerEntry.warehouse.code,
+          qty: Number(le.ledgerEntry.qty),
+        })),
+      };
     });
-
-    if (!serial) {
-      throw new NotFoundException(`Serial not found: ${serialNo}`);
-    }
-
-    return {
-      id: serial.id,
-      itemCode: serial.item.code,
-      itemName: serial.item.name,
-      serialNo: serial.serialNo,
-      status: serial.status,
-      currentWarehouse: serial.warehouse?.code,
-      currentLocation: serial.location?.code,
-      batchNo: serial.batch?.batchNo,
-      history: serial.ledgerEntries.map(le => ({
-        date: le.ledgerEntry.postingDate.toISOString().split('T')[0],
-        voucherType: le.ledgerEntry.voucherType,
-        voucherNo: le.ledgerEntry.voucherNo,
-        warehouse: le.ledgerEntry.warehouse.code,
-        qty: Number(le.ledgerEntry.qty),
-      })),
-    };
   }
 }

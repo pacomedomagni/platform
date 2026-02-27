@@ -1,3 +1,1 @@
-export function businessLogic(): string {
-  return 'business-logic';
-}
+// This module re-exports business logic services via business-logic.module.ts

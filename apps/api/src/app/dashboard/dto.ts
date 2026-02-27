@@ -1,15 +1,3 @@
-import { IsOptional, IsDateString } from 'class-validator';
-
-export class DashboardQueryDto {
-  @IsOptional()
-  @IsDateString()
-  startDate?: string;
-
-  @IsOptional()
-  @IsDateString()
-  endDate?: string;
-}
-
 // Response types
 export interface RevenueStats {
   today: number;
@@ -43,18 +31,9 @@ export interface InventoryAlert {
   isOutOfStock: boolean;
 }
 
-export interface OverduePayment {
-  orderId: string;
-  orderNumber: string;
-  customerEmail: string;
-  amount: number;
-  dueDate: Date;
-  daysOverdue: number;
-}
-
 export interface RecentActivity {
   id: string;
-  type: 'order' | 'payment' | 'customer' | 'product';
+  type: 'order' | 'customer';
   action: string;
   description: string;
   timestamp: Date;

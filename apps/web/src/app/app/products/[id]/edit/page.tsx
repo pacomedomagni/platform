@@ -446,7 +446,7 @@ export default function EditProductPage() {
               <div className="mt-4 flex flex-wrap gap-3">
                 {images.map((url, idx) => (
                   <div
-                    key={idx}
+                    key={url}
                     className="group relative h-24 w-24 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-600"
                   >
                     <img

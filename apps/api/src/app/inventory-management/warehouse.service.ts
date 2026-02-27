@@ -114,17 +114,17 @@ export class WarehouseService {
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.tenant', ${ctx.tenantId}, true)`;
 
-      // Check unique code
-      const existingByCode = await tx.warehouse.findUnique({
-        where: { tenantId_code: { tenantId: ctx.tenantId, code: dto.code } },
+      // Check unique code (exclude soft-deleted warehouses)
+      const existingByCode = await tx.warehouse.findFirst({
+        where: { tenantId: ctx.tenantId, code: dto.code, deletedAt: null },
       });
       if (existingByCode) {
         throw new ConflictException(`Warehouse code already exists: ${dto.code}`);
       }
 
-      // Check unique name
-      const existingByName = await tx.warehouse.findUnique({
-        where: { tenantId_name: { tenantId: ctx.tenantId, name: dto.name } },
+      // Check unique name (exclude soft-deleted warehouses)
+      const existingByName = await tx.warehouse.findFirst({
+        where: { tenantId: ctx.tenantId, name: dto.name, deletedAt: null },
       });
       if (existingByName) {
         throw new ConflictException(`Warehouse name already exists: ${dto.name}`);

@@ -202,6 +202,7 @@ export class AdminRespondDto {
 export class CreateGiftCardDto {
   @IsNumber()
   @Min(1)
+  @Max(100000)
   initialValue: number;
 
   @IsString()
@@ -257,6 +258,7 @@ export class GiftCardTransactionDto {
   type: 'redemption' | 'refund' | 'adjustment' | 'deduction';
 
   @IsNumber()
+  @Min(0.01)
   amount: number;
 
   @IsString()

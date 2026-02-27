@@ -43,6 +43,7 @@ export enum SyncLogStatus {
   FAILED = 'failed',
 }
 
+/** @deprecated Use the Prisma MarketplaceConnection model directly. Kept for reference. */
 export interface MarketplaceConnectionConfig {
   appId: string;
   certId: string;

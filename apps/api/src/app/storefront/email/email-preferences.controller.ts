@@ -4,6 +4,7 @@ import { EmailPreferencesService, UpdatePreferencesDto } from './email-preferenc
 import { CustomerAuthGuard } from '../auth/customer-auth.guard';
 import { CurrentCustomer } from '../auth/current-customer.decorator';
 import { CurrentTenant } from '../auth/current-tenant.decorator';
+import { Tenant } from '../../tenant.middleware';
 
 const VALID_UNSUBSCRIBE_TYPES = ['marketing', 'orderUpdates', 'promotions', 'newsletter', 'all'] as const;
 type UnsubscribeType = typeof VALID_UNSUBSCRIBE_TYPES[number];
@@ -68,6 +69,10 @@ export class EmailPreferencesController {
     @Query('token') token: string,
     @Query('type') type?: 'marketing' | 'all',
   ) {
+    // H4: Validate token is present before calling service
+    if (!token) {
+      throw new BadRequestException('Unsubscribe token is required');
+    }
     return this.preferencesService.unsubscribeByToken(token, type || 'all');
   }
 
@@ -79,6 +84,10 @@ export class EmailPreferencesController {
     @Body('token') token: string,
     @Body('type') type?: 'marketing' | 'all',
   ) {
+    // H4: Validate token is present before calling service
+    if (!token) {
+      throw new BadRequestException('Unsubscribe token is required');
+    }
     return this.preferencesService.unsubscribeByToken(token, type || 'all');
   }
 
@@ -87,7 +96,7 @@ export class EmailPreferencesController {
    */
   @Post('newsletter/subscribe')
   async subscribeToNewsletter(
-    @CurrentTenant() tenantId: string,
+    @Tenant() tenantId: string,
     @Body() dto: NewsletterSubscribeDto,
   ) {
     return this.preferencesService.subscribeToNewsletter(tenantId, dto.email);

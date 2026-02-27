@@ -6,7 +6,7 @@ import { toSafeTableName } from './identifiers';
 export class ValidationService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async validate(docType: string, data: any) {
+  async validate(docType: string, data: any, tenantId: string) {
     const docTypeExists = await this.prisma.docType.findUnique({ where: { name: docType } });
     if (!docTypeExists) throw new BadRequestException(`DocType ${docType} does not exist`);
 
@@ -17,7 +17,7 @@ export class ValidationService {
     });
 
     if (!fields || fields.length === 0) {
-       return; 
+       return;
     }
 
     // 2. Iterate fields
@@ -44,7 +44,7 @@ export class ValidationService {
                 break;
             case 'Link':
                 if (field.target) {
-                    await this.validateLink(field.target, value);
+                    await this.validateLink(field.target, value, tenantId);
                 }
                 break;
         }
@@ -52,19 +52,20 @@ export class ValidationService {
     }
   }
 
-  private async validateLink(targetDocType: string, name: string) {
+  private async validateLink(targetDocType: string, name: string, tenantId: string) {
     const targetExists = await this.prisma.docType.findUnique({ where: { name: targetDocType } });
     if (!targetExists) throw new BadRequestException(`Invalid Link Target: ${targetDocType}`);
 
     const tableName = toSafeTableName(targetDocType);
-    // Security risk: SQL injection if targetDocType is malformed? 
-    // DocType names are strictly controlled via Meta sync, but good to be safe.
-    // We trust metadata, but we should verify the table exists or just try select.
+    // Wrap query in a transaction that sets RLS context to enforce tenant isolation
     try {
-        const result = await this.prisma.$queryRawUnsafe(
-            `SELECT name FROM "${tableName}" WHERE name = $1`, 
-            name
-        );
+        const result = await this.prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+            return tx.$queryRawUnsafe(
+                `SELECT name FROM "${tableName}" WHERE name = $1`,
+                name
+            );
+        });
         if ((result as any[]).length === 0) {
             throw new BadRequestException(`Link mismatch: ${name} not found in ${targetDocType}`);
         }

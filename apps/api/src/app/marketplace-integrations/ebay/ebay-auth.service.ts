@@ -3,7 +3,6 @@ import * as crypto from 'crypto';
 import { PrismaService } from '@platform/db';
 import { EbayStoreService } from './ebay-store.service';
 import { MarketplaceAuditService } from '../shared/marketplace-audit.service';
-import eBayApi from 'ebay-api';
 
 /**
  * eBay OAuth Authentication Service
@@ -81,7 +80,7 @@ export class EbayAuthService implements OnModuleDestroy {
       state,
     });
 
-    const authUrl = `https://auth.ebay.com/oauth2/authorize?${params.toString()}`;
+    const authUrl = `${this.authBaseUrl}/oauth2/authorize?${params.toString()}`;
 
     this.logger.log(`Generated OAuth URL for connection ${connectionId}`);
     return authUrl;
@@ -144,13 +143,32 @@ export class EbayAuthService implements OnModuleDestroy {
   }
 
   /**
+   * Determine the correct eBay base URLs based on sandbox mode.
+   */
+  private get isSandbox(): boolean {
+    return process.env.EBAY_SANDBOX === 'true';
+  }
+
+  private get authBaseUrl(): string {
+    return this.isSandbox
+      ? 'https://auth.sandbox.ebay.com'
+      : 'https://auth.ebay.com';
+  }
+
+  private get apiBaseUrl(): string {
+    return this.isSandbox
+      ? 'https://api.sandbox.ebay.com'
+      : 'https://api.ebay.com';
+  }
+
+  /**
    * Exchange authorization code for tokens
    */
   private async exchangeCodeForTokens(code: string) {
     const appId = process.env['EBAY_APP_ID'];
     const certId = process.env['EBAY_CERT_ID'];
     const ruName = process.env['EBAY_RU_NAME'];
-    const tokenEndpoint = 'https://api.ebay.com/identity/v1/oauth2/token';
+    const tokenEndpoint = `${this.apiBaseUrl}/identity/v1/oauth2/token`;
 
     const credentials = Buffer.from(`${appId}:${certId}`).toString('base64');
 

@@ -452,13 +452,38 @@ export class I18nService {
   }
 
   /**
-   * Delete a category translation
+   * Delete a category translation.
+   * Verifies the category belongs to the requesting tenant before deleting.
    */
   async deleteCategoryTranslation(
     ctx: TenantContext,
     categoryId: string,
     languageCode: string
   ) {
+    // Verify the category belongs to this tenant
+    const category = await this.prisma.productCategory.findFirst({
+      where: { id: categoryId, tenantId: ctx.tenantId },
+    });
+
+    if (!category) {
+      throw new NotFoundException(`Category '${categoryId}' not found`);
+    }
+
+    // Also verify the translation itself belongs to this tenant
+    const translation = await this.prisma.categoryTranslation.findFirst({
+      where: {
+        categoryId,
+        languageCode,
+        tenantId: ctx.tenantId,
+      },
+    });
+
+    if (!translation) {
+      throw new NotFoundException(
+        `Translation for category '${categoryId}' in '${languageCode}' not found`
+      );
+    }
+
     await this.prisma.categoryTranslation.delete({
       where: {
         categoryId_languageCode: {

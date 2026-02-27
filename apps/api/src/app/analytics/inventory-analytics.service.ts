@@ -61,7 +61,8 @@ export class InventoryAnalyticsService {
         FROM warehouse_item_balances wib
         GROUP BY wib."itemId"
       ) wib_totals ON wib_totals."itemId" = i.id
-      LEFT JOIN sales_data sd ON sd."productId" = i.id
+      LEFT JOIN product_listings pl ON pl."itemId" = i.id
+      LEFT JOIN sales_data sd ON sd."productId" = pl.id
       WHERE i."tenantId" = ${ctx.tenantId}
         AND i."isActive" = true
       ORDER BY COALESCE(sd.units_sold, 0) DESC
@@ -132,7 +133,7 @@ export class InventoryAnalyticsService {
         GROUP BY wib."itemId"
       ) wib_totals ON wib_totals."itemId" = i.id
       LEFT JOIN product_listings pl ON pl."itemId" = i.id
-      LEFT JOIN last_sale ls ON ls."productId" = i.id
+      LEFT JOIN last_sale ls ON ls."productId" = pl.id
       WHERE i."tenantId" = ${ctx.tenantId}
         AND i."isActive" = true
         AND COALESCE(wib_totals.total_qty, 0) > 0
@@ -254,7 +255,7 @@ export class InventoryAnalyticsService {
           COALESCE(SUM(wib_totals.total_qty * pl."price")::float, 0) as total_retail
         FROM items i
         LEFT JOIN (
-          SELECT wib."itemId", SUM(wib."quantity") as total_qty
+          SELECT wib."itemId", SUM(wib."actualQty") as total_qty
           FROM warehouse_item_balances wib
           GROUP BY wib."itemId"
         ) wib_totals ON wib_totals."itemId" = i.id
@@ -278,7 +279,7 @@ export class InventoryAnalyticsService {
           COUNT(DISTINCT i.id)::int as item_count
         FROM items i
         LEFT JOIN (
-          SELECT wib."itemId", SUM(wib."quantity") as total_qty
+          SELECT wib."itemId", SUM(wib."actualQty") as total_qty
           FROM warehouse_item_balances wib
           GROUP BY wib."itemId"
         ) wib_totals ON wib_totals."itemId" = i.id
@@ -394,12 +395,12 @@ export class InventoryAnalyticsService {
           COALESCE(
             (SELECT MAX(o."createdAt") FROM order_items oi
              INNER JOIN orders o ON o.id = oi."orderId"
-             WHERE oi."productId" = i.id AND o."paymentStatus" = 'CAPTURED'),
+             WHERE oi."productId" = pl.id AND o."paymentStatus" = 'CAPTURED'),
             i."createdAt"
           ) as last_activity
         FROM items i
         LEFT JOIN (
-          SELECT wib."itemId", SUM(wib."quantity") as total_qty
+          SELECT wib."itemId", SUM(wib."actualQty") as total_qty
           FROM warehouse_item_balances wib
           GROUP BY wib."itemId"
         ) wib_totals ON wib_totals."itemId" = i.id

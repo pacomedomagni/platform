@@ -68,14 +68,24 @@ export function isValidHexColor(color: string): boolean {
 }
 
 /**
- * Validates if all colors in the palette are valid hex colors
+ * Validates if all colors in the palette are valid hex colors.
+ * The 'radius' field is excluded since it is a CSS length value, not a color.
+ * All other string fields must start with '#' and be valid hex colors.
  */
 export function validateThemeColors(colors: Partial<ThemeColors>): boolean {
   const colorKeys = Object.keys(colors) as (keyof ThemeColors)[];
+  const nonColorKeys: (keyof ThemeColors)[] = ['radius'];
 
   for (const key of colorKeys) {
+    // Skip non-color fields (e.g. border-radius values)
+    if (nonColorKeys.includes(key)) continue;
+
     const value = colors[key];
-    if (typeof value === 'string' && value.startsWith('#')) {
+    if (typeof value === 'string') {
+      // Color fields must start with '#' and be valid hex
+      if (!value.startsWith('#')) {
+        return false;
+      }
       if (!isValidHexColor(value)) {
         return false;
       }

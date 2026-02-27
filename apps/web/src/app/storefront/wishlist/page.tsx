@@ -202,11 +202,11 @@ export default function WishlistPage() {
                         <div className="mt-1 flex flex-wrap gap-1">
                           {item.variant.attributes.map((attr) => (
                             <Badge
-                              key={attr.attributeType.name}
+                              key={attr.type}
                               variant="outline"
                               className="text-xs"
                             >
-                              {attr.attributeType.displayName}: {attr.attributeValue.displayValue}
+                              {attr.type}: {attr.value}
                             </Badge>
                           ))}
                         </div>

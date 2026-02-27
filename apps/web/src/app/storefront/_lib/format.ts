@@ -1,3 +1,5 @@
+'use client';
+
 import { useCurrencyStore } from '@/lib/currency-store';
 
 /**

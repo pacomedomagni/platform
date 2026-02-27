@@ -59,7 +59,12 @@ export class ConnectionsController {
    * GET /api/marketplace/connections/:id
    */
   @Get(':id')
-  async getConnection(@Param('id') id: string) {
+  async getConnection(
+    @Tenant() tenantId: string,
+    @Param('id') id: string
+  ) {
+    // tenantId is resolved from CLS by the service, but the @Tenant() decorator
+    // ensures the middleware has populated the CLS context for this request.
     return this.ebayStore.getConnection(id);
   }
 
@@ -68,7 +73,10 @@ export class ConnectionsController {
    * GET /api/marketplace/connections/:id/status
    */
   @Get(':id/status')
-  async getConnectionStatus(@Param('id') id: string) {
+  async getConnectionStatus(
+    @Tenant() tenantId: string,
+    @Param('id') id: string
+  ) {
     return this.ebayStore.getConnectionStatus(id);
   }
 
@@ -78,7 +86,10 @@ export class ConnectionsController {
    */
   @Post(':id/disconnect')
   @Roles('admin', 'System Manager')
-  async disconnectConnection(@Param('id') id: string) {
+  async disconnectConnection(
+    @Tenant() tenantId: string,
+    @Param('id') id: string
+  ) {
     await this.ebayStore.disconnectConnection(id);
     return { success: true, message: 'Connection disconnected' };
   }
@@ -89,7 +100,10 @@ export class ConnectionsController {
    */
   @Delete(':id')
   @Roles('admin', 'System Manager')
-  async deleteConnection(@Param('id') id: string) {
+  async deleteConnection(
+    @Tenant() tenantId: string,
+    @Param('id') id: string
+  ) {
     await this.ebayStore.deleteConnection(id);
     return { success: true, message: 'Connection deleted' };
   }

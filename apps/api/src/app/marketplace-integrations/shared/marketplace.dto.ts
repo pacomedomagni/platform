@@ -40,7 +40,9 @@ export class CreateConnectionDto {
   description?: string;
 
   @IsOptional()
-  @IsString()
+  @IsEnum(['EBAY_US', 'EBAY_UK', 'EBAY_GB', 'EBAY_DE', 'EBAY_FR', 'EBAY_IT', 'EBAY_ES', 'EBAY_CA', 'EBAY_AU'], {
+    message: 'marketplaceId must be a valid eBay marketplace (e.g. EBAY_US, EBAY_UK, EBAY_DE)',
+  })
   marketplaceId?: string;
 
   @IsOptional()
@@ -127,10 +129,21 @@ export class CreateDirectListingDto {
   @Min(0)
   quantity!: number;
 
-  @IsString()
+  @IsEnum(
+    [
+      'NEW', 'LIKE_NEW', 'NEW_OTHER', 'NEW_WITH_DEFECTS',
+      'MANUFACTURER_REFURBISHED', 'CERTIFIED_REFURBISHED',
+      'EXCELLENT_REFURBISHED', 'VERY_GOOD_REFURBISHED',
+      'GOOD_REFURBISHED', 'SELLER_REFURBISHED',
+      'USED_EXCELLENT', 'USED_VERY_GOOD', 'USED_GOOD', 'USED_ACCEPTABLE',
+      'FOR_PARTS_OR_NOT_WORKING',
+    ],
+    { message: 'condition must be a valid eBay item condition' }
+  )
   condition!: string;
 
   @IsString()
+  @MinLength(1)
   categoryId!: string;
 
   @IsOptional()
@@ -202,7 +215,9 @@ export class GetListingsQueryDto {
   connectionId?: string;
 
   @IsOptional()
-  @IsString()
+  @IsEnum(['draft', 'pending_approval', 'approved', 'publishing', 'published', 'ended', 'error'], {
+    message: 'status must be a valid listing status',
+  })
   status?: string;
 
   @IsOptional()
@@ -234,15 +249,21 @@ export class GetMarketplaceOrdersQueryDto {
   connectionId?: string;
 
   @IsOptional()
-  @IsString()
+  @IsEnum(['NOT_STARTED', 'IN_PROGRESS', 'FULFILLED'], {
+    message: 'fulfillmentStatus must be NOT_STARTED, IN_PROGRESS, or FULFILLED',
+  })
   fulfillmentStatus?: string;
 
   @IsOptional()
-  @IsString()
+  @IsEnum(['PAID', 'PENDING', 'FAILED', 'REFUNDED'], {
+    message: 'paymentStatus must be PAID, PENDING, FAILED, or REFUNDED',
+  })
   paymentStatus?: string;
 
   @IsOptional()
-  @IsString()
+  @IsEnum(['pending', 'synced', 'error'], {
+    message: 'syncStatus must be pending, synced, or error',
+  })
   syncStatus?: string;
 
   @IsOptional()

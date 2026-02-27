@@ -24,6 +24,7 @@ interface OrderDetail {
   phone: string | null;
   status: string;
   paymentStatus: string;
+  currency?: string;
   shippingAddress: any;
   billingAddress: any;
   items: Array<{
@@ -39,6 +40,7 @@ interface OrderDetail {
   taxTotal: number;
   discountTotal: number;
   grandTotal: number;
+  totalRefunded?: number | null;
   shippingMethod: string | null;
   shippingCarrier: string | null;
   trackingNumber: string | null;
@@ -148,9 +150,11 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
   const handleSaveNotes = async () => {
     if (!order) return;
     try {
+      // CRITICAL-2: Pass notesOnly flag so backend skips status transition validation
       await api.put(`/v1/store/orders/admin/${order.id}/status`, {
         status: order.status,
         adminNotes,
+        notesOnly: true,
       });
       toast({ title: 'Success', description: 'Notes saved' });
     } catch {
@@ -170,7 +174,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
     const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
     return new Intl.NumberFormat(locale, {
       style: 'currency',
-      currency: 'USD',
+      currency: order?.currency || 'USD',
     }).format(amount);
   };
 
@@ -209,6 +213,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
   const canProcess = order.status === 'CONFIRMED';
   const canShip = order.status === 'PROCESSING' || order.status === 'CONFIRMED';
   const canDeliver = order.status === 'SHIPPED';
+  const canCancel = ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED'].includes(order.status);
   const canRefund = (order.paymentStatus === 'CAPTURED' || order.paymentStatus === 'PARTIALLY_REFUNDED') && order.status !== 'CANCELLED';
 
   return (
@@ -280,6 +285,15 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
                 >
                   <CreditCard className="w-4 h-4 mr-2" />
                   Process Refund
+                </Button>
+              )}
+              {canCancel && (
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => updateStatus('CANCELLED')}
+                >
+                  Cancel Order
                 </Button>
               )}
             </div>
@@ -446,6 +460,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
         open={showRefundModal}
         onClose={() => setShowRefundModal(false)}
         orderTotal={order.grandTotal}
+        refundedAmount={order.totalRefunded || 0}
         onRefund={handleRefund}
       />
 

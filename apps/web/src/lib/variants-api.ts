@@ -23,7 +23,7 @@ async function apiFetch<T>(
 
   // Add auth token if available
   if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('admin_token') || localStorage.getItem('customer_token');
+    const token = localStorage.getItem('access_token');
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
@@ -72,7 +72,10 @@ export const attributeTypesApi = {
   }): Promise<AttributeType> => {
     return apiFetch('/v1/store/admin/attribute-types', {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: JSON.stringify({
+        ...data,
+        name: data.displayName.toLowerCase().replace(/\s+/g, '_'),
+      }),
     });
   },
 
@@ -105,7 +108,10 @@ export const attributeValuesApi = {
   }): Promise<AttributeValue> => {
     return apiFetch('/v1/store/admin/attribute-values', {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: JSON.stringify({
+        ...data,
+        value: data.displayValue.toLowerCase().replace(/\s+/g, '_'),
+      }),
     });
   },
 

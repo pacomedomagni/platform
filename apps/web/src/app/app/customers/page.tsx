@@ -120,8 +120,9 @@ export default function CustomersPage() {
     });
   };
 
+  // M8: VIP requires totalSpent > 1000 AND orderCount >= 5 to match backend
   const getCustomerSegment = (customer: Customer) => {
-    if ((customer.totalSpent || 0) > 1000) return { label: 'VIP', color: 'text-purple-600 bg-purple-50' };
+    if ((customer.totalSpent || 0) > 1000 && (customer.orderCount || 0) >= 5) return { label: 'VIP', color: 'text-purple-600 bg-purple-50' };
 
     const daysSinceCreation = Math.floor(
       (Date.now() - new Date(customer.createdAt).getTime()) / (1000 * 60 * 60 * 24)

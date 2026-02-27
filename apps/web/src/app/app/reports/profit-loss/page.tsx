@@ -14,6 +14,7 @@ type ProfitLoss = {
   net_profit_margin: number;
 };
 
+// TODO: Currency is hardcoded to USD. Make configurable via tenant settings or shared constant.
 const formatCurrency = (amount: number) => {
   const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
   try {

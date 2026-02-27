@@ -132,8 +132,9 @@ export class StripeService {
       refundData.reason = reason;
     }
 
-    // Generate idempotency key if not provided
-    const key = idempotencyKey || `refund_${paymentIntentId}_${Date.now()}`;
+    // Generate idempotency key if not provided — use stable key without Date.now()
+    // to ensure true idempotency on retries
+    const key = idempotencyKey || `refund_${paymentIntentId}`;
 
     const refund = await this.stripe.refunds.create(
       refundData,

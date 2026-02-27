@@ -7,9 +7,12 @@ import {
   Param,
   Body,
   Headers,
+  Req,
   BadRequestException,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { CustomerAuthService } from './customer-auth.service';
 import { CustomerAuthGuard } from './customer-auth.guard';
@@ -28,6 +31,26 @@ import {
 @Controller('store/auth')
 export class CustomerAuthController {
   constructor(private readonly authService: CustomerAuthService) {}
+
+  /**
+   * Extract tenantId from JWT (request.user) for authenticated endpoints.
+   * Falls back to header only if JWT tenantId is not available.
+   * Throws if they mismatch.
+   */
+  private resolveAuthenticatedTenantId(req: Request): string {
+    const jwtTenantId = (req as any).user?.tenantId;
+    const headerTenantId = req.headers['x-tenant-id'] as string | undefined;
+
+    if (jwtTenantId && headerTenantId && jwtTenantId !== headerTenantId) {
+      throw new UnauthorizedException('Tenant ID mismatch between token and header');
+    }
+
+    const tenantId = jwtTenantId || headerTenantId;
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID required');
+    }
+    return tenantId;
+  }
 
   /**
    * Register new customer
@@ -68,13 +91,10 @@ export class CustomerAuthController {
   @Get('me')
   @UseGuards(CustomerAuthGuard)
   async getProfile(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @CurrentCustomer() customerId: string
   ) {
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
+    const tenantId = this.resolveAuthenticatedTenantId(req);
     return this.authService.getProfile(tenantId, customerId);
   }
 
@@ -85,14 +105,11 @@ export class CustomerAuthController {
   @Put('me')
   @UseGuards(CustomerAuthGuard)
   async updateProfile(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @CurrentCustomer() customerId: string,
     @Body() dto: UpdateProfileDto
   ) {
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
+    const tenantId = this.resolveAuthenticatedTenantId(req);
     return this.authService.updateProfile(tenantId, customerId, dto);
   }
 
@@ -103,14 +120,11 @@ export class CustomerAuthController {
   @Post('change-password')
   @UseGuards(CustomerAuthGuard)
   async changePassword(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @CurrentCustomer() customerId: string,
     @Body() dto: ChangePasswordDto
   ) {
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
+    const tenantId = this.resolveAuthenticatedTenantId(req);
     return this.authService.changePassword(tenantId, customerId, dto);
   }
 
@@ -168,13 +182,10 @@ export class CustomerAuthController {
   @Post('resend-verification')
   @UseGuards(CustomerAuthGuard)
   async resendVerification(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @CurrentCustomer() customerId: string
   ) {
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
+    const tenantId = this.resolveAuthenticatedTenantId(req);
     return this.authService.resendVerificationEmail(tenantId, customerId);
   }
 
@@ -187,13 +198,10 @@ export class CustomerAuthController {
   @Get('addresses')
   @UseGuards(CustomerAuthGuard)
   async getAddresses(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @CurrentCustomer() customerId: string
   ) {
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
+    const tenantId = this.resolveAuthenticatedTenantId(req);
     return this.authService.getAddresses(tenantId, customerId);
   }
 
@@ -205,14 +213,11 @@ export class CustomerAuthController {
   @UseGuards(CustomerAuthGuard)
   @Throttle({ medium: { limit: 10, ttl: 60000 } })
   async addAddress(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @CurrentCustomer() customerId: string,
     @Body() dto: AddAddressDto
   ) {
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
+    const tenantId = this.resolveAuthenticatedTenantId(req);
     return this.authService.addAddress(tenantId, customerId, dto);
   }
 
@@ -224,15 +229,12 @@ export class CustomerAuthController {
   @UseGuards(CustomerAuthGuard)
   @Throttle({ medium: { limit: 10, ttl: 60000 } })
   async updateAddress(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @CurrentCustomer() customerId: string,
     @Param('id') addressId: string,
     @Body() dto: Partial<AddAddressDto>
   ) {
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
+    const tenantId = this.resolveAuthenticatedTenantId(req);
     return this.authService.updateAddress(
       tenantId,
       customerId,
@@ -249,14 +251,11 @@ export class CustomerAuthController {
   @UseGuards(CustomerAuthGuard)
   @Throttle({ medium: { limit: 10, ttl: 60000 } })
   async deleteAddress(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @CurrentCustomer() customerId: string,
     @Param('id') addressId: string
   ) {
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
+    const tenantId = this.resolveAuthenticatedTenantId(req);
     return this.authService.deleteAddress(tenantId, customerId, addressId);
   }
 }

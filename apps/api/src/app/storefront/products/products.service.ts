@@ -38,6 +38,7 @@ export class ProductsService {
     const where: Prisma.ProductListingWhereInput = {
       tenantId,
       isPublished: true,
+      deletedAt: null,
     };
 
     // Category filter
@@ -76,7 +77,7 @@ export class ProductsService {
       const productIds = await this.prisma.$queryRaw<Array<{ id: string }>>`
         SELECT pl."id"
         FROM "product_listings" pl
-        LEFT JOIN "order_items" oi ON oi."productListingId" = pl."id"
+        LEFT JOIN "order_items" oi ON oi."productId" = pl."id"
         WHERE pl."tenantId" = ${tenantId} AND pl."isPublished" = true
         ${categorySlug ? Prisma.sql`AND EXISTS (SELECT 1 FROM "product_categories" pc WHERE pc."id" = pl."categoryId" AND pc."slug" = ${categorySlug})` : Prisma.empty}
         ${search ? Prisma.sql`AND (pl."displayName" ILIKE ${'%' + search + '%'} OR pl."shortDescription" ILIKE ${'%' + search + '%'})` : Prisma.empty}
@@ -271,6 +272,17 @@ export class ProductsService {
               select: { actualQty: true, reservedQty: true },
             },
           },
+        },
+        variants: {
+          include: {
+            attributes: {
+              include: {
+                attributeType: true,
+                attributeValue: true,
+              },
+            },
+          },
+          orderBy: { createdAt: 'asc' },
         },
       },
     });
@@ -492,95 +504,106 @@ export class ProductsService {
    * Update a product listing (admin)
    */
   async updateProductListing(tenantId: string, id: string, dto: UpdateProductListingDto) {
-    const existing = await this.prisma.productListing.findFirst({
-      where: { id, tenantId },
-    });
+    try {
+      const product = await this.prisma.$transaction(async (tx) => {
+        const existing = await tx.productListing.findFirst({
+          where: { id, tenantId },
+        });
 
-    if (!existing) {
-      throw new NotFoundException('Product listing not found');
-    }
-
-    // Check slug uniqueness if changing
-    if (dto.slug && dto.slug !== existing.slug) {
-      const existingSlug = await this.prisma.productListing.findFirst({
-        where: { tenantId, slug: dto.slug, id: { not: id } },
-      });
-
-      if (existingSlug) {
-        throw new ConflictException('Product with this slug already exists');
-      }
-    }
-
-    const updateData: Prisma.ProductListingUpdateInput = {
-      ...(dto.slug && { slug: dto.slug }),
-      ...(dto.displayName && { displayName: dto.displayName }),
-      ...(dto.shortDescription !== undefined && { shortDescription: dto.shortDescription }),
-      ...(dto.longDescription !== undefined && { longDescription: dto.longDescription }),
-      ...(dto.price !== undefined && { price: dto.price }),
-      ...(dto.compareAtPrice !== undefined && { compareAtPrice: dto.compareAtPrice }),
-      ...(dto.images && { images: dto.images }),
-      ...(dto.categoryId !== undefined && { categoryId: dto.categoryId }),
-      ...(dto.badge !== undefined && { badge: dto.badge }),
-      ...(dto.isFeatured !== undefined && { isFeatured: dto.isFeatured }),
-      ...(dto.metaTitle !== undefined && { metaTitle: dto.metaTitle }),
-      ...(dto.metaDescription !== undefined && { metaDescription: dto.metaDescription }),
-    };
-
-    // Handle publishing with validation
-    if (dto.isPublished !== undefined) {
-      if (dto.isPublished && !existing.isPublished) {
-        // Validate required fields before publishing
-        const displayName = dto.displayName || existing.displayName;
-        const price = dto.price ?? existing.price;
-
-        if (!displayName || !displayName.trim()) {
-          throw new BadRequestException('Product must have a display name before publishing');
-        }
-        if (price === null || price === undefined || Number(price) <= 0) {
-          throw new BadRequestException('Product must have a valid price before publishing');
-        }
-        if (!existing.images?.length && !dto.images?.length) {
-          throw new BadRequestException('Product must have at least one image before publishing');
+        if (!existing) {
+          throw new NotFoundException('Product listing not found');
         }
 
-        updateData.publishedAt = new Date();
-      }
-      updateData.isPublished = dto.isPublished;
-    }
+        // Check slug uniqueness if changing
+        if (dto.slug !== undefined && dto.slug !== existing.slug) {
+          const existingSlug = await tx.productListing.findFirst({
+            where: { tenantId, slug: dto.slug, id: { not: id } },
+          });
 
-    const product = await this.prisma.productListing.update({
-      where: { id },
-      data: updateData,
-      include: {
-        category: {
-          select: { id: true, name: true, slug: true },
-        },
-        item: {
-          select: {
-            code: true,
-            stockUomCode: true,
-            warehouseItemBalances: {
-              select: { actualQty: true, reservedQty: true },
+          if (existingSlug) {
+            throw new ConflictException('Product with this slug already exists');
+          }
+        }
+
+        const updateData: Prisma.ProductListingUpdateInput = {
+          ...(dto.slug !== undefined && { slug: dto.slug }),
+          ...(dto.displayName !== undefined && { displayName: dto.displayName }),
+          ...(dto.shortDescription !== undefined && { shortDescription: dto.shortDescription }),
+          ...(dto.longDescription !== undefined && { longDescription: dto.longDescription }),
+          ...(dto.price !== undefined && { price: dto.price }),
+          ...(dto.compareAtPrice !== undefined && { compareAtPrice: dto.compareAtPrice }),
+          ...(dto.images && { images: dto.images }),
+          ...(dto.categoryId !== undefined && { categoryId: dto.categoryId }),
+          ...(dto.badge !== undefined && { badge: dto.badge }),
+          ...(dto.isFeatured !== undefined && { isFeatured: dto.isFeatured }),
+          ...(dto.metaTitle !== undefined && { metaTitle: dto.metaTitle }),
+          ...(dto.metaDescription !== undefined && { metaDescription: dto.metaDescription }),
+        };
+
+        // Handle publishing with validation
+        if (dto.isPublished !== undefined) {
+          if (dto.isPublished && !existing.isPublished) {
+            // Validate required fields before publishing
+            const displayName = dto.displayName || existing.displayName;
+            const price = dto.price ?? existing.price;
+
+            if (!displayName || !displayName.trim()) {
+              throw new BadRequestException('Product must have a display name before publishing');
+            }
+            if (price === null || price === undefined || Number(price) <= 0) {
+              throw new BadRequestException('Product must have a valid price before publishing');
+            }
+            if (!existing.images?.length && !dto.images?.length) {
+              throw new BadRequestException('Product must have at least one image before publishing');
+            }
+
+            updateData.publishedAt = new Date();
+          }
+          updateData.isPublished = dto.isPublished;
+        }
+
+        return tx.productListing.update({
+          where: { id },
+          data: updateData,
+          include: {
+            category: {
+              select: { id: true, name: true, slug: true },
+            },
+            item: {
+              select: {
+                code: true,
+                stockUomCode: true,
+                warehouseItemBalances: {
+                  select: { actualQty: true, reservedQty: true },
+                },
+              },
             },
           },
+        });
+      });
+
+      // Fire-and-forget: trigger product.updated webhook
+      this.webhookService.triggerEvent({ tenantId }, {
+        event: 'product.updated',
+        payload: {
+          productId: product.id,
+          slug: product.slug,
+          displayName: product.displayName,
+          price: product.price ? Number(product.price) : null,
+          isPublished: product.isPublished,
         },
-      },
-    });
+        timestamp: new Date(),
+      }).catch(() => { /* silent */ });
 
-    // Fire-and-forget: trigger product.updated webhook
-    this.webhookService.triggerEvent({ tenantId }, {
-      event: 'product.updated',
-      payload: {
-        productId: product.id,
-        slug: product.slug,
-        displayName: product.displayName,
-        price: product.price ? Number(product.price) : null,
-        isPublished: product.isPublished,
-      },
-      timestamp: new Date(),
-    }).catch(() => { /* silent */ });
-
-    return this.mapProductToDetailResponse(product);
+      return this.mapProductToDetailResponse(product);
+    } catch (error: unknown) {
+      // Handle P2002 unique constraint violation (slug race condition)
+      const prismaError = error as { code?: string; meta?: { target?: string[] } };
+      if (prismaError.code === 'P2002') {
+        throw new ConflictException('Product with this slug already exists');
+      }
+      throw error;
+    }
   }
 
   /**
@@ -621,92 +644,134 @@ export class ProductsService {
    * Create a category (admin)
    */
   async createCategory(tenantId: string, dto: CreateCategoryDto) {
-    // Check slug uniqueness
-    const existingSlug = await this.prisma.productCategory.findFirst({
-      where: { tenantId, slug: dto.slug },
-    });
+    try {
+      // Validate parentId belongs to the same tenant
+      if (dto.parentId) {
+        const parentCategory = await this.prisma.productCategory.findFirst({
+          where: { id: dto.parentId, tenantId },
+        });
+        if (!parentCategory) {
+          throw new BadRequestException('Parent category not found');
+        }
+      }
 
-    if (existingSlug) {
-      throw new ConflictException('Category with this slug already exists');
-    }
+      // Check slug uniqueness
+      const existingSlug = await this.prisma.productCategory.findFirst({
+        where: { tenantId, slug: dto.slug },
+      });
 
-    const category = await this.prisma.productCategory.create({
-      data: {
-        tenantId,
-        name: dto.name,
-        slug: dto.slug,
-        description: dto.description,
-        imageUrl: dto.imageUrl,
-        parentId: dto.parentId,
-        sortOrder: dto.sortOrder ?? 0,
-        isActive: true,
-      },
-      include: {
-        _count: {
-          select: { products: true },
+      if (existingSlug) {
+        throw new ConflictException('Category with this slug already exists');
+      }
+
+      const category = await this.prisma.productCategory.create({
+        data: {
+          tenantId,
+          name: dto.name,
+          slug: dto.slug,
+          description: dto.description,
+          imageUrl: dto.imageUrl,
+          parentId: dto.parentId,
+          sortOrder: dto.sortOrder ?? 0,
+          isActive: true,
         },
-      },
-    });
+        include: {
+          _count: {
+            select: { products: true },
+          },
+        },
+      });
 
-    return {
-      id: category.id,
-      name: category.name,
-      slug: category.slug,
-      description: category.description,
-      imageUrl: category.imageUrl,
-      productCount: category._count.products,
-    };
+      return {
+        id: category.id,
+        name: category.name,
+        slug: category.slug,
+        description: category.description,
+        imageUrl: category.imageUrl,
+        productCount: category._count.products,
+      };
+    } catch (error: unknown) {
+      // M11: Handle P2002 unique constraint violation (slug race condition)
+      const prismaError = error as { code?: string };
+      if (prismaError.code === 'P2002') {
+        throw new ConflictException('Category with this slug already exists');
+      }
+      throw error;
+    }
   }
 
   /**
    * Update a category (admin)
    */
   async updateCategory(tenantId: string, id: string, dto: UpdateCategoryDto) {
-    const existing = await this.prisma.productCategory.findFirst({
-      where: { id, tenantId },
-    });
-
-    if (!existing) {
-      throw new NotFoundException('Category not found');
-    }
-
-    // Check slug uniqueness if changing
-    if (dto.slug && dto.slug !== existing.slug) {
-      const existingSlug = await this.prisma.productCategory.findFirst({
-        where: { tenantId, slug: dto.slug, id: { not: id } },
+    try {
+      const existing = await this.prisma.productCategory.findFirst({
+        where: { id, tenantId },
       });
-      if (existingSlug) {
+
+      if (!existing) {
+        throw new NotFoundException('Category not found');
+      }
+
+      // Validate parentId belongs to the same tenant
+      if (dto.parentId !== undefined && dto.parentId !== null) {
+        const parentCategory = await this.prisma.productCategory.findFirst({
+          where: { id: dto.parentId, tenantId },
+        });
+        if (!parentCategory) {
+          throw new BadRequestException('Parent category not found');
+        }
+        // Prevent self-referencing
+        if (dto.parentId === id) {
+          throw new BadRequestException('Category cannot be its own parent');
+        }
+      }
+
+      // Check slug uniqueness if changing
+      if (dto.slug && dto.slug !== existing.slug) {
+        const existingSlug = await this.prisma.productCategory.findFirst({
+          where: { tenantId, slug: dto.slug, id: { not: id } },
+        });
+        if (existingSlug) {
+          throw new ConflictException('Category with this slug already exists');
+        }
+      }
+
+      const updated = await this.prisma.productCategory.update({
+        where: { id },
+        data: {
+          ...(dto.name !== undefined && { name: dto.name }),
+          ...(dto.slug !== undefined && { slug: dto.slug }),
+          ...(dto.description !== undefined && { description: dto.description }),
+          ...(dto.imageUrl !== undefined && { imageUrl: dto.imageUrl }),
+          ...(dto.parentId !== undefined && { parentId: dto.parentId }),
+          ...(dto.sortOrder !== undefined && { sortOrder: dto.sortOrder }),
+          ...(dto.isActive !== undefined && { isActive: dto.isActive }),
+        },
+        include: {
+          _count: {
+            select: { products: true },
+          },
+        },
+      });
+
+      return {
+        id: updated.id,
+        name: updated.name,
+        slug: updated.slug,
+        description: updated.description,
+        imageUrl: updated.imageUrl,
+        isActive: updated.isActive,
+        productCount: updated._count.products,
+      };
+    } catch (error: unknown) {
+      // M11: Handle P2002 unique constraint violation (slug race condition)
+      const prismaError = error as { code?: string };
+      if (prismaError.code === 'P2002') {
         throw new ConflictException('Category with this slug already exists');
       }
+      throw error;
     }
-
-    const updated = await this.prisma.productCategory.update({
-      where: { id },
-      data: {
-        ...(dto.name !== undefined && { name: dto.name }),
-        ...(dto.slug !== undefined && { slug: dto.slug }),
-        ...(dto.description !== undefined && { description: dto.description }),
-        ...(dto.imageUrl !== undefined && { imageUrl: dto.imageUrl }),
-        ...(dto.parentId !== undefined && { parentId: dto.parentId }),
-        ...(dto.sortOrder !== undefined && { sortOrder: dto.sortOrder }),
-        ...(dto.isActive !== undefined && { isActive: dto.isActive }),
-      },
-      include: {
-        _count: {
-          select: { products: true },
-        },
-      },
-    });
-
-    return {
-      id: updated.id,
-      name: updated.name,
-      slug: updated.slug,
-      description: updated.description,
-      imageUrl: updated.imageUrl,
-      isActive: updated.isActive,
-      productCount: updated._count.products,
-    };
   }
 
   /**
@@ -819,7 +884,7 @@ export class ProductsService {
       offset = 0,
     } = dto;
 
-    const where: Prisma.ProductListingWhereInput = { tenantId };
+    const where: Prisma.ProductListingWhereInput = { tenantId, deletedAt: null };
 
     if (search) {
       where.OR = [
@@ -885,7 +950,7 @@ export class ProductsService {
       slug: product.slug,
       displayName: product.displayName,
       shortDescription: product.shortDescription,
-      price: Number(product.price),
+      price: product.price !== null ? Number(product.price) : null,
       compareAtPrice: product.compareAtPrice ? Number(product.compareAtPrice) : null,
       images: product.images,
       badge: product.badge,

@@ -15,6 +15,7 @@ interface Order {
   status: string;
   paymentStatus: string;
   grandTotal: number;
+  currency?: string;
   itemCount: number;
   createdAt: string | Date;
 }
@@ -39,10 +40,10 @@ export function OrderTable({ orders, loading }: OrderTableProps) {
     });
   };
 
-  const formatCurrency = (amount: number) => {
+  const formatCurrency = (amount: number, currency = 'USD') => {
     return new Intl.NumberFormat(locale, {
       style: 'currency',
-      currency: 'USD',
+      currency,
     }).format(amount);
   };
 
@@ -105,7 +106,7 @@ export function OrderTable({ orders, loading }: OrderTableProps) {
                 <PaymentStatusBadge status={order.paymentStatus} />
               </td>
               <td className="p-3 text-right">{order.itemCount}</td>
-              <td className="p-3 text-right font-medium">{formatCurrency(order.grandTotal)}</td>
+              <td className="p-3 text-right font-medium">{formatCurrency(order.grandTotal, order.currency || 'USD')}</td>
               <td className="p-3 text-sm text-muted-foreground">
                 {formatDate(order.createdAt)}
               </td>

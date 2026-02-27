@@ -433,7 +433,20 @@ function ListingRow({
         <div className="text-xs text-gray-500">{listing.connection?.marketplaceId}</div>
       </td>
       <td className="px-6 py-4">
-        <div className="text-sm text-gray-900">${listing.price}</div>
+        <div className="text-sm text-gray-900">
+          {new Intl.NumberFormat(undefined, {
+            style: 'currency',
+            currency: listing.connection?.marketplaceId === 'EBAY_UK' || listing.connection?.marketplaceId === 'EBAY_GB'
+              ? 'GBP'
+              : listing.connection?.marketplaceId === 'EBAY_DE' || listing.connection?.marketplaceId === 'EBAY_FR' || listing.connection?.marketplaceId === 'EBAY_IT' || listing.connection?.marketplaceId === 'EBAY_ES'
+                ? 'EUR'
+                : listing.connection?.marketplaceId === 'EBAY_CA'
+                  ? 'CAD'
+                  : listing.connection?.marketplaceId === 'EBAY_AU'
+                    ? 'AUD'
+                    : 'USD',
+          }).format(Number(listing.price))}
+        </div>
       </td>
       <td className="px-6 py-4">
         <div className="text-sm text-gray-900">{listing.quantity}</div>

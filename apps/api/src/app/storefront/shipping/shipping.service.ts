@@ -198,17 +198,32 @@ export class ShippingService {
         return true;
       })
       .map((rate) => {
-        const isFree =
+        const isFreeRate =
           rate.freeShippingThreshold && dto.cartTotal >= Number(rate.freeShippingThreshold);
+
+        // H1: Compute estimatedDays string and isFree boolean for frontend consumption
+        let estimatedDays: string | null = null;
+        if (rate.estimatedDaysMin != null && rate.estimatedDaysMax != null) {
+          estimatedDays =
+            rate.estimatedDaysMin === rate.estimatedDaysMax
+              ? `${rate.estimatedDaysMin} day${rate.estimatedDaysMin === 1 ? '' : 's'}`
+              : `${rate.estimatedDaysMin}-${rate.estimatedDaysMax} days`;
+        } else if (rate.estimatedDaysMin != null) {
+          estimatedDays = `${rate.estimatedDaysMin}+ days`;
+        } else if (rate.estimatedDaysMax != null) {
+          estimatedDays = `Up to ${rate.estimatedDaysMax} days`;
+        }
 
         return {
           id: rate.id,
           name: rate.name,
           description: rate.description,
-          price: isFree ? 0 : Number(rate.price),
+          price: isFreeRate ? 0 : Number(rate.price),
           type: rate.type,
           estimatedDaysMin: rate.estimatedDaysMin,
           estimatedDaysMax: rate.estimatedDaysMax,
+          estimatedDays,
+          isFree: !!isFreeRate,
         };
       })
       .sort((a, b) => a.price - b.price);

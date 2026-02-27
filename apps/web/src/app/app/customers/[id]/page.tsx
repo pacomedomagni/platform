@@ -14,6 +14,7 @@ import {
   Edit2,
   Save,
   X,
+  Power,
 } from 'lucide-react';
 import api from '../../../../lib/api';
 import { OrderStatusBadge, PaymentStatusBadge } from '../../orders/_components/order-status-badge';
@@ -25,6 +26,8 @@ interface CustomerDetail {
   lastName: string | null;
   phone: string | null;
   emailVerified: boolean;
+  isActive: boolean;
+  adminNotes: string | null;
   createdAt: string;
   addresses?: Array<{
     id: string;
@@ -90,6 +93,9 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
         lastName: customerRes.data.lastName || '',
         phone: customerRes.data.phone || '',
       });
+
+      // M6: Load adminNotes from the customer data
+      setAdminNotes(customerRes.data.adminNotes || '');
 
       // Calculate stats
       const ordersList = ordersRes.data.data || [];
@@ -192,7 +198,40 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
               Customer since {formatDate(customer.createdAt)}
             </p>
           </div>
+          {/* M13: Display isActive status badge */}
+          {customer.isActive ? (
+            <Badge variant="success" className="ml-3">Active</Badge>
+          ) : (
+            <Badge variant="destructive" className="ml-3">Inactive</Badge>
+          )}
         </div>
+        {/* M13: Toggle active/inactive button */}
+        <Button
+          variant={customer.isActive ? 'destructive' : 'default'}
+          size="sm"
+          onClick={async () => {
+            if (!customer) return;
+            try {
+              await api.put(`/v1/store/admin/customers/${customer.id}`, {
+                isActive: !customer.isActive,
+              });
+              await loadCustomer();
+              toast({
+                title: 'Success',
+                description: customer.isActive ? 'Customer deactivated' : 'Customer activated',
+              });
+            } catch (err: any) {
+              toast({
+                title: 'Error',
+                description: 'Failed to update customer status',
+                variant: 'destructive',
+              });
+            }
+          }}
+        >
+          <Power className="w-4 h-4 mr-2" />
+          {customer.isActive ? 'Deactivate' : 'Activate'}
+        </Button>
       </div>
 
       <div className="grid lg:grid-cols-3 gap-6">

@@ -98,6 +98,13 @@ export class CouponService {
       );
     }
 
+    // L6: Check expiresAt is not in the past
+    if (dto.expiresAt && new Date(dto.expiresAt) < new Date()) {
+      throw new BadRequestException(
+        'Expiry date must be in the future'
+      );
+    }
+
     // Validate date range
     if (dto.startsAt && dto.expiresAt) {
       if (new Date(dto.expiresAt) <= new Date(dto.startsAt)) {
@@ -208,15 +215,28 @@ export class CouponService {
       data.expiresAt = dto.expiresAt ? new Date(dto.expiresAt) : null;
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
 
-    const coupon = await this.prisma.coupon.update({
-      where: { id },
-      data,
+    // M1: Use updateMany with tenantId scope for defense in depth, then fetch the updated record
+    const updateResult = await this.prisma.coupon.updateMany({
+      where: { id, tenantId },
+      data: data as any,
+    });
+
+    if (updateResult.count === 0) {
+      throw new NotFoundException('Coupon not found');
+    }
+
+    const coupon = await this.prisma.coupon.findFirst({
+      where: { id, tenantId },
       include: {
         _count: {
           select: { usages: true },
         },
       },
     });
+
+    if (!coupon) {
+      throw new NotFoundException('Coupon not found');
+    }
 
     return this.mapCoupon(coupon);
   }

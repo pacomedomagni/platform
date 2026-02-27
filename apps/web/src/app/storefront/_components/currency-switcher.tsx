@@ -9,14 +9,11 @@ import { ChevronDown, Globe } from 'lucide-react';
 import { useCurrencyStore, StoreCurrency } from '../../../lib/currency-store';
 
 export function CurrencySwitcher() {
-  const { currencies, selectedCurrency, isLoading, loadCurrencies, selectCurrency } = useCurrencyStore();
+  const { currencies, selectedCurrency, isLoading, selectCurrency } = useCurrencyStore();
   const [isOpen, setIsOpen] = useState(false);
 
-  useEffect(() => {
-    if (currencies.length === 0) {
-      loadCurrencies();
-    }
-  }, [currencies.length, loadCurrencies]);
+  // Note: loadCurrencies() is called by StoreProviders on mount.
+  // No need to call it here again.
 
   if (isLoading || currencies.length <= 1) {
     return null; // Don't show if only one currency or still loading

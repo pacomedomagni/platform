@@ -16,12 +16,18 @@ export class MarketplaceAuditService {
   ) {}
 
   /**
-   * Get current context from CLS
+   * Get current context from CLS.
+   * Returns undefined values when called outside of a CLS context
+   * (e.g. scheduled jobs). Callers should wrap audit calls in try/catch.
    */
   private getContext() {
-    const tenantId = this.cls.get('tenantId');
-    const userId = this.cls.get('userId');
-    return { tenantId, userId };
+    try {
+      const tenantId = this.cls.get('tenantId');
+      const userId = this.cls.get('userId');
+      return { tenantId, userId };
+    } catch {
+      return { tenantId: undefined, userId: undefined };
+    }
   }
 
   /**

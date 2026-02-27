@@ -248,7 +248,7 @@ export class SquareOAuthService {
    */
   private async fetchMerchantInfo(
     accessToken: string,
-  ): Promise<{ merchantId: string; locationId: string }> {
+  ): Promise<{ merchantId: string; locationId: string | null }> {
     const apiBase =
       process.env['SQUARE_ENVIRONMENT'] === 'production'
         ? 'https://connect.squareup.com'
@@ -267,7 +267,7 @@ export class SquareOAuthService {
 
     return {
       merchantId: merchant?.id || 'unknown',
-      locationId: merchant?.main_location_id || '',
+      locationId: merchant?.main_location_id || null,
     };
   }
 }

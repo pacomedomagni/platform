@@ -181,7 +181,7 @@ export class OrdersService {
    * List all orders (admin)
    */
   async listAllOrders(tenantId: string, dto: ListOrdersDto & { search?: string }) {
-    const { status, search, dateFrom, dateTo, limit = 20, offset = 0 } = dto;
+    const { status, paymentStatus, search, dateFrom, dateTo, limit = 20, offset = 0 } = dto;
 
     const where: Prisma.OrderWhereInput = {
       tenantId,
@@ -189,6 +189,10 @@ export class OrdersService {
 
     if (status) {
       where.status = status as any;
+    }
+
+    if (paymentStatus) {
+      where.paymentStatus = paymentStatus as any;
     }
 
     if (dateFrom || dateTo) {
@@ -270,12 +274,19 @@ export class OrdersService {
       throw new NotFoundException('Order not found');
     }
 
-    // PAY-13: Validate status transition
-    const allowedTransitions = VALID_ORDER_TRANSITIONS[order.status] || [];
-    if (!allowedTransitions.includes(status)) {
-      throw new BadRequestException(
-        `Invalid status transition: ${order.status} → ${status}. Allowed: ${allowedTransitions.join(', ') || 'none'}`
-      );
+    // CRITICAL-2: If status is unchanged and adminNotes is provided, skip
+    // transition validation and just update the notes (supports "Save Notes" in admin UI).
+    const isNotesOnlyUpdate =
+      status === order.status && trackingInfo?.adminNotes !== undefined;
+
+    if (!isNotesOnlyUpdate) {
+      // PAY-13: Validate status transition
+      const allowedTransitions = VALID_ORDER_TRANSITIONS[order.status] || [];
+      if (!allowedTransitions.includes(status)) {
+        throw new BadRequestException(
+          `Invalid status transition: ${order.status} → ${status}. Allowed: ${allowedTransitions.join(', ') || 'none'}`
+        );
+      }
     }
 
     const updateData: Prisma.OrderUpdateInput = { status: status as any };

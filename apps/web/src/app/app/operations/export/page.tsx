@@ -1,17 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { Card, Button, NativeSelect, Label, Input, toast } from '@platform/ui';
+import { Card, Button, Label, Input, toast } from '@platform/ui';
 import { Download, FileJson, FileSpreadsheet, Calendar } from 'lucide-react';
 import api from '../../../../lib/api';
-
-interface ExportHistory {
-  id: string;
-  entityType: string;
-  format: string;
-  recordCount: number;
-  createdAt: string;
-}
 
 export default function ExportPage() {
   const [entityType, setEntityType] = useState<'products' | 'customers' | 'inventory' | 'orders'>('orders');

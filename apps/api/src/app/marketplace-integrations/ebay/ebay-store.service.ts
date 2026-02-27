@@ -3,7 +3,7 @@ import { PrismaService } from '@platform/db';
 import { ClsService } from 'nestjs-cls';
 import eBayApi from 'ebay-api';
 import { EncryptionService } from '../shared/encryption.service';
-import { EbayTokenResponse, EbayBusinessPolicies } from '../shared/marketplace.types';
+import { EbayTokenResponse } from '../shared/marketplace.types';
 
 /**
  * eBay Store Management Service
@@ -220,7 +220,7 @@ export class EbayStoreService {
     if (existingLock) {
       await existingLock;
       // After waiting, retry getClient to use the refreshed token
-      return this.getClient(connectionId);
+      return this.getClient(connectionId, tenantId);
     }
 
     const refreshPromise = this.refreshAccessToken(refreshToken)
@@ -258,11 +258,15 @@ export class EbayStoreService {
   }
 
   /**
-   * Refresh access token using refresh token
+   * Refresh access token using refresh token.
+   * Respects EBAY_SANDBOX env var to use the correct endpoint.
    */
   private async refreshAccessToken(refreshToken: string): Promise<EbayTokenResponse> {
     const { appId, certId } = this.getEbayCredentials();
-    const tokenEndpoint = 'https://api.ebay.com/identity/v1/oauth2/token';
+    const isSandbox = process.env.EBAY_SANDBOX === 'true';
+    const tokenEndpoint = isSandbox
+      ? 'https://api.sandbox.ebay.com/identity/v1/oauth2/token'
+      : 'https://api.ebay.com/identity/v1/oauth2/token';
 
     const credentials = Buffer.from(`${appId}:${certId}`).toString('base64');
 
@@ -364,9 +368,13 @@ export class EbayStoreService {
   }
 
   /**
-   * Disconnect (clear tokens)
+   * Disconnect (clear tokens).
+   * Verifies the connection belongs to the current tenant first.
    */
   async disconnectConnection(connectionId: string) {
+    // Verify connection belongs to the current tenant
+    await this.getConnection(connectionId);
+
     await this.prisma.marketplaceConnection.update({
       where: { id: connectionId },
       data: {
@@ -382,10 +390,14 @@ export class EbayStoreService {
   }
 
   /**
-   * Delete connection
+   * Delete connection.
+   * Verifies the connection belongs to the current tenant before deleting.
    */
   async deleteConnection(connectionId: string) {
     const tenantId = this.cls.get('tenantId');
+
+    // Verify connection exists and belongs to the current tenant
+    const connection = await this.getConnection(connectionId);
 
     // Check if connection has any associated data
     const [listingCount, orderCount] = await Promise.all([
@@ -399,7 +411,7 @@ export class EbayStoreService {
       );
     }
 
-    await this.prisma.marketplaceConnection.delete({ where: { id: connectionId, tenantId } });
+    await this.prisma.marketplaceConnection.delete({ where: { id: connection.id } });
     this.clientCache.delete(connectionId);
     this.logger.log(`Deleted connection ${connectionId}`);
   }

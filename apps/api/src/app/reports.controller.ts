@@ -1,9 +1,9 @@
 import { Controller, Get, Query, Req, UseGuards, BadRequestException, ForbiddenException } from '@nestjs/common';
-import { AuthGuard } from '@nestjs/passport';
+import { AuthGuard } from '@platform/auth';
 import { ReportsService } from '@platform/business-logic';
 
 @Controller('reports')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard)
 export class ReportsController {
   constructor(private readonly reports: ReportsService) {}
 
@@ -51,12 +51,16 @@ export class ReportsController {
     @Req() req: any,
     @Query('fromDate') fromDate?: string,
     @Query('toDate') toDate?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
   ) {
     const tenantId = req.user?.tenantId;
     if (!tenantId) throw new BadRequestException('Missing tenantId');
     this.ensureReportsAccess(req.user);
     if (!fromDate || !toDate) throw new BadRequestException('fromDate and toDate are required');
-    return this.reports.getCashFlow(tenantId, fromDate, toDate);
+    const parsedLimit = limit ? parseInt(limit, 10) : 500;
+    const parsedOffset = offset ? parseInt(offset, 10) : 0;
+    return this.reports.getCashFlow(tenantId, fromDate, toDate, parsedLimit, parsedOffset);
   }
 
   @Get('general-ledger')

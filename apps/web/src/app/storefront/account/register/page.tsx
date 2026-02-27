@@ -6,13 +6,45 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useForm } from 'react-hook-form';
+import { useForm, useWatch, Control } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Card, Input, Button, Spinner } from '@platform/ui';
 import { registerSchema, type RegisterInput } from '@platform/validation';
 import { useAuthStore } from '../../../../lib/auth-store';
 import { FormField } from '@/components/forms';
 import { AlertCircle } from 'lucide-react';
+
+// L16: Extracted password strength indicator into a separate component using useWatch
+// to prevent the entire form from re-rendering on every keystroke
+function PasswordStrengthIndicator({ control }: { control: Control<RegisterInput> }) {
+  const password = useWatch({ control, name: 'password' });
+
+  if (!password) return null;
+
+  return (
+    <div
+      className="rounded-lg bg-blue-50 p-3 text-xs"
+      role="status"
+      aria-live="polite"
+    >
+      <p className="font-medium text-blue-900 mb-1">Password strength:</p>
+      <ul className="space-y-1 text-blue-700">
+        <li className={password.length >= 8 ? 'text-green-700' : ''}>
+          {password.length >= 8 ? '\u2713' : '\u25CB'} At least 8 characters
+        </li>
+        <li className={/[A-Z]/.test(password) ? 'text-green-700' : ''}>
+          {/[A-Z]/.test(password) ? '\u2713' : '\u25CB'} One uppercase letter
+        </li>
+        <li className={/[a-z]/.test(password) ? 'text-green-700' : ''}>
+          {/[a-z]/.test(password) ? '\u2713' : '\u25CB'} One lowercase letter
+        </li>
+        <li className={/[0-9]/.test(password) ? 'text-green-700' : ''}>
+          {/[0-9]/.test(password) ? '\u2713' : '\u25CB'} One number
+        </li>
+      </ul>
+    </div>
+  );
+}
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -22,7 +54,7 @@ export default function RegisterPage() {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
-    watch,
+    control,
   } = useForm<RegisterInput>({
     resolver: zodResolver(registerSchema),
     mode: 'onBlur',
@@ -47,8 +79,6 @@ export default function RegisterPage() {
       // Error is handled by the store
     }
   };
-
-  const password = watch('password');
 
   return (
     <div className="mx-auto w-full max-w-md px-6 py-20">
@@ -129,7 +159,7 @@ export default function RegisterPage() {
             htmlFor="password"
             error={errors.password?.message}
             required
-            hint="At least 8 characters with uppercase, lowercase, number, and special character"
+            hint="At least 8 characters with uppercase, lowercase, and number"
           >
             <Input
               type="password"
@@ -157,32 +187,7 @@ export default function RegisterPage() {
             />
           </FormField>
 
-          {password && (
-            <div
-              className="rounded-lg bg-blue-50 p-3 text-xs"
-              role="status"
-              aria-live="polite"
-            >
-              <p className="font-medium text-blue-900 mb-1">Password strength:</p>
-              <ul className="space-y-1 text-blue-700">
-                <li className={password.length >= 8 ? 'text-green-700' : ''}>
-                  {password.length >= 8 ? '✓' : '○'} At least 8 characters
-                </li>
-                <li className={/[A-Z]/.test(password) ? 'text-green-700' : ''}>
-                  {/[A-Z]/.test(password) ? '✓' : '○'} One uppercase letter
-                </li>
-                <li className={/[a-z]/.test(password) ? 'text-green-700' : ''}>
-                  {/[a-z]/.test(password) ? '✓' : '○'} One lowercase letter
-                </li>
-                <li className={/[0-9]/.test(password) ? 'text-green-700' : ''}>
-                  {/[0-9]/.test(password) ? '✓' : '○'} One number
-                </li>
-                <li className={/[^A-Za-z0-9]/.test(password) ? 'text-green-700' : ''}>
-                  {/[^A-Za-z0-9]/.test(password) ? '✓' : '○'} One special character
-                </li>
-              </ul>
-            </div>
-          )}
+          <PasswordStrengthIndicator control={control} />
 
           <Button
             type="submit"

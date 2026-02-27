@@ -15,12 +15,14 @@ interface RefundModalProps {
   open: boolean;
   onClose: () => void;
   orderTotal: number;
+  refundedAmount?: number;
   onRefund: (amount: number, reason: string, type: 'full' | 'partial') => Promise<void>;
 }
 
-export function RefundModal({ open, onClose, orderTotal, onRefund }: RefundModalProps) {
+export function RefundModal({ open, onClose, orderTotal, refundedAmount = 0, onRefund }: RefundModalProps) {
+  const remainingRefundable = orderTotal - refundedAmount;
   const [type, setType] = useState<'full' | 'partial'>('full');
-  const [amount, setAmount] = useState(orderTotal.toString());
+  const [amount, setAmount] = useState(remainingRefundable.toString());
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -34,8 +36,8 @@ export function RefundModal({ open, onClose, orderTotal, onRefund }: RefundModal
       return;
     }
 
-    if (refundAmount > orderTotal) {
-      setError('Refund amount cannot exceed order total');
+    if (refundAmount > remainingRefundable) {
+      setError(`Refund amount cannot exceed remaining refundable amount ($${remainingRefundable.toFixed(2)})`);
       return;
     }
 
@@ -49,7 +51,7 @@ export function RefundModal({ open, onClose, orderTotal, onRefund }: RefundModal
       await onRefund(refundAmount, reason, type);
       onClose();
       setType('full');
-      setAmount(orderTotal.toString());
+      setAmount(remainingRefundable.toString());
       setReason('');
     } catch (err: any) {
       setError(err.message || 'Failed to process refund');
@@ -61,7 +63,7 @@ export function RefundModal({ open, onClose, orderTotal, onRefund }: RefundModal
   const handleTypeChange = (newType: 'full' | 'partial') => {
     setType(newType);
     if (newType === 'full') {
-      setAmount(orderTotal.toString());
+      setAmount(remainingRefundable.toString());
     } else {
       setAmount('');
     }
@@ -96,13 +98,16 @@ export function RefundModal({ open, onClose, orderTotal, onRefund }: RefundModal
               type="number"
               step="0.01"
               min="0"
-              max={orderTotal}
+              max={remainingRefundable}
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               disabled={type === 'full'}
             />
             <p className="text-xs text-muted-foreground">
               Order total: ${orderTotal.toFixed(2)}
+              {refundedAmount > 0 && (
+                <> | Already refunded: ${refundedAmount.toFixed(2)} | Remaining: ${remainingRefundable.toFixed(2)}</>
+              )}
             </p>
           </div>
 

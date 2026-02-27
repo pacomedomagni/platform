@@ -1,5 +1,15 @@
-import { IsString, IsNumber, IsOptional, Min } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsIn, Min } from 'class-validator';
 import { Type } from 'class-transformer';
+
+// L1: Moved from payments.controller.ts for consistency
+// M5: Removed dead `amount` field — amount is derived from order.grandTotal on the backend
+export class SquarePaymentDto {
+  @IsString()
+  orderId!: string;
+
+  @IsString()
+  sourceId!: string; // Card nonce from Square Web Payments SDK
+}
 
 export class CreateRefundDto {
   @IsString()
@@ -12,23 +22,8 @@ export class CreateRefundDto {
   amount?: number;
 
   @IsOptional()
-  @IsString()
+  @IsIn(['duplicate', 'fraudulent', 'requested_by_customer'])
   reason?: 'duplicate' | 'fraudulent' | 'requested_by_customer';
 }
 
-export class PaymentConfigResponseDto {
-  publicKey: string | null;
-  isConfigured: boolean;
-}
-
-export class PaymentResponseDto {
-  id: string;
-  orderId: string;
-  amount: number;
-  currency: string;
-  status: string;
-  method: string;
-  cardBrand: string | null;
-  cardLast4: string | null;
-  createdAt: Date;
-}
+// L2: PaymentConfigResponseDto and PaymentResponseDto removed — they were unused

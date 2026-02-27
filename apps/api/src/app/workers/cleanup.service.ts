@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '@platform/db';
+import { WebhookService } from '../operations/webhook.service';
 
 /**
  * Cleanup Service
@@ -10,11 +11,14 @@ import { PrismaService } from '@platform/db';
 export class CleanupService {
   private readonly logger = new Logger(CleanupService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly webhookService: WebhookService,
+  ) {}
 
   /**
    * Clean up expired carts and release stock reservations
-   * Runs every 15 minutes
+   * Runs every 10 minutes
    */
   @Cron(CronExpression.EVERY_10_MINUTES)
   async cleanupExpiredCarts() {
@@ -159,34 +163,45 @@ export class CleanupService {
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-      // Delete cart items first (foreign key constraint)
-      const cartIds = await this.prisma.cart.findMany({
-        where: {
-          status: 'abandoned',
-          abandonedAt: { lt: thirtyDaysAgo },
-        },
-        select: { id: true },
-      });
+      // M-4: Process in batches of 1000 and loop until no more found
+      let totalDeleted = 0;
 
-      if (cartIds.length === 0) {
-        this.logger.log('No old abandoned carts found');
-        return;
+      while (true) {
+        const cartIds = await this.prisma.cart.findMany({
+          where: {
+            status: 'abandoned',
+            abandonedAt: { lt: thirtyDaysAgo },
+          },
+          select: { id: true },
+          take: 1000,
+        });
+
+        if (cartIds.length === 0) break;
+
+        // Delete cart items first (foreign key constraint)
+        await this.prisma.$transaction([
+          this.prisma.cartItem.deleteMany({
+            where: {
+              cartId: { in: cartIds.map((c) => c.id) },
+            },
+          }),
+          this.prisma.cart.deleteMany({
+            where: {
+              id: { in: cartIds.map((c) => c.id) },
+            },
+          }),
+        ]);
+
+        totalDeleted += cartIds.length;
+
+        if (cartIds.length < 1000) break;
       }
 
-      await this.prisma.$transaction([
-        this.prisma.cartItem.deleteMany({
-          where: {
-            cartId: { in: cartIds.map((c) => c.id) },
-          },
-        }),
-        this.prisma.cart.deleteMany({
-          where: {
-            id: { in: cartIds.map((c) => c.id) },
-          },
-        }),
-      ]);
-
-      this.logger.log(`Deleted ${cartIds.length} old abandoned carts`);
+      if (totalDeleted === 0) {
+        this.logger.log('No old abandoned carts found');
+      } else {
+        this.logger.log(`Deleted ${totalDeleted} old abandoned carts`);
+      }
     } catch (error) {
       this.logger.error(
         'Error during abandoned cart cleanup:',
@@ -223,6 +238,34 @@ export class CleanupService {
     } catch (error) {
       this.logger.error(
         'Error during audit log cleanup:',
+        error instanceof Error ? error.stack : String(error)
+      );
+    }
+
+    // L-8: Clean up old webhook deliveries as part of the weekly cleanup
+    try {
+      await this.webhookService.cleanupOldDeliveries();
+    } catch (error) {
+      this.logger.error(
+        'Error during webhook delivery cleanup:',
+        error instanceof Error ? error.stack : String(error)
+      );
+    }
+
+    // M2: Clean up old processed webhook events (older than 7 days)
+    try {
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+      const result = await this.prisma.$executeRaw`
+        DELETE FROM processed_webhook_events
+        WHERE "processedAt" < ${sevenDaysAgo}
+      `;
+
+      this.logger.log(`Deleted ${result} old processed webhook events`);
+    } catch (error) {
+      this.logger.error(
+        'Error during webhook events cleanup:',
         error instanceof Error ? error.stack : String(error)
       );
     }

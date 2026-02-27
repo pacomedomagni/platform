@@ -161,7 +161,13 @@ export const useAuthStore = create<AuthState>()(
         set({ isLoading: true, error: null });
 
         try {
-          await authApi.changePassword(currentPassword, newPassword);
+          const response = await authApi.changePassword(currentPassword, newPassword);
+          // H3: If the backend returns a new token (with updated tokenVersion), update the stored token
+          if (response && typeof response === 'object' && 'token' in response && (response as any).token) {
+            const newToken = (response as any).token;
+            localStorage.setItem('customer_token', newToken);
+            set({ token: newToken });
+          }
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Password change failed';
           set({ error: message });

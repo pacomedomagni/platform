@@ -69,7 +69,10 @@ export class MarketplaceListingsController {
    * GET /api/marketplace/listings/:id
    */
   @Get(':id')
-  async getListing(@Param('id') id: string) {
+  async getListing(
+    @Tenant() tenantId: string,
+    @Param('id') id: string
+  ) {
     return this.ebayListings.getListing(id);
   }
 

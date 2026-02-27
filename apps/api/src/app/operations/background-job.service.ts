@@ -255,7 +255,7 @@ export class BackgroundJobService implements OnModuleInit, OnModuleDestroy {
     if (this.isShuttingDown) return 0;
 
     // Atomically claim jobs using SELECT FOR UPDATE SKIP LOCKED
-    const claimedJobs = await this.prisma.$queryRawUnsafe<any[]>(`
+    const claimedJobs = await this.prisma.$queryRaw<any[]>`
       UPDATE background_jobs
       SET status = 'running', "startedAt" = NOW(), attempts = attempts + 1
       WHERE id IN (
@@ -267,7 +267,7 @@ export class BackgroundJobService implements OnModuleInit, OnModuleDestroy {
         FOR UPDATE SKIP LOCKED
       )
       RETURNING *
-    `);
+    `;
 
     let processed = 0;
 
@@ -358,12 +358,12 @@ export class BackgroundJobService implements OnModuleInit, OnModuleDestroy {
       this.prisma.backgroundJob.groupBy({
         by: ['status'],
         where,
-        _count: true,
+        _count: { _all: true },
       }),
       this.prisma.backgroundJob.groupBy({
         by: ['type'],
         where,
-        _count: true,
+        _count: { _all: true },
       }),
       this.prisma.backgroundJob.findMany({
         where: {
@@ -383,8 +383,8 @@ export class BackgroundJobService implements OnModuleInit, OnModuleDestroy {
     ]);
 
     return {
-      byStatus: statusCounts.map((s) => ({ status: s.status, count: s._count })),
-      byType: typeCounts.map((t) => ({ type: t.type, count: t._count })),
+      byStatus: statusCounts.map((s) => ({ status: s.status, count: s._count._all })),
+      byType: typeCounts.map((t) => ({ type: t.type, count: t._count._all })),
       recentFailures,
     };
   }

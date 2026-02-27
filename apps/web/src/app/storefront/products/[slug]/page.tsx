@@ -8,10 +8,19 @@ import { ProductReviews } from './_components/product-reviews';
 import { ProductPrice } from './_components/product-price';
 import { VariantSelector } from './_components/variant-selector';
 import { AddToCartButton } from './_components/add-to-cart-button';
+import { ImageGallery } from './_components/image-gallery';
 import {
   LocalizedProductName,
   LocalizedProductDescription,
 } from './_components/localized-product-info';
+/**
+ * Architectural note: This server component calls the storefront API using
+ * NEXT_PUBLIC_TENANT_ID. In production, each deployment (or subdomain) should
+ * have its own NEXT_PUBLIC_TENANT_ID configured at build/deploy time, or the
+ * page should use incoming request headers (e.g. Host) for tenant resolution
+ * via Next.js middleware. The current approach works for single-tenant
+ * deployments but does not support runtime multi-tenancy without middleware.
+ */
 import { productsApi } from '@/lib/store-api';
 import {
   generateProductSchema,
@@ -81,21 +90,51 @@ export default async function ProductPage({ params }: ProductPageProps) {
   }
 
   const relatedRes = await productsApi.list({ categorySlug: product.category?.slug, limit: 4 }).catch(() => ({ data: [] }));
-  const related = relatedRes.data.filter((item) => item.id !== product.id).slice(0, 3);
+  const relatedRaw = relatedRes.data.filter((item) => item.id !== product.id).slice(0, 3);
+
+  // Map raw API products to the shape expected by ProductCard
+  const mapProductForCard = (p: any) => ({
+    id: p.id,
+    name: p.name || p.displayName,
+    slug: p.slug,
+    category: typeof p.category === 'string' ? p.category : p.category?.name || 'Uncategorized',
+    price: p.price,
+    compareAt: p.compareAtPrice || undefined,
+    rating: p.averageRating ?? undefined,
+    reviews: p.reviewCount ?? 0,
+    badge: p.tags?.includes('bestseller')
+      ? ('Best Seller' as const)
+      : p.tags?.includes('new')
+        ? ('New Arrival' as const)
+        : undefined,
+    description: p.shortDescription || p.description?.substring(0, 100) || '',
+    stockStatus: (p.trackInventory && (p.quantity ?? p.stockQuantity) === 0)
+      ? ('Low Stock' as const)
+      : ('In Stock' as const),
+    leadTime: p.leadTime ?? undefined,
+    tone: 'from-blue-50 via-slate-50 to-amber-50',
+    images: p.images,
+  });
+
+  const related = relatedRaw.map(mapProductForCard);
 
   const categoryName = product.category?.name || 'Uncategorized';
-  const displayImage = product.images?.[0]; // Fallback to gradient if null
+  const allImages: string[] = product.images?.length ? product.images : [];
+  const displayImage = allImages[0] || null; // Fallback to gradient if null
 
   // Generate JSON-LD schemas for SEO
   const productUrl = `${BASE_URL}/storefront/products/${product.slug}`;
   const imageUrl = displayImage || `${BASE_URL}/og-product-${product.slug}.png`;
+
+  // Use the product's or store's currency instead of hardcoding USD
+  const schemaCurrency = product.currency || process.env.NEXT_PUBLIC_DEFAULT_CURRENCY || 'USD';
 
   const productSchema = generateProductSchema({
     name: product.displayName,
     description: product.description || product.shortDescription || '',
     image: imageUrl,
     price: product.price,
-    currency: 'USD',
+    currency: schemaCurrency,
     availability: product.stockStatus === 'in_stock' ? 'InStock' : 'OutOfStock',
     sku: product.id,
     url: productUrl,
@@ -131,7 +170,9 @@ export default async function ProductPage({ params }: ProductPageProps) {
 
       <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr]">
         <Card className="overflow-hidden border-border bg-card p-6 shadow-sm">
-          {displayImage ? (
+          {allImages.length > 1 ? (
+            <ImageGallery images={allImages} alt={product.displayName} />
+          ) : displayImage ? (
             <div className="aspect-[4/3] w-full rounded-2xl overflow-hidden flex items-center justify-center bg-white">
                <img src={displayImage} alt={product.displayName} className="h-full w-full object-contain" />
             </div>

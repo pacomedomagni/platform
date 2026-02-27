@@ -143,7 +143,7 @@ export class SalesAnalyticsService {
         COALESCE(SUM(oi."quantity")::int, 0) as items_sold
       FROM order_items oi
       INNER JOIN orders o ON o.id = oi."orderId"
-      LEFT JOIN product_listings pl ON pl."itemId" = oi."productId"
+      LEFT JOIN product_listings pl ON pl.id = oi."productId"
       LEFT JOIN product_categories pc ON pc.id = pl."categoryId"
       WHERE o."tenantId" = ${ctx.tenantId}
         AND o."paymentStatus" = 'CAPTURED'
