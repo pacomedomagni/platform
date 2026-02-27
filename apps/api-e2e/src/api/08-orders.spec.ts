@@ -556,6 +556,32 @@ describe('Order Endpoints', () => {
     });
   });
 
+  // ─── Cart Merge ────────────────────────────────────────────────
+
+  describe('Cart Merge', () => {
+    it('POST /store/cart/merge → merge guest cart into authenticated cart', async () => {
+      // Create a guest cart by getting a cart without auth
+      const guestRes = await axios.get('/store/cart', {
+        headers: { 'x-tenant-id': adminHeaders()['x-tenant-id'] },
+      });
+
+      const guestCartId = guestRes.data.id || guestRes.data.cartId;
+      if (!guestCartId) {
+        console.warn('Skipping merge test: could not create guest cart');
+        return;
+      }
+
+      const res = await axios.post(
+        '/store/cart/merge',
+        { sourceCartId: guestCartId },
+        { headers: customerHeaders() },
+      );
+
+      // May return 200 (merged) or 400 (empty cart to merge)
+      expect(res.status).toBeLessThan(500);
+    });
+  });
+
   // ─── Checkout Extras ────────────────────────────────────────────
 
   describe('Checkout Extras', () => {

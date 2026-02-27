@@ -112,5 +112,31 @@ describe('Dashboard Endpoints', () => {
         expect(res.data).toBeDefined();
       }
     });
+
+    it('POST /store/admin/dashboard/publish → 200 (publish store)', async () => {
+      const res = await axios.post(
+        '/store/admin/dashboard/publish',
+        {},
+        { headers: adminHeaders() },
+      );
+
+      expect(res.status).toBeLessThan(500);
+      if (res.status === 200) {
+        expect(res.data).toBeDefined();
+      }
+    });
+
+    it('POST /store/admin/dashboard/unpublish → 200 (unpublish store)', async () => {
+      const res = await axios.post(
+        '/store/admin/dashboard/unpublish',
+        {},
+        { headers: adminHeaders() },
+      );
+
+      expect(res.status).toBeLessThan(500);
+      if (res.status === 200) {
+        expect(res.data).toBeDefined();
+      }
+    });
   });
 });

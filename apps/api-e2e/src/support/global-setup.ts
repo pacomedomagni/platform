@@ -32,6 +32,12 @@ module.exports = async function () {
     journeyCartId: '', journeyOrderId: '', journeyOrderNumber: '',
     journeyCancelGiftCardId: '', journeyCancelGiftCardCode: '',
     journeyCancelOrderId: '',
+    // Marketplace extended fields
+    ebayConnectionId: '', ebayListingId: '', ebayOAuthState: '',
+    // Shipping advanced fields
+    weightTierId: '',
+    // Product import fields
+    importJobId: '',
   };
   fs.writeFileSync(storeFile, JSON.stringify(initialStore, null, 2));
   fs.writeFileSync(authFile, JSON.stringify({ adminToken: null, customerToken: null, customerId: null }));
