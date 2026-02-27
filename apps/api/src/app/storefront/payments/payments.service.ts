@@ -71,16 +71,17 @@ export class PaymentsService {
    * Handle Stripe webhook events
    */
   async handleWebhook(payload: Buffer, signature: string) {
+    const mockMode = process.env['MOCK_EXTERNAL_SERVICES'] === 'true';
     const webhookSecret = process.env['STRIPE_WEBHOOK_SECRET'];
-    
-    if (!webhookSecret) {
+
+    if (!webhookSecret && !mockMode) {
       throw new BadRequestException('Webhook secret not configured');
     }
 
     let event: Stripe.Event;
 
     try {
-      event = this.stripeService.verifyWebhookSignature(payload, signature, webhookSecret);
+      event = this.stripeService.verifyWebhookSignature(payload, signature, webhookSecret || 'mock');
     } catch (err) {
       this.logger.error('Webhook signature verification failed:', err);
       throw new BadRequestException('Webhook signature verification failed');

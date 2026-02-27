@@ -15,6 +15,7 @@ export class EbayStoreService {
   private readonly clientCache = new Map<string, { client: eBayApi; expiry: number }>();
   private readonly refreshLocks = new Map<string, Promise<any>>();
   private readonly TOKEN_BUFFER_MS = 60000; // Refresh 1 min before expiry
+  private readonly mockMode = process.env['MOCK_EXTERNAL_SERVICES'] === 'true';
 
   constructor(
     private prisma: PrismaService,
@@ -38,6 +39,7 @@ export class EbayStoreService {
    * Check if eBay credentials are configured
    */
   hasCredentials(): boolean {
+    if (this.mockMode) return true;
     const { appId, certId, ruName } = this.getEbayCredentials();
     return !!(appId && certId && ruName);
   }
@@ -176,6 +178,11 @@ export class EbayStoreService {
    * When tenantId is provided explicitly, it is used directly instead of CLS.
    */
   async getClient(connectionId: string, tenantId?: string): Promise<eBayApi> {
+    if (this.mockMode) {
+      // Return a minimal mock client — EbayClientService will intercept all calls in mock mode
+      return {} as eBayApi;
+    }
+
     // Check cache
     const cached = this.clientCache.get(connectionId);
     if (cached && Date.now() < cached.expiry) {
@@ -262,6 +269,9 @@ export class EbayStoreService {
    * Respects EBAY_SANDBOX env var to use the correct endpoint.
    */
   private async refreshAccessToken(refreshToken: string): Promise<EbayTokenResponse> {
+    if (this.mockMode) {
+      return { access_token: 'mock_access_token', refresh_token: refreshToken, expires_in: 7200, token_type: 'Bearer' };
+    }
     const { appId, certId } = this.getEbayCredentials();
     const isSandbox = process.env.EBAY_SANDBOX === 'true';
     const tokenEndpoint = isSandbox
@@ -294,6 +304,21 @@ export class EbayStoreService {
    * through to getClient/getConnection instead of relying on CLS.
    */
   async fetchAndSaveBusinessPolicies(connectionId: string, tenantId?: string) {
+    if (this.mockMode) {
+      const mockPolicies = {
+        fulfillmentPolicyId: 'mock_fp_1',
+        paymentPolicyId: 'mock_pp_1',
+        returnPolicyId: 'mock_rp_1',
+        locationKey: 'mock_loc_1',
+      };
+      await this.prisma.marketplaceConnection.update({
+        where: { id: connectionId },
+        data: mockPolicies,
+      });
+      this.logger.log(`[MOCK] Saved mock business policies for connection ${connectionId}`);
+      return mockPolicies;
+    }
+
     const connection = await this.getConnection(connectionId, tenantId);
     const client = await this.getClient(connectionId, tenantId);
 

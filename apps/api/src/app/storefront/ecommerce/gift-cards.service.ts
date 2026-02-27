@@ -14,8 +14,9 @@ export class GiftCardsService {
 
   // ============ PUBLIC ENDPOINTS ============
 
-  async checkBalance(tenantId: string, code: string, pin?: string) {
-    const giftCard = await this.prisma.giftCard.findFirst({
+  async checkBalance(tenantId: string, code: string, pin?: string, txClient?: any) {
+    const db = txClient || this.prisma;
+    const giftCard = await db.giftCard.findFirst({
       where: { tenantId, code: code.toUpperCase() },
     });
 
@@ -55,10 +56,10 @@ export class GiftCardsService {
     tenantId: string,
     orderId: string,
     dto: RedeemGiftCardDto,
-    amount: number
+    amount: number,
+    txClient?: any,
   ) {
-    // Use interactive transaction with row-level locking to prevent race conditions
-    return this.prisma.$transaction(async (tx) => {
+    const redeemLogic = async (tx: any) => {
       // Lock the gift card row to prevent concurrent redemptions
       const lockedCards = await tx.$queryRaw<any[]>`
         SELECT * FROM gift_cards
@@ -126,7 +127,15 @@ export class GiftCardsService {
         remainingBalance: newBalance,
         transactionId: transaction.id,
       };
-    });
+    };
+
+    // If a transaction client is provided (e.g. from checkout), use it directly
+    // to avoid nested transactions that can't see uncommitted rows (FK violation).
+    // Otherwise, create a new transaction for standalone usage.
+    if (txClient) {
+      return redeemLogic(txClient);
+    }
+    return this.prisma.$transaction(redeemLogic);
   }
 
   // ============ ADMIN ENDPOINTS ============

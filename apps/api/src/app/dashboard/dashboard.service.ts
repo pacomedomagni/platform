@@ -185,7 +185,9 @@ export class DashboardService {
 
   private async getInventoryAlerts(tenantId: string): Promise<{
     lowStock: InventoryAlert[];
+    lowStockCount: number;
     outOfStock: InventoryAlert[];
+    outOfStockCount: number;
     totalActive: number;
   }> {
     // Get items with warehouse balances.

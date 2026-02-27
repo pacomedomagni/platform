@@ -1,0 +1,85 @@
+{
+  "categoryIds": [
+    "97d5b07c-e6b2-4718-84a7-60d7781cfa78",
+    "196c4176-5c93-4630-bfc1-ef5a14f40190"
+  ],
+  "productIds": [
+    "911357f6-299a-4c44-8229-677b8a7872d4",
+    "685626cd-338b-424d-b598-3f86fdecda49",
+    "b9b95a94-c419-4e19-97c6-3b9b9845c679"
+  ],
+  "productSlugs": [
+    "test-widget-b1a814",
+    "test-gadget-2d1e19"
+  ],
+  "attributeTypeIds": [
+    "ce44340c-b8e1-46ff-8384-e30b807302e9",
+    "589fe282-d48f-451a-8528-768d2b2aea71"
+  ],
+  "attributeValueIds": [
+    "ce02396f-637a-418e-a794-e3cb2fe46c2f",
+    "1f24709b-4e01-471c-a0ca-a2f1e5e5dd32",
+    "fea6f0ea-482f-4714-874c-3cda28a3f6a1",
+    "e51bf3ad-2e8e-42b0-9c0c-60c3c14063ed"
+  ],
+  "variantIds": [],
+  "warehouseId": "cf2d82d1-7239-4961-899a-58d8fd180470",
+  "warehouseCode": "MAIN",
+  "locationIds": [
+    "c85d18f1-2a37-4fdc-bc59-0589f2d053bf",
+    "e8749ec6-1c41-47a8-9af6-62682fee86de",
+    "7cb66066-5b47-403c-a244-b7da9decdd2e",
+    "bd56935d-b300-4a8e-be6a-0da1e48ec3e2",
+    "ee99e64d-5143-4bb3-a245-958ecff3927e",
+    "f58ae195-9eb0-4407-b49b-919af4eee36f",
+    "6c6ba1ef-6463-4072-9d0e-e2e6566ece1a",
+    "f5bdf918-d9a0-41c9-82df-c33a0d905e5f"
+  ],
+  "locationCodes": [
+    "ROOT",
+    "QC",
+    "RECEIVING",
+    "RETURNS",
+    "STAGING",
+    "ZONE-A",
+    "ZONE-B",
+    "ZONE-C"
+  ],
+  "testCustomerEmail": "e2e-customer-1772224800198@test.com",
+  "testCustomerPassword": "NewTestPass456!",
+  "testCustomerId": "a8aa7649-e552-4386-8c80-0bf73e9057b4",
+  "addressId": "4b1ef1ea-9bec-4872-9be0-f5d8adf4afc1",
+  "cartId": "a4d567a6-f28f-4ebb-b4cb-d94f995d9079",
+  "orderId": "565cd53a-4bea-4bf9-aded-38976caf7e22",
+  "orderNumber": "ORD-202602-00059",
+  "couponId": "e243d9dd-023f-47f3-b5bc-acbc2f5ed34a",
+  "couponCode": "SAVE10-1772224803944",
+  "giftCardId": "f7065692-49ef-4fad-ac55-78c50777b719",
+  "giftCardCode": "Q3XY-6LE4-P5L4-LPQU",
+  "reviewId": "7412a0a7-68ef-46c0-af6d-4487165cb154",
+  "wishlistId": "6a63ba66-e11f-4f96-8d46-e50faf246374",
+  "webhookId": "f2b118e5-76a3-41be-8788-76cb694aa4c3",
+  "themeId": "56b87773-c828-4e93-b440-591d5c4aea9c",
+  "secondaryWarehouseId": "",
+  "cancelTestOrderId": "",
+  "carrierId": "",
+  "shippingZoneId": "c083b213-07d7-43d1-a72b-76ece13983a3",
+  "shippingRateId": "3c4b996e-5b9b-4780-b902-bbebb3361122",
+  "shipmentId": "",
+  "journeyTenantId": "b66ab82e-b36d-44a9-b042-97ad7db7a686",
+  "journeyAdminToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImpvdXJuZXktMTc3MjIyNDgwNjQ2M0BlMmUtdGVzdC5jb20iLCJlbWFpbCI6ImpvdXJuZXktMTc3MjIyNDgwNjQ2M0BlMmUtdGVzdC5jb20iLCJzdWIiOiIzMTE1MTQ5OC1kYWNjLTRhNTItOTAyNy05NDM4YzBmNTJiNDIiLCJ0ZW5hbnRfaWQiOiJiNjZhYjgyZS1iMzZkLTQ0YTktYjA0Mi05N2FkN2RiN2E2ODYiLCJyb2xlcyI6WyJhZG1pbiIsInVzZXIiXSwiaXNzIjoiYWRtaW4iLCJhdWQiOiJhZG1pbiIsImlhdCI6MTc3MjIyNDgwNiwiZXhwIjoxNzcyMzExMjA2fQ.GiCZ_4SPoFSNmvFUPg_M29YL1994PrZF3NMUEx8QBes",
+  "journeyEmail": "journey-1772224806463@e2e-test.com",
+  "journeyProductId": "b26bf04c-f24e-41c1-9608-de7b3b04d103",
+  "journeyCategoryId": "5d13d658-71e8-4d93-9d2f-d3d1e5bbfc72",
+  "journeyGiftCardId": "878b1f8c-d39d-4127-9682-39fda9a350bc",
+  "journeyGiftCardCode": "XGY2-7B86-STVU-DVUY",
+  "journeyCartId": "a99be270-556a-404c-8b4d-7c043d40b9ec",
+  "journeyOrderId": "43a8d092-c5e0-48c8-b9fd-108915e2fc54",
+  "journeyOrderNumber": "ORD-202602-00061",
+  "journeyCancelGiftCardId": "61b8dcc6-dcb8-4b7a-ab02-c1db24db6586",
+  "journeyCancelGiftCardCode": "6K92-8Z4P-UXQB-7ARD",
+  "journeyCancelOrderId": "c2c14f1d-deb9-48fc-9dfd-ab16fce8ff85",
+  "ebayConnectionId": "0cbddad0-77b4-440e-89cf-763508c71f34",
+  "ebayOAuthState": "68bb4c68c28e177d17af1f4c3f73751c9c6692a3fd91d5b3a6a8f4c5a6a8ac56",
+  "ebayListingId": "aa7a0092-b657-46ec-adab-a6c2ef718895"
+}

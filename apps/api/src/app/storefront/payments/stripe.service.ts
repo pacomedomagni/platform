@@ -5,11 +5,15 @@ import Stripe from 'stripe';
 export class StripeService {
   private readonly stripe: Stripe | null;
   private readonly logger = new Logger(StripeService.name);
+  private readonly mockMode = process.env['MOCK_EXTERNAL_SERVICES'] === 'true';
 
   constructor() {
     const secretKey = process.env['STRIPE_SECRET_KEY'];
-    
-    if (secretKey) {
+
+    if (this.mockMode) {
+      this.stripe = null;
+      this.logger.log('Stripe running in MOCK mode');
+    } else if (secretKey) {
       this.stripe = new Stripe(secretKey, {
         apiVersion: '2026-01-28.clover',
       });
@@ -24,7 +28,7 @@ export class StripeService {
    * Check if Stripe is configured
    */
   isConfigured(): boolean {
-    return this.stripe !== null;
+    return this.mockMode || this.stripe !== null;
   }
 
   /**
@@ -41,6 +45,20 @@ export class StripeService {
     metadata: Record<string, string> = {},
     idempotencyKey?: string
   ): Promise<Stripe.PaymentIntent> {
+    if (this.mockMode) {
+      const amountInCents = Math.round(amount * 100);
+      return {
+        id: `pi_mock_${Date.now()}`,
+        object: 'payment_intent',
+        amount: amountInCents,
+        currency: currency.toLowerCase(),
+        status: 'requires_payment_method',
+        client_secret: `pi_mock_secret_${Date.now()}`,
+        metadata,
+        created: Math.floor(Date.now() / 1000),
+        livemode: false,
+      } as unknown as Stripe.PaymentIntent;
+    }
     if (!this.stripe) {
       throw new BadRequestException('Payment processing is not configured');
     }
@@ -73,6 +91,9 @@ export class StripeService {
    * Get a Payment Intent
    */
   async getPaymentIntent(paymentIntentId: string): Promise<Stripe.PaymentIntent> {
+    if (this.mockMode) {
+      return { id: paymentIntentId, object: 'payment_intent', amount: 0, currency: 'usd', status: 'succeeded', livemode: false } as unknown as Stripe.PaymentIntent;
+    }
     if (!this.stripe) {
       throw new BadRequestException('Payment processing is not configured');
     }
@@ -84,6 +105,9 @@ export class StripeService {
    * Cancel a Payment Intent
    */
   async cancelPaymentIntent(paymentIntentId: string): Promise<Stripe.PaymentIntent> {
+    if (this.mockMode) {
+      return { id: paymentIntentId, object: 'payment_intent', status: 'canceled', livemode: false } as unknown as Stripe.PaymentIntent;
+    }
     if (!this.stripe) {
       throw new BadRequestException('Payment processing is not configured');
     }
@@ -95,6 +119,9 @@ export class StripeService {
    * Capture a Payment Intent (for manual capture)
    */
   async capturePaymentIntent(paymentIntentId: string): Promise<Stripe.PaymentIntent> {
+    if (this.mockMode) {
+      return { id: paymentIntentId, object: 'payment_intent', status: 'succeeded', livemode: false } as unknown as Stripe.PaymentIntent;
+    }
     if (!this.stripe) {
       throw new BadRequestException('Payment processing is not configured');
     }
@@ -116,6 +143,18 @@ export class StripeService {
     reason?: 'duplicate' | 'fraudulent' | 'requested_by_customer',
     idempotencyKey?: string
   ): Promise<Stripe.Refund> {
+    if (this.mockMode) {
+      const refundAmount = amount ? Math.round(amount * 100) : 0;
+      return {
+        id: `re_mock_${Date.now()}`,
+        object: 'refund',
+        amount: refundAmount,
+        status: 'succeeded',
+        payment_intent: paymentIntentId,
+        reason: reason || null,
+        created: Math.floor(Date.now() / 1000),
+      } as unknown as Stripe.Refund;
+    }
     if (!this.stripe) {
       throw new BadRequestException('Payment processing is not configured');
     }
@@ -150,6 +189,16 @@ export class StripeService {
    * Retrieve a charge by ID (used to get card details when latest_charge is a string)
    */
   async retrieveCharge(chargeId: string): Promise<Stripe.Charge> {
+    if (this.mockMode) {
+      return {
+        id: chargeId,
+        object: 'charge',
+        amount: 0,
+        currency: 'usd',
+        status: 'succeeded',
+        payment_method_details: { card: { brand: 'visa', last4: '4242' } },
+      } as unknown as Stripe.Charge;
+    }
     if (!this.stripe) {
       throw new BadRequestException('Payment processing is not configured');
     }
@@ -165,6 +214,10 @@ export class StripeService {
     signature: string,
     webhookSecret: string
   ): Stripe.Event {
+    if (this.mockMode) {
+      const parsed = JSON.parse(typeof payload === 'string' ? payload : payload.toString('utf-8'));
+      return parsed as Stripe.Event;
+    }
     if (!this.stripe) {
       throw new BadRequestException('Payment processing is not configured');
     }
@@ -180,6 +233,9 @@ export class StripeService {
     name?: string,
     metadata?: Record<string, string>
   ): Promise<Stripe.Customer> {
+    if (this.mockMode) {
+      return { id: `cus_mock_${Date.now()}`, object: 'customer', email, name, metadata } as unknown as Stripe.Customer;
+    }
     if (!this.stripe) {
       throw new BadRequestException('Payment processing is not configured');
     }
@@ -195,6 +251,6 @@ export class StripeService {
    * Get public key for client-side
    */
   getPublicKey(): string | null {
-    return process.env['STRIPE_PUBLIC_KEY'] || null;
+    return process.env['STRIPE_PUBLIC_KEY'] || (this.mockMode ? 'pk_test_mock' : null);
   }
 }

@@ -16,7 +16,6 @@ import {
   AnalyticsPeriodDto,
   SalesReportDto,
   CustomerAnalyticsDto,
-  InventoryReportDto,
 } from './analytics.dto';
 
 @Controller('analytics')

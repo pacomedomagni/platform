@@ -211,26 +211,24 @@ export class CartService {
         );
       }
 
-      // Upsert cart item atomically
-      await tx.cartItem.upsert({
-        where: {
-          cartId_productId_variantId: {
+      // Create or update cart item atomically
+      // (avoids Prisma upsert issue with nullable variantId in compound unique)
+      if (existingItem) {
+        await tx.cartItem.update({
+          where: { id: existingItem.id },
+          data: { quantity: { increment: dto.quantity } },
+        });
+      } else {
+        await tx.cartItem.create({
+          data: {
+            tenantId,
             cartId,
             productId: dto.productId,
-            variantId: (dto as any).variantId || null,
+            quantity: dto.quantity,
+            price: product.price,
           },
-        },
-        update: {
-          quantity: { increment: dto.quantity },
-        },
-        create: {
-          tenantId,
-          cartId,
-          productId: dto.productId,
-          quantity: dto.quantity,
-          price: product.price,
-        },
-      });
+        });
+      }
 
       // Reserve stock for this item
       await this.reserveStock(tx, tenantId, product.item.id, dto.quantity);
@@ -1057,12 +1055,8 @@ export class CartService {
       // At cart level we don't have the full address yet, so we use
       // a broad calculation. The exact rate will be finalized at checkout
       // when the shipping address is known.
-      // Limitation: If the tenant has no defaultCountry set, we fall back to 'US'.
-      const tenant = await this.prisma.tenant.findUnique({
-        where: { id: tenantId },
-        select: { defaultCountry: true },
-      });
-      const country = tenant?.defaultCountry || 'US';
+      // Limitation: Tenant model does not have a defaultCountry field yet, so we fall back to 'US'.
+      const country = 'US';
 
       const result = await this.shippingService.calculateShipping(tenantId, {
         country,

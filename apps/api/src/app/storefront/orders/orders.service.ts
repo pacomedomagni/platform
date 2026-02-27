@@ -306,7 +306,7 @@ export class OrdersService {
     }
 
     if (trackingInfo?.adminNotes !== undefined) {
-      updateData.adminNotes = trackingInfo.adminNotes;
+      updateData.internalNotes = trackingInfo.adminNotes;
     }
 
     await this.prisma.order.update({
@@ -322,6 +322,11 @@ export class OrdersService {
     // Release stock reservations when cancelling an unpaid order (PENDING)
     if (status === 'CANCELLED' && order.paymentStatus === 'PENDING') {
       await this.releaseStockReservationsForOrder(tenantId, orderId);
+    }
+
+    // Reverse gift card transaction when cancelling an order that used gift card payment
+    if (status === 'CANCELLED') {
+      await this.reverseGiftCardForOrder(tenantId, orderId);
     }
 
     // Fire-and-forget transactional emails
@@ -479,6 +484,56 @@ export class OrdersService {
       this.logger.log(`Stock reservations released for cancelled unpaid order: ${order.orderNumber}`);
     } catch (error) {
       this.logger.error(`Failed to release stock reservations for order ${orderId}:`, error);
+    }
+  }
+
+  /**
+   * Reverse gift card transaction when an order that used gift card payment is cancelled.
+   * Restores the redeemed amount back to the gift card balance.
+   */
+  private async reverseGiftCardForOrder(tenantId: string, orderId: string) {
+    try {
+      const gcTransaction = await this.prisma.giftCardTransaction.findFirst({
+        where: { orderId, tenantId, type: 'redemption' },
+        include: { giftCard: true },
+      });
+
+      if (!gcTransaction || !gcTransaction.giftCard) return;
+
+      const refundAmount = Math.abs(Number(gcTransaction.amount));
+      const currentBalance = Number(gcTransaction.giftCard.currentBalance);
+      const restoredBalance = currentBalance + refundAmount;
+
+      const order = await this.prisma.order.findUnique({
+        where: { id: orderId },
+        select: { orderNumber: true },
+      });
+
+      await this.prisma.$transaction([
+        this.prisma.giftCardTransaction.create({
+          data: {
+            tenantId,
+            giftCardId: gcTransaction.giftCardId,
+            type: 'refund',
+            amount: refundAmount,
+            balanceBefore: currentBalance,
+            balanceAfter: restoredBalance,
+            orderId,
+            notes: `Reversed due to order cancellation (${order?.orderNumber || orderId})`,
+          },
+        }),
+        this.prisma.giftCard.update({
+          where: { id: gcTransaction.giftCardId },
+          data: {
+            currentBalance: restoredBalance,
+            status: 'active',
+          },
+        }),
+      ]);
+
+      this.logger.log(`Gift card ${gcTransaction.giftCardId} balance restored by ${refundAmount} for cancelled order ${orderId}`);
+    } catch (error) {
+      this.logger.error(`Failed to reverse gift card for order ${orderId}:`, error);
     }
   }
 

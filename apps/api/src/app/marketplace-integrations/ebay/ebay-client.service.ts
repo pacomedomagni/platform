@@ -11,6 +11,7 @@ export class EbayClientService {
   private readonly logger = new Logger(EbayClientService.name);
   private readonly MAX_RETRIES = 3;
   private readonly BASE_DELAY_MS = 1000;
+  private readonly mockMode = process.env['MOCK_EXTERNAL_SERVICES'] === 'true';
 
   /**
    * Execute an eBay API call with automatic rate limit (HTTP 429) retry handling.
@@ -86,6 +87,10 @@ export class EbayClientService {
       };
     }
   ) {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Created/updated inventory item: ${sku}`);
+      return { sku, statusCode: 204 };
+    }
     return this.withRateLimitRetry(async () => {
       try {
         const response = await client.sell.inventory.createOrReplaceInventoryItem(sku, data as any);
@@ -102,6 +107,10 @@ export class EbayClientService {
    * Delete an inventory item (for rollback on publish failure)
    */
   async deleteInventoryItem(client: eBayApi, sku: string) {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Deleted inventory item: ${sku}`);
+      return;
+    }
     return this.withRateLimitRetry(async () => {
       try {
         await client.sell.inventory.deleteInventoryItem(sku);
@@ -141,6 +150,11 @@ export class EbayClientService {
       hideBuyerDetails?: boolean;
     }
   ) {
+    if (this.mockMode) {
+      const offerId = `mock_offer_${Date.now()}`;
+      this.logger.log(`[MOCK] Created offer ${offerId} for SKU: ${data.sku}`);
+      return { offerId };
+    }
     return this.withRateLimitRetry(async () => {
       try {
         const response = await client.sell.inventory.createOffer(data);
@@ -157,6 +171,11 @@ export class EbayClientService {
    * Publish offer to eBay
    */
   async publishOffer(client: eBayApi, offerId: string) {
+    if (this.mockMode) {
+      const listingId = `mock_listing_${Date.now()}`;
+      this.logger.log(`[MOCK] Published offer: ${offerId} → listing ${listingId}`);
+      return { listingId };
+    }
     return this.withRateLimitRetry(async () => {
       try {
         const response = await client.sell.inventory.publishOffer(offerId);
@@ -173,6 +192,15 @@ export class EbayClientService {
    * Get a single inventory item by SKU
    */
   async getInventoryItem(client: eBayApi, sku: string) {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Fetched inventory item: ${sku}`);
+      return {
+        sku,
+        product: { title: 'Mock Product', description: 'Mock description', imageUrls: [] },
+        condition: 'NEW',
+        availability: { shipToLocationAvailability: { quantity: 100 } },
+      };
+    }
     return this.withRateLimitRetry(async () => {
       try {
         const response = await client.sell.inventory.getInventoryItem(sku);
@@ -197,6 +225,10 @@ export class EbayClientService {
    * all other item data (product title, description, images, etc.).
    */
   async updateInventoryQuantity(client: eBayApi, sku: string, quantity: number) {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Updated quantity for SKU ${sku}: ${quantity}`);
+      return;
+    }
     return this.withRateLimitRetry(async () => {
       try {
         // Fetch the existing inventory item to preserve all current data
@@ -235,6 +267,10 @@ export class EbayClientService {
       offset?: number;
     }
   ) {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Fetched 0 orders from eBay`);
+      return [];
+    }
     return this.withRateLimitRetry(async () => {
       try {
         const response = await client.sell.fulfillment.getOrders(params);
@@ -262,6 +298,10 @@ export class EbayClientService {
       trackingNumber: string;
     }
   ) {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Created shipping fulfillment for order: ${orderId}`);
+      return { fulfillmentId: `mock_fulfill_${Date.now()}` };
+    }
     return this.withRateLimitRetry(async () => {
       try {
         const response = await client.sell.fulfillment.createShippingFulfillment(orderId, data);
@@ -285,6 +325,10 @@ export class EbayClientService {
       sku?: string;
     }
   ) {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Fetched 0 active listings`);
+      return [];
+    }
     return this.withRateLimitRetry(async () => {
       try {
         const response = await client.sell.inventory.getInventoryItems(params);
@@ -301,6 +345,10 @@ export class EbayClientService {
    * End listing
    */
   async withdrawOffer(client: eBayApi, offerId: string) {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Withdrew offer: ${offerId}`);
+      return;
+    }
     return this.withRateLimitRetry(async () => {
       try {
         await client.sell.inventory.withdrawOffer(offerId);
@@ -316,6 +364,9 @@ export class EbayClientService {
    * Get fulfillment policies
    */
   async getFulfillmentPolicies(client: eBayApi, marketplaceId: string) {
+    if (this.mockMode) {
+      return [{ fulfillmentPolicyId: 'mock_fp_1', name: 'Mock Fulfillment Policy' }];
+    }
     return this.withRateLimitRetry(async () => {
       try {
         const response = await client.sell.account.getFulfillmentPolicies(marketplaceId as any);
@@ -331,6 +382,9 @@ export class EbayClientService {
    * Get payment policies
    */
   async getPaymentPolicies(client: eBayApi, marketplaceId: string) {
+    if (this.mockMode) {
+      return [{ paymentPolicyId: 'mock_pp_1', name: 'Mock Payment Policy' }];
+    }
     return this.withRateLimitRetry(async () => {
       try {
         const response = await client.sell.account.getPaymentPolicies(marketplaceId as any);
@@ -346,6 +400,9 @@ export class EbayClientService {
    * Get return policies
    */
   async getReturnPolicies(client: eBayApi, marketplaceId: string) {
+    if (this.mockMode) {
+      return [{ returnPolicyId: 'mock_rp_1', name: 'Mock Return Policy' }];
+    }
     return this.withRateLimitRetry(async () => {
       try {
         const response = await client.sell.account.getReturnPolicies(marketplaceId as any);
@@ -361,6 +418,9 @@ export class EbayClientService {
    * Get inventory locations
    */
   async getInventoryLocations(client: eBayApi) {
+    if (this.mockMode) {
+      return [{ merchantLocationKey: 'mock_loc_1', name: 'Mock Location' }];
+    }
     return this.withRateLimitRetry(async () => {
       try {
         const response = await client.sell.inventory.getInventoryLocations();

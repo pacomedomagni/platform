@@ -8,6 +8,7 @@ const SQUARE_API_VERSION = '2024-12-18';
 export class SquarePaymentService {
   private readonly logger = new Logger(SquarePaymentService.name);
   private readonly apiBase: string;
+  private readonly mockMode = process.env['MOCK_EXTERNAL_SERVICES'] === 'true';
 
   constructor(private readonly squareOAuth: SquareOAuthService) {
     this.apiBase =
@@ -29,6 +30,11 @@ export class SquarePaymentService {
     locationId: string,
     metadata?: Record<string, string>,
   ): Promise<any> {
+    if (this.mockMode) {
+      const id = `sq_mock_${Date.now()}`;
+      this.logger.log(`[MOCK] Created Square payment ${id} for tenant ${tenantId}: $${amount}`);
+      return { id, status: 'COMPLETED', amount_money: { amount: Math.round(amount * 100), currency: currency.toUpperCase() } };
+    }
     const accessToken = await this.squareOAuth.getValidAccessToken(tenantId);
 
     const body: any = {
@@ -79,6 +85,9 @@ export class SquarePaymentService {
    * Get a payment by ID
    */
   async getPayment(tenantId: string, paymentId: string): Promise<any> {
+    if (this.mockMode) {
+      return { id: paymentId, status: 'COMPLETED', amount_money: { amount: 0, currency: 'USD' } };
+    }
     const accessToken = await this.squareOAuth.getValidAccessToken(tenantId);
 
     const response = await fetch(`${this.apiBase}/v2/payments/${paymentId}`, {
@@ -106,6 +115,11 @@ export class SquarePaymentService {
     currency?: string,
     reason?: string,
   ): Promise<any> {
+    if (this.mockMode) {
+      const id = `sqref_mock_${Date.now()}`;
+      this.logger.log(`[MOCK] Created Square refund ${id} for payment ${paymentId}`);
+      return { id, status: 'COMPLETED', amount_money: { amount: amount ? Math.round(amount * 100) : 0, currency: (currency || 'USD').toUpperCase() } };
+    }
     const accessToken = await this.squareOAuth.getValidAccessToken(tenantId);
 
     // Square API requires amount_money for all refunds (including full refunds).

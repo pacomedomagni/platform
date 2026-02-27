@@ -325,20 +325,22 @@ export class CheckoutService {
 
       if (dto.giftCardCode) {
         try {
-          // Validate the gift card balance first
+          // Validate the gift card balance first (pass tx to use same transaction)
           const balanceCheck = await this.giftCardsService.checkBalance(
             tenantId,
             dto.giftCardCode,
             dto.giftCardPin,
+            tx,
           );
 
-          if (balanceCheck.balance > 0) {
-            // Redeem the gift card against this order
+          if (Number(balanceCheck.balance) > 0) {
+            // Redeem the gift card against this order (pass tx to avoid nested transaction FK violation)
             const redemption = await this.giftCardsService.redeemForOrder(
               tenantId,
               order.id,
               { code: dto.giftCardCode, pin: dto.giftCardPin },
               chargeAmount,
+              tx,
             );
 
             giftCardDiscount = redemption.amountRedeemed;
@@ -363,6 +365,9 @@ export class CheckoutService {
                   paymentMethod: 'gift_card',
                 },
               });
+              // Reflect the update on the local object so the response is accurate
+              (order as any).paymentStatus = 'CAPTURED';
+              (order as any).paymentMethod = 'gift_card';
             }
           }
         } catch (error) {
@@ -542,7 +547,7 @@ export class CheckoutService {
     });
 
     const idempotencyKey = `pi_${tenantId}_${orderId}`;
-    const metadata = {
+    const metadata: Record<string, string> = {
       orderId: order.id,
       orderNumber: order.orderNumber,
       tenantId,

@@ -6,6 +6,8 @@ import { DbModule } from '@platform/db';
 import { AuthModule } from '@platform/auth';
 import { MetaModule } from '@platform/meta';
 import { BusinessLogicModule } from '@platform/business-logic';
+import { QueueModule } from '@platform/queue';
+import { StorageModule } from '@platform/storage';
 import { AppController } from './app.controller';
 import { InventoryController } from './inventory.controller';
 import { ReportsController } from './reports.controller';
@@ -35,24 +37,16 @@ import { DomainResolverModule } from './storefront/domain-resolver/domain-resolv
     LoggerModule,
     // Domain resolver — must load before StorefrontModule (used by TenantMiddleware)
     DomainResolverModule,
-    // Rate limiting - 100 requests per minute per IP
-    ThrottlerModule.forRoot([
-      {
-        name: 'short',
-        ttl: 1000, // 1 second
-        limit: 10, // 10 requests per second
-      },
-      {
-        name: 'medium',
-        ttl: 60000, // 1 minute
-        limit: 100, // 100 requests per minute
-      },
-      {
-        name: 'long',
-        ttl: 3600000, // 1 hour
-        limit: 1000, // 1000 requests per hour
-      },
-    ]),
+    // Rate limiting - relaxed in test/development for E2E, strict in production
+    ThrottlerModule.forRoot(
+      process.env.NODE_ENV === 'test' || process.env.NODE_ENV === 'development'
+        ? [{ name: 'short', ttl: 1000, limit: 1000 }, { name: 'medium', ttl: 60000, limit: 10000 }, { name: 'long', ttl: 3600000, limit: 100000 }]
+        : [
+            { name: 'short', ttl: 1000, limit: 10 },
+            { name: 'medium', ttl: 60000, limit: 100 },
+            { name: 'long', ttl: 3600000, limit: 1000 },
+          ],
+    ),
     ClsModule.forRoot({
       global: true,
       middleware: { mount: true },
@@ -61,6 +55,24 @@ import { DomainResolverModule } from './storefront/domain-resolver/domain-resolv
     AuthModule,
     MetaModule,
     BusinessLogicModule,
+    QueueModule.forRoot({
+      connection: {
+        host: process.env.REDIS_HOST || 'localhost',
+        port: parseInt(process.env.REDIS_PORT || '6379', 10),
+        password: process.env.REDIS_PASSWORD,
+      },
+    }),
+    StorageModule.forRoot({
+      provider: {
+        type: 's3' as const,
+        endpoint: process.env.S3_ENDPOINT || 'http://localhost:9000',
+        region: process.env.S3_REGION || 'us-east-1',
+        bucket: process.env.S3_BUCKET || 'noslag-uploads',
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID || 'minioadmin',
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || 'minioadmin',
+        forcePathStyle: true,
+      },
+    }),
     HealthModule,
     ProvisioningModule,
     StorefrontModule,
@@ -78,11 +90,10 @@ import { DomainResolverModule } from './storefront/domain-resolver/domain-resolv
   providers: [
     AppService,
     EmailWorker,
-    // Global rate limiting guard
-    {
-      provide: APP_GUARD,
-      useClass: ThrottlerGuard,
-    },
+    // Global rate limiting guard (disabled in development/test to avoid per-endpoint @Throttle overrides)
+    ...(process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test'
+      ? []
+      : [{ provide: APP_GUARD, useClass: ThrottlerGuard }]),
     // Tenant context propagation
     {
       provide: APP_INTERCEPTOR,
