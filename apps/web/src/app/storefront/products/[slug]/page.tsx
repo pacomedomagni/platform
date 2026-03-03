@@ -126,8 +126,7 @@ export default async function ProductPage({ params }: ProductPageProps) {
   const productUrl = `${BASE_URL}/storefront/products/${product.slug}`;
   const imageUrl = displayImage || `${BASE_URL}/og-product-${product.slug}.png`;
 
-  // Use the product's or store's currency instead of hardcoding USD
-  const schemaCurrency = product.currency || process.env.NEXT_PUBLIC_DEFAULT_CURRENCY || 'USD';
+  const schemaCurrency = process.env.NEXT_PUBLIC_DEFAULT_CURRENCY || 'USD';
 
   const productSchema = generateProductSchema({
     name: product.displayName,

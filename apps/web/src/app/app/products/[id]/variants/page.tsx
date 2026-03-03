@@ -26,6 +26,7 @@ export default function ProductVariantsPage() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingVariant, setEditingVariant] = useState<ProductVariant | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; variantId: string | null }>({ open: false, variantId: null });
+  const [isBulkGenerating, setIsBulkGenerating] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -177,12 +178,69 @@ export default function ProductVariantsPage() {
             size="sm"
             variant="outline"
             className="mt-3 border-blue-300 bg-white text-blue-700 hover:bg-blue-100"
-            onClick={() => {
-              /* TODO: Implement bulk generation */
-              toast({ title: 'Info', description: 'Bulk generation feature coming soon!' });
+            disabled={isBulkGenerating}
+            onClick={async () => {
+              const typesWithValues = attributeTypes.filter(
+                (at) => at.values && at.values.length > 0
+              );
+
+              if (typesWithValues.length === 0) {
+                toast({ title: 'No attribute values', description: 'Add attribute values before generating variants.' });
+                return;
+              }
+
+              // Generate cartesian product of all attribute values
+              const cartesian = typesWithValues.reduce<
+                Array<Array<{ attributeTypeId: string; attributeValueId: string }>>
+              >(
+                (combos, attrType) =>
+                  combos.flatMap((combo) =>
+                    attrType.values.map((val) => [
+                      ...combo,
+                      { attributeTypeId: attrType.id, attributeValueId: val.id },
+                    ])
+                  ),
+                [[]]
+              );
+
+              setIsBulkGenerating(true);
+              let created = 0;
+
+              try {
+                for (const attributes of cartesian) {
+                  const dto: CreateVariantDto = {
+                    productListingId: productId,
+                    attributes,
+                  };
+                  await variantsApi.create(dto);
+                  created++;
+                }
+
+                toast({
+                  title: 'Bulk generation complete',
+                  description: `Successfully created ${created} variant${created === 1 ? '' : 's'}.`,
+                });
+                await loadData();
+              } catch (err) {
+                console.error('Bulk generation failed:', err);
+                toast({
+                  title: 'Bulk generation failed',
+                  description: `Created ${created} variant${created === 1 ? '' : 's'} before encountering an error: ${err instanceof Error ? err.message : 'Unknown error'}`,
+                });
+                await loadData();
+              } finally {
+                setIsBulkGenerating(false);
+              }
             }}
           >
-            Generate All Combinations
+            {isBulkGenerating ? (
+              <>
+                <Spinner className="mr-2 h-4 w-4" />
+                Generating...
+              </>
+            ) : (
+              'Generate All Combinations'
+            )}
           </Button>
         </Card>
       )}

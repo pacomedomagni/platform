@@ -7,7 +7,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { Response } from 'express';
-import { AuthGuard } from '@platform/auth';
+import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { SalesAnalyticsService } from './sales-analytics.service';
 import { InventoryAnalyticsService } from './inventory-analytics.service';
 import { ReportExportService } from './report-export.service';
@@ -19,7 +19,7 @@ import {
 } from './analytics.dto';
 
 @Controller('analytics')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, RolesGuard)
 export class AnalyticsController {
   constructor(
     private readonly salesAnalytics: SalesAnalyticsService,
@@ -65,6 +65,7 @@ export class AnalyticsController {
   // ==========================================
 
   @Get('dashboard')
+  @Roles('admin')
   async getDashboardAnalytics(
     @Tenant() tenantId: string,
     @Query('startDate') startDate?: string,
@@ -83,6 +84,7 @@ export class AnalyticsController {
   // ==========================================
 
   @Get('sales/trends')
+  @Roles('admin')
   async getSalesTrends(
     @Tenant() tenantId: string,
     @Query() query: SalesReportDto,
@@ -100,6 +102,7 @@ export class AnalyticsController {
   }
 
   @Get('sales/top-products')
+  @Roles('admin')
   async getTopSellingProducts(
     @Tenant() tenantId: string,
     @Query('startDate') startDate?: string,
@@ -116,6 +119,7 @@ export class AnalyticsController {
   }
 
   @Get('sales/categories')
+  @Roles('admin')
   async getCategoryPerformance(
     @Tenant() tenantId: string,
     @Query('startDate') startDate?: string,
@@ -130,6 +134,7 @@ export class AnalyticsController {
   }
 
   @Get('sales/payment-methods')
+  @Roles('admin')
   async getRevenueByPaymentMethod(
     @Tenant() tenantId: string,
     @Query('startDate') startDate?: string,
@@ -148,6 +153,7 @@ export class AnalyticsController {
   // ==========================================
 
   @Get('customers/cohorts')
+  @Roles('admin')
   async getCustomerCohorts(
     @Tenant() tenantId: string,
     @Query() query: CustomerAnalyticsDto,
@@ -162,6 +168,7 @@ export class AnalyticsController {
   }
 
   @Get('customers/ltv')
+  @Roles('admin')
   async getCustomerLifetimeValue(
     @Tenant() tenantId: string,
     @Query('limit') limit?: string,
@@ -177,6 +184,7 @@ export class AnalyticsController {
   // ==========================================
 
   @Get('inventory/turnover')
+  @Roles('admin')
   async getInventoryTurnover(
     @Tenant() tenantId: string,
     @Query('startDate') startDate?: string,
@@ -193,6 +201,7 @@ export class AnalyticsController {
   }
 
   @Get('inventory/dead-stock')
+  @Roles('admin')
   async getDeadStock(
     @Tenant() tenantId: string,
     @Query('days') days?: string,
@@ -204,6 +213,7 @@ export class AnalyticsController {
   }
 
   @Get('inventory/low-stock')
+  @Roles('admin')
   async getLowStockItems(
     @Tenant() tenantId: string,
     @Query('threshold') threshold?: string,
@@ -215,16 +225,19 @@ export class AnalyticsController {
   }
 
   @Get('inventory/value')
+  @Roles('admin')
   async getStockValueSummary(@Tenant() tenantId: string) {
     return this.inventoryAnalytics.getStockValueSummary(this.getContext(tenantId));
   }
 
   @Get('inventory/aging')
+  @Roles('admin')
   async getInventoryAging(@Tenant() tenantId: string) {
     return this.inventoryAnalytics.getInventoryAging(this.getContext(tenantId));
   }
 
   @Get('inventory/forecast')
+  @Roles('admin')
   async getSalesForecast(
     @Tenant() tenantId: string,
     @Query('productId') productId?: string,
@@ -242,6 +255,7 @@ export class AnalyticsController {
   // ==========================================
 
   @Get('export/sales')
+  @Roles('admin')
   async exportSalesReport(
     @Tenant() tenantId: string,
     @Query('startDate') startDate: string,
@@ -262,6 +276,7 @@ export class AnalyticsController {
   }
 
   @Get('export/order-items')
+  @Roles('admin')
   async exportOrderItemsReport(
     @Tenant() tenantId: string,
     @Query('startDate') startDate: string,
@@ -282,6 +297,7 @@ export class AnalyticsController {
   }
 
   @Get('export/inventory')
+  @Roles('admin')
   async exportInventoryReport(
     @Tenant() tenantId: string,
     @Query('format') format: 'csv' | 'json' = 'csv',
@@ -295,6 +311,7 @@ export class AnalyticsController {
   }
 
   @Get('export/customers')
+  @Roles('admin')
   async exportCustomersReport(
     @Tenant() tenantId: string,
     @Query('format') format: 'csv' | 'json' = 'csv',
@@ -308,6 +325,7 @@ export class AnalyticsController {
   }
 
   @Get('export/products-performance')
+  @Roles('admin')
   async exportProductsPerformanceReport(
     @Tenant() tenantId: string,
     @Query('startDate') startDate: string,
@@ -328,6 +346,7 @@ export class AnalyticsController {
   }
 
   @Get('export/gift-cards')
+  @Roles('admin')
   async exportGiftCardsReport(
     @Tenant() tenantId: string,
     @Query('format') format: 'csv' | 'json' = 'csv',

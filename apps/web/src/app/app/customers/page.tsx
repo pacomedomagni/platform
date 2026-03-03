@@ -78,7 +78,7 @@ export default function CustomersPage() {
 
   const handleExportCSV = async () => {
     try {
-      const response = await api.get('/v1/operations/export/customers', {
+      const response = await api.get('/v1/operations/export/customers/csv', {
         responseType: 'blob',
       });
 

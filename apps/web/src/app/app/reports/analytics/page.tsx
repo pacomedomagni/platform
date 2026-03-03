@@ -127,13 +127,13 @@ export default function AnalyticsDashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startDate, endDate, groupBy]);
 
-  // TODO: Currency is hardcoded to USD. Make configurable via tenant settings or shared constant.
   const formatCurrency = (amount: number) => {
     const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
+    const cur = (typeof window !== 'undefined' && localStorage.getItem('tenantCurrency')) || 'USD';
     try {
-      return new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' }).format(amount);
+      return new Intl.NumberFormat(locale, { style: 'currency', currency: cur }).format(amount);
     } catch {
-      return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+      return new Intl.NumberFormat('en-US', { style: 'currency', currency: cur }).format(amount);
     }
   };
 

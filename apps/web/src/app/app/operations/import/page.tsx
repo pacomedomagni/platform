@@ -69,14 +69,13 @@ export default function ImportPage() {
     setResult(null);
 
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('entityType', entityType);
-      formData.append('skipDuplicates', String(options.skipDuplicates));
-      formData.append('updateExisting', String(options.updateExisting));
+      const content = await file.text();
 
-      const res = await api.post('/v1/operations/import', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      const res = await api.post(`/v1/operations/import/${entityType}/csv`, { content }, {
+        params: {
+          skipDuplicates: String(options.skipDuplicates),
+          updateExisting: String(options.updateExisting),
+        },
       });
 
       setResult(res.data);

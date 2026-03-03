@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '@platform/db';
 import {
   SalesTrend,
@@ -34,14 +35,18 @@ export class SalesAnalyticsService {
       month: 'YYYY-MM',
     }[groupBy];
 
+    // Use Prisma.raw() to inline the date format so SELECT and GROUP BY
+    // reference the same literal instead of separate parameterized values.
+    const format = Prisma.raw(`'${dateFormat}'`);
+
     const trends = await this.prisma.$queryRaw<Array<{
       period: string;
       revenue: number;
       order_count: number;
       items_sold: number;
     }>>`
-      SELECT 
-        TO_CHAR(o."createdAt", ${dateFormat}) as period,
+      SELECT
+        TO_CHAR(o."createdAt", ${format}) as period,
         COALESCE(SUM(o."grandTotal")::float, 0) as revenue,
         COUNT(DISTINCT o.id)::int as order_count,
         COALESCE(SUM(oi."quantity")::int, 0) as items_sold
@@ -51,7 +56,7 @@ export class SalesAnalyticsService {
         AND o."paymentStatus" = 'CAPTURED'
         AND o."createdAt" >= ${startDate}
         AND o."createdAt" <= ${endDate}
-      GROUP BY TO_CHAR(o."createdAt", ${dateFormat})
+      GROUP BY TO_CHAR(o."createdAt", ${format})
       ORDER BY period ASC
     `;
 

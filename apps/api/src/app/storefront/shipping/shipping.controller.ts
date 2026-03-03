@@ -6,6 +6,7 @@ import {
   Delete,
   Headers,
   Param,
+  Query,
   Body,
   BadRequestException,
   UseGuards,
@@ -114,5 +115,18 @@ export class ShippingPublicController {
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
     return this.shippingService.calculateShipping(tenantId, dto);
+  }
+
+  @Get('rates')
+  async getShippingRates(
+    @Headers('x-tenant-id') tenantId: string,
+    @Query('country') country: string,
+  ) {
+    if (!tenantId) throw new BadRequestException('Tenant ID required');
+    if (!country) throw new BadRequestException('Country code required');
+    return this.shippingService.calculateShipping(tenantId, {
+      country,
+      cartTotal: 0,
+    });
   }
 }

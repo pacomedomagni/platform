@@ -11,9 +11,13 @@ import {
   BadRequestException,
   UnauthorizedException,
   UseGuards,
+  UseInterceptors,
+  UploadedFiles,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
+import { StorageService } from '@platform/storage';
 import { Throttle } from '@nestjs/throttler';
 import { VariantsService } from './variants.service';
 import { ReviewsService } from './reviews.service';
@@ -45,7 +49,8 @@ export class EcommerceController {
     private readonly reviewsService: ReviewsService,
     private readonly giftCardsService: GiftCardsService,
     private readonly wishlistService: WishlistService,
-    private readonly authService: CustomerAuthService
+    private readonly authService: CustomerAuthService,
+    private readonly storageService: StorageService,
   ) {}
 
   // ============ VARIANTS - PUBLIC ============
@@ -243,14 +248,31 @@ export class EcommerceController {
   }
 
   @Post('reviews/upload-images')
-  @HttpCode(HttpStatus.NOT_IMPLEMENTED)
-  async uploadReviewImages() {
-    // TODO: Implement multipart file upload with image validation and storage service integration
-    return {
-      statusCode: 501,
-      message: 'Review image upload is not yet implemented. Please provide image URLs directly.',
-      urls: [],
-    };
+  @UseInterceptors(FilesInterceptor('images', 5, { limits: { fileSize: 5 * 1024 * 1024 } }))
+  async uploadReviewImages(
+    @Tenant() tenantId: string,
+    @UploadedFiles() files: Express.Multer.File[],
+  ) {
+    if (!tenantId) throw new BadRequestException('Tenant ID required');
+    if (!files || files.length === 0) throw new BadRequestException('No files provided');
+
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    const urls: string[] = [];
+
+    for (const file of files) {
+      if (!allowedTypes.includes(file.mimetype)) {
+        throw new BadRequestException(`Invalid file type: ${file.mimetype}. Allowed: ${allowedTypes.join(', ')}`);
+      }
+      const result = await this.storageService.uploadFile(
+        tenantId,
+        file.originalname,
+        file.buffer,
+        { prefix: 'reviews', contentType: file.mimetype },
+      );
+      urls.push(result.url);
+    }
+
+    return { urls };
   }
 
   @Post('reviews/:reviewId/vote')

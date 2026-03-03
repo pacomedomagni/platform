@@ -8,10 +8,11 @@ import { WishlistService } from './wishlist.service';
 import { CurrencyService } from './currency.service';
 import { ShippingService } from './shipping.service';
 import { DbModule } from '@platform/db';
+import { StorageModule } from '@platform/storage';
 import { CustomerAuthModule } from '../auth/customer-auth.module';
 
 @Module({
-  imports: [DbModule, CustomerAuthModule],
+  imports: [DbModule, CustomerAuthModule, StorageModule],
   controllers: [EcommerceController, CurrencyShippingController],
   providers: [
     VariantsService,

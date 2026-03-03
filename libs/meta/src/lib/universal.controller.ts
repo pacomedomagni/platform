@@ -5,7 +5,7 @@ import { SchemaService } from './schema.service';
 import { DocTypeDefinition } from './types';
 
 // H-DT-5: All endpoints require JWT authentication via class-level guard
-@Controller('v1')
+@Controller()
 @UseGuards(AuthGuard('jwt'))
 export class UniversalController {
   constructor(

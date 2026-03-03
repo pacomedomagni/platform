@@ -178,6 +178,32 @@ export class OrdersService {
   // ============ ADMIN METHODS ============
 
   /**
+   * Get order stats by status (admin)
+   */
+  async getOrderStats(tenantId: string) {
+    const counts = await this.prisma.order.groupBy({
+      by: ['status'],
+      where: { tenantId },
+      _count: { status: true },
+    });
+
+    const statsMap: Record<string, number> = {};
+    for (const row of counts) {
+      statsMap[row.status] = row._count.status;
+    }
+
+    return {
+      pending: statsMap['PENDING'] || 0,
+      confirmed: statsMap['CONFIRMED'] || 0,
+      processing: statsMap['PROCESSING'] || 0,
+      shipped: statsMap['SHIPPED'] || 0,
+      delivered: statsMap['DELIVERED'] || 0,
+      cancelled: statsMap['CANCELLED'] || 0,
+      refunded: statsMap['REFUNDED'] || 0,
+    };
+  }
+
+  /**
    * List all orders (admin)
    */
   async listAllOrders(tenantId: string, dto: ListOrdersDto & { search?: string }) {
@@ -310,7 +336,7 @@ export class OrdersService {
     }
 
     await this.prisma.order.update({
-      where: { id: orderId },
+      where: { id: orderId, tenantId },
       data: updateData,
     });
 

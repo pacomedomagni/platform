@@ -61,11 +61,13 @@ export const useAuthStore = create<AuthState>()(
 
         try {
           const response = await authApi.login(email, password);
-          localStorage.setItem('customer_token', response.token);
+          if (response.token) {
+            localStorage.setItem('customer_token', response.token);
+          }
           set({
             customer: response.customer,
             token: response.token,
-            isAuthenticated: true,
+            isAuthenticated: !!response.token,
           });
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Login failed';

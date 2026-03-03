@@ -44,7 +44,7 @@ export default function AuditLogsPage() {
 
       const [logsRes, summaryRes] = await Promise.all([
         api.get('/v1/operations/audit-logs', { params }),
-        api.get('/v1/operations/audit-logs/summary', { params: { startDate: filters.startDate, endDate: filters.endDate } }),
+        api.get('/v1/operations/audit-logs/activity-summary', { params: { startDate: filters.startDate, endDate: filters.endDate } }),
       ]);
 
       let filteredLogs = logsRes.data.data || [];

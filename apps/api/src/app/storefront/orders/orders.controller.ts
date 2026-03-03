@@ -105,6 +105,21 @@ export class OrdersController {
   // ============ ADMIN ENDPOINTS ============
 
   /**
+   * Get order stats (admin)
+   * GET /api/v1/store/orders/admin/stats
+   */
+  @Get('admin/stats')
+  @UseGuards(StoreAdminGuard)
+  async getOrderStats(
+    @Headers('x-tenant-id') tenantId: string,
+  ) {
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID required');
+    }
+    return this.ordersService.getOrderStats(tenantId);
+  }
+
+  /**
    * List all orders (admin)
    * GET /api/v1/store/orders/admin/all
    */

@@ -49,18 +49,16 @@ export default function OrdersPage() {
       if (status) params.status = status;
       if (paymentStatus) params.paymentStatus = paymentStatus;
 
-      const res = await api.get('/v1/store/orders/admin/all', { params });
+      const [res, statsRes] = await Promise.all([
+        api.get('/v1/store/orders/admin/all', { params }),
+        api.get('/v1/store/orders/admin/stats'),
+      ]);
       setOrders(res.data.data || []);
-
-      // M7: Note — stats are calculated from the current page of results only,
-      // not the full dataset. For accurate global stats, consider fetching from
-      // a separate lightweight aggregation endpoint (e.g., GET /orders/admin/stats).
-      const allOrders = res.data.data || [];
       setStats({
-        pending: allOrders.filter((o: Order) => o.status === 'PENDING').length,
-        processing: allOrders.filter((o: Order) => o.status === 'PROCESSING' || o.status === 'CONFIRMED').length,
-        shipped: allOrders.filter((o: Order) => o.status === 'SHIPPED').length,
-        delivered: allOrders.filter((o: Order) => o.status === 'DELIVERED').length,
+        pending: statsRes.data.pending || 0,
+        processing: (statsRes.data.processing || 0) + (statsRes.data.confirmed || 0),
+        shipped: statsRes.data.shipped || 0,
+        delivered: statsRes.data.delivered || 0,
       });
     } catch (error: any) {
       console.error('Failed to load orders:', error);
@@ -76,7 +74,7 @@ export default function OrdersPage() {
       if (status) params.set('status', status);
       if (paymentStatus) params.set('paymentStatus', paymentStatus);
 
-      const response = await api.get('/v1/operations/export/orders?' + params.toString(), {
+      const response = await api.get('/v1/operations/export/orders/csv?' + params.toString(), {
         responseType: 'blob',
       });
 

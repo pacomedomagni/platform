@@ -100,7 +100,7 @@ export class ReportsService {
                     (gl."debitBc" - gl."creditBc") as net_change
                 FROM "gl_entries" gl
                 JOIN "accounts" a ON a."id" = gl."accountId"
-                WHERE gl."tenantId" = $1
+                WHERE gl."tenantId" = $1::uuid
                   AND gl."accountId" = ANY($2::uuid[])
                   AND gl."postingDate" BETWEEN $3 AND $4
                 ORDER BY gl."postingDate", gl."postingTs"
@@ -270,7 +270,7 @@ export class ReportsService {
                     due_date,
                     grand_total,
                     outstanding_amount,
-                    EXTRACT(DAY FROM ($1::date - due_date)) as days_overdue
+                    EXTRACT(DAY FROM ($1::date - due_date::date)) as days_overdue
                 FROM "${invoiceTable}"
                 WHERE "tenantId" = $2
                   AND docstatus = 1
@@ -320,14 +320,14 @@ export class ReportsService {
             // toSafeTableName sanitizes input to [A-Za-z0-9_] only, preventing SQL injection
             const invoiceTable = toSafeTableName('Purchase Invoice');
             return tx.$queryRawUnsafe<any[]>(`
-                SELECT 
+                SELECT
                     name,
                     supplier,
                     posting_date,
                     due_date,
                     grand_total,
                     outstanding_amount,
-                    EXTRACT(DAY FROM ($1::date - due_date)) as days_overdue
+                    EXTRACT(DAY FROM ($1::date - due_date::date)) as days_overdue
                 FROM "${invoiceTable}"
                 WHERE "tenantId" = $2
                   AND docstatus = 1

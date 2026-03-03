@@ -177,7 +177,7 @@ export class WarehouseService {
       }
 
       const updated = await tx.warehouse.update({
-        where: { id },
+        where: { id, tenantId: ctx.tenantId },
         data: {
           ...(dto.name !== undefined ? { name: dto.name } : {}),
           ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
@@ -226,7 +226,7 @@ export class WarehouseService {
 
       // Soft delete the warehouse and its locations
       await tx.warehouse.update({
-        where: { id },
+        where: { id, tenantId: ctx.tenantId },
         data: { deletedAt: new Date() },
       });
 
@@ -358,7 +358,7 @@ export class WarehouseService {
       }
 
       const updated = await tx.location.update({
-        where: { id },
+        where: { id, tenantId: ctx.tenantId },
         data: {
           ...(dto.name !== undefined ? { name: dto.name } : {}),
           ...(dto.isPickable !== undefined ? { isPickable: dto.isPickable } : {}),
@@ -415,7 +415,7 @@ export class WarehouseService {
       }
 
       await tx.location.update({
-        where: { id },
+        where: { id, tenantId: ctx.tenantId },
         data: { deletedAt: new Date() },
       });
 

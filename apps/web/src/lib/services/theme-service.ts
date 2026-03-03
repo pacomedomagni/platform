@@ -7,10 +7,11 @@ import { themesApi } from '../api/themes';
 import type { Theme, CreateThemeDto, UpdateThemeDto } from '../theme/types';
 import { sanitizeCSS } from '../theme/theme-engine';
 
-// Mock tenant ID for now - in production, this would come from auth context
 const getCurrentTenantId = (): string => {
-  // TODO: Get from auth context
-  return 'tenant-1';
+  if (typeof window !== 'undefined') {
+    return localStorage.getItem('tenantId') || '';
+  }
+  return '';
 };
 
 class ThemeService {
