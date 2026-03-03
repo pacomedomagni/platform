@@ -86,7 +86,6 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       KEYCLOAK_JWKS_URI: ${KEYCLOAK_JWKS_URI}
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER}
-      SENTRY_DSN: ${SENTRY_DSN}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
       TRAEFIK_DYNAMIC_DIR: /etc/traefik/dynamic/custom-domains
@@ -123,7 +122,6 @@ services:
       NODE_ENV: production
       NEXT_PUBLIC_API_URL: https://api.${DOMAIN}
       NEXT_PUBLIC_STRIPE_KEY: ${STRIPE_PUBLIC_KEY}
-      SENTRY_DSN: ${SENTRY_DSN_WEB}
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.web.rule=Host(`${DOMAIN}`) || HostRegexp(`{subdomain:[a-z0-9-]+}.${DOMAIN}`)"

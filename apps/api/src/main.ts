@@ -2,16 +2,11 @@
  * Production-ready NestJS API Server
  */
 
-// Initialize Sentry FIRST, before any other imports
-import { initSentry } from './app/sentry/sentry';
-initSentry();
-
 import 'dotenv/config';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import { AppModule } from './app/app.module';
-import { SentryExceptionFilter } from './app/sentry/sentry.filter';
 
 /**
  * Validate required environment variables
@@ -101,9 +96,6 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
     }),
   );
-  
-  // Global exception filter (Sentry integration)
-  app.useGlobalFilters(new SentryExceptionFilter());
   
   const port = process.env['PORT'] || 3000;
   await app.listen(port, '0.0.0.0');

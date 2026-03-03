@@ -16,10 +16,7 @@ export default function Error({
     // Log error to console in development
     console.error('Application error:', error);
 
-    // In production, you would send this to an error tracking service like Sentry
     if (process.env.NODE_ENV === 'production' && typeof window !== 'undefined') {
-      // Example: Sentry.captureException(error);
-      // For now, we'll just log it
       console.error('Error digest:', error.digest);
     }
   }, [error]);

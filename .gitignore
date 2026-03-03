@@ -164,9 +164,6 @@ storybook-static
 .local
 *.local
 
-# Sentry
-.sentryclirc
-
 # Claude Code
 .claude
 !.claude/config.json

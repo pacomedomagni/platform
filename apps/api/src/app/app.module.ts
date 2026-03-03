@@ -25,7 +25,6 @@ import { MarketplaceIntegrationsModule } from './marketplace-integrations/market
 import { LoggerModule } from './common/logger';
 import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
 import { ResponseTransformInterceptor } from './common/interceptors/response-transform.interceptor';
-import { SentryInterceptor } from './sentry/sentry.interceptor';
 import { EmailWorker } from './workers/email.worker';
 import { WorkersModule } from './workers/workers.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
@@ -104,11 +103,6 @@ import { DomainResolverModule } from './storefront/domain-resolver/domain-resolv
     {
       provide: APP_INTERCEPTOR,
       useClass: ResponseTransformInterceptor,
-    },
-    // Sentry context interceptor
-    {
-      provide: APP_INTERCEPTOR,
-      useClass: SentryInterceptor,
     },
   ],
 })
