@@ -71,7 +71,7 @@ export class PaymentsService {
    * Handle Stripe webhook events
    */
   async handleWebhook(payload: Buffer, signature: string) {
-    const mockMode = process.env['MOCK_EXTERNAL_SERVICES'] === 'true';
+    const mockMode = process.env['MOCK_PAYMENTS'] === 'true';
     const webhookSecret = process.env['STRIPE_WEBHOOK_SECRET'];
 
     if (!webhookSecret && !mockMode) {

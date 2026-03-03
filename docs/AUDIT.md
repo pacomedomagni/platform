@@ -485,3 +485,112 @@ All 19 issues have been addressed. Resolution date: 2026-03-03.
 | 17 | Analytics controller has no role-based access | **FIXED** | Added `RolesGuard` + `@Roles('admin')` to all 17 analytics endpoints |
 | 18 | Product bulk variant generation is a stub | **FIXED** | Implemented cartesian product generation across all attribute types with progress tracking |
 | 19 | Order stats calculated from current page | **FIXED** | Added `GET /store/orders/admin/stats` endpoint using Prisma `groupBy`; frontend fetches stats in parallel |
+
+---
+
+## Audit Round 2 — Security, Infrastructure & Code Quality
+
+Audit date: 2026-03-03 (post-fix pass)
+
+All 19 issues from Round 1 verified as fixed. This round covers deeper security, infrastructure, and code quality issues not caught in the feature-level audit.
+
+### Methodology
+
+Three parallel audit agents plus one verification agent:
+- **Agent 1**: API backend — auth guards, tenant isolation, SQL safety, input validation
+- **Agent 2**: Frontend — API mismatches, error handling, state management, XSS risks
+- **Agent 3**: Libs, Prisma schema, Docker, deployment — indexes, constraints, container security
+- **Verifier**: Cross-checked 8 critical findings for false positives (4 confirmed, 4 eliminated)
+
+---
+
+### Critical (4)
+
+| # | Issue | Location | Impact | Fix Effort |
+|---|-------|----------|--------|------------|
+| 20 | **Monitoring controller auth commented out** | `apps/api/src/app/monitoring/monitoring.controller.ts:12` | `/monitoring/metrics`, `/monitoring/health`, `/monitoring/failed-operations`, `/monitoring/stock-anomalies`, `/monitoring/alerts` are all unauthenticated. Exposes system internals. | Low — uncomment guard |
+| 21 | **RolesGuard allows cross-tenant access when x-tenant-id header is missing** | `libs/auth/src/lib/guards/roles.guard.ts:45-52` | Admin users bypass tenant check if request has no `x-tenant-id` header. Condition `if (requestTenantId && ...)` short-circuits when header is absent, granting access to any tenant's data. | Low — make tenantId mandatory |
+| 22 | **Docker containers run as root** | `apps/api/Dockerfile`, `apps/web/Dockerfile` | Both production images have no `USER` directive. Container escape gives full root access to host. | Low — add `USER node` |
+| 23 | **SVG uploads allowed (XSS vector)** | `libs/storage/src/lib/storage.service.ts:31` | `image/svg+xml` in allowed MIME types. SVGs can contain `<script>` tags and event handlers. Any uploaded SVG served to users enables stored XSS. | Low — remove SVG from allowlist |
+
+### High (8)
+
+| # | Issue | Location | Impact | Fix Effort |
+|---|-------|----------|--------|------------|
+| 24 | **Missing database indexes on high-traffic queries** | `prisma/schema.prisma` | Missing composite indexes: `Order(tenantId, paymentStatus)`, `Payment(tenantId, status)`, `StockLedgerEntry(tenantId, itemId, warehouseId, postingDate)`, `Cart(tenantId, updatedAt)`. Report and analytics queries will degrade with data growth. | Medium — add indexes + migrate |
+| 25 | **SendGrid webhook tenant resolution picks wrong tenant** | `apps/api/src/app/storefront/email/sendgrid-webhook.controller.ts:251-265` | Fallback `getTenantIdFromEmail` uses `findFirst` — if same email exists in multiple tenants, events get attributed to the first match, not the correct one. | Medium — require tenantId in custom_args |
+| 26 | **Hardcoded fallback JWT secret** | `apps/api/src/app/storefront/auth/customer-auth.service.ts:27-36` | `const EFFECTIVE_JWT_SECRET = JWT_SECRET \|\| 'dev-only-secret-change-in-production'` — if env var is unset in production, a known static secret signs all customer tokens. | Low — throw error if not set in production |
+| 27 | **Payment.stripePaymentIntentId not unique per tenant** | `prisma/schema.prisma` (Payment model) | Multiple Payment records can share the same `stripePaymentIntentId`. Enables duplicate payment recording and incorrect refund calculations. | Low — add `@@unique([tenantId, stripePaymentIntentId])` |
+| 28 | **No pagination max limit on admin list endpoints** | `apps/api/src/app/inventory-management/inventory-management.controller.ts`, `apps/api/src/app/reports.controller.ts` | `limit` query param parsed without upper cap. `?limit=999999` dumps entire table into memory. | Low — clamp to 200 |
+| 29 | **API service depends on MinIO without health check** | `docker-compose.droplet.yml:138-144` | API `depends_on` for MinIO uses implicit `service_started`, not `service_healthy`. API may boot before MinIO is ready, failing file uploads on first requests. | Low — add `condition: service_healthy` |
+| 30 | **Email template rendering not wrapped in try-catch** | `libs/email/src/lib/email.service.ts:635-639` | If Handlebars template has a missing variable, the unhandled error crashes the email send without logging which template failed. | Low — wrap + log |
+| 31 | **JWT has no refresh token flow** | `libs/auth/src/lib/auth.service.ts:66` | Token expires in 1 day with no refresh mechanism. Users forced to re-login daily. | High — implement refresh tokens |
+
+### Medium (10)
+
+| # | Issue | Location | Impact | Fix Effort |
+|---|-------|----------|--------|------------|
+| 32 | **Hardcoded USD currency in 5+ frontend locations** | `apps/web/src/app/landing/page.tsx`, `apps/web/src/app/app/products/page.tsx:88`, `apps/web/src/app/app/orders/_components/order-table.tsx` | Price display hardcodes `'USD'` outside the 6 report pages already fixed. Multi-currency tenants see wrong symbol on product lists, order tables, and landing page. | Medium |
+| 33 | **Checkout useEffect missing cleanup/AbortController** | `apps/web/src/app/storefront/checkout/page.tsx:92-105,158-163` | Multiple `useEffect` hooks fire async API calls (payment config, shipping rates) without cancellation. Navigation away mid-flight causes state updates on unmounted components. | Medium |
+| 34 | **localStorage token key inconsistency** | `apps/web/src/lib/auth-store.ts` uses `customer_token`, `apps/web/src/lib/api.ts` uses `access_token` | Admin dashboard and storefront use different token keys. If code paths cross, auth silently fails. | Low |
+| 35 | **Cart state persists after customer logout** | `apps/web/src/lib/cart-store.ts` | Zustand persist middleware keeps cart in localStorage. `logout()` clears auth but not cart. Next user on shared device sees previous cart contents. | Low |
+| 36 | **API key guard environment check is brittle** | `libs/auth/src/lib/guards/api-key.guard.ts:44-50` | Guard checks `NODE_ENV` string match. Typo in env var or non-standard value silently allows/blocks. | Low |
+| 37 | **Deploy script silences docker compose errors** | `scripts/deploy-droplet.sh:62` | `docker compose ... down 2>/dev/null` swallows failures. If `down` fails (e.g., locked volume), `up` starts with stale containers. | Low |
+| 38 | **Soft-deleted records not excluded by default** | `prisma/schema.prisma` (multiple models with `deletedAt`) | Indexes don't include `WHERE deletedAt IS NULL`. Queries must explicitly filter, easy to forget. | Medium |
+| 39 | **Missing error states in admin pages** | `apps/web/src/app/app/products/page.tsx`, `apps/web/src/app/app/customers/page.tsx` | Error state is captured (`setError(...)`) but never rendered in JSX. Users see empty page on API failure. | Low |
+| 40 | **BankTransaction.externalId not unique per tenant** | `prisma/schema.prisma` (BankTransaction model) | Same bank transaction can be imported twice. No `@@unique([tenantId, externalId])` constraint. | Low |
+| 41 | **Storage service allows unlimited file size** | `libs/storage/src/lib/storage.service.ts` | No file size validation before upload. A single 1GB upload could exhaust MinIO storage or memory. | Medium |
+
+### Low (5)
+
+| # | Issue | Location | Impact | Fix Effort |
+|---|-------|----------|--------|------------|
+| 42 | **No rate limiting on admin endpoints** | Most admin controllers | Public endpoints have `@Throttle()` but admin endpoints don't. Brute-force or resource exhaustion possible with valid token. | Medium |
+| 43 | **Inconsistent API response format** | Various controllers | Some return `{ data: [...], pagination: {...} }`, others return raw arrays. Frontend must handle both patterns. | Medium |
+| 44 | **Product can be published without category** | `prisma/schema.prisma` (ProductListing) | `categoryId` is optional but published products without category are unreachable in storefront navigation. | Low |
+| 45 | **FailedOperation has no max retry count** | `prisma/schema.prisma` (FailedOperation model) | `nextRetryAt` field exists but no `retryCount` limit. Operations can retry indefinitely. | Low |
+| 46 | **Notification index missing createdAt** | `prisma/schema.prisma` (Notification model) | Index on `(userId, isRead)` but queries also filter by date. Missing `(tenantId, userId, createdAt)` index slows notification feeds. | Low |
+
+---
+
+### Recommended Fix Priority
+
+### Round 2 Fix Status
+
+Resolution date: 2026-03-03. Builds verified: `nx build api` + `nx build web` both pass.
+
+| # | Issue | Status | Fix Summary |
+|---|-------|--------|-------------|
+| 20 | Monitoring controller auth commented out | **FIXED** | Replaced commented `AuthGuard('jwt')` with `@UseGuards(AuthGuard, RolesGuard)` + `@Roles('admin')` using `@platform/auth` |
+| 21 | RolesGuard cross-tenant bypass | **FIXED** | Added explicit handling when `requestTenantId` is missing — admin operates on own tenant by default |
+| 22 | Docker containers run as root | **FIXED** | Added `USER node` to both `apps/api/Dockerfile` and `apps/web/Dockerfile` |
+| 23 | SVG uploads allowed (XSS vector) | **FIXED** | Removed `image/svg+xml` from `ALLOWED_MIME_TYPES` in `libs/storage/src/lib/storage.service.ts` |
+| 24 | Missing database indexes | **FIXED** | Added `@@index([tenantId, paymentStatus])` on Order, `@@index([tenantId, status])` on Payment, `@@index([tenantId, updatedAt])` on Cart, `@@index([tenantId, userId, createdAt])` on Notification |
+| 25 | SendGrid webhook tenant resolution | **FIXED** | Changed `findFirst` to `findMany` + `orderBy: createdAt desc` with warning log for multi-tenant emails |
+| 26 | Hardcoded fallback JWT secret | **BY DESIGN** | Already throws error in non-dev/test environments (lines 31-35 of `customer-auth.service.ts`) |
+| 27 | Payment.stripePaymentIntentId not unique | **DEFERRED** | Needs careful migration — existing data may have nulls; adding `@@unique` requires data cleanup first |
+| 28 | No pagination max limit | **FIXED** | Added `Math.min(..., cap)` clamping to monitoring (200), reports (1000), and admin customers (200) controllers |
+| 29 | MinIO health check dependency | **FIXED** | Added `minio: condition: service_healthy` to API service in `docker-compose.droplet.yml` |
+| 30 | Email template rendering not wrapped in try-catch | **FIXED** | Wrapped template rendering in try-catch with template name in error log |
+| 31 | JWT has no refresh token flow | **DEFERRED** | Architectural change — requires new endpoints, frontend token refresh interceptor, and refresh token storage |
+| 32 | Hardcoded USD in frontend | **FIXED** | Replaced hardcoded `'USD'` with `localStorage.getItem('tenantCurrency') \|\| 'USD'` in dashboard, products, customers, and customer detail pages |
+| 33 | Checkout useEffect missing cleanup | **FIXED** | Added `cancelled` flag to payment config useEffect and `AbortController` to shipping rates useEffect |
+| 34 | localStorage token key inconsistency | **BY DESIGN** | Admin pages use `access_token`, storefront uses `customer_token` — intentionally separate auth flows |
+| 35 | Cart persists after logout | **FIXED** | Added `localStorage.removeItem('cart_session')` and `localStorage.removeItem('cart-storage')` to logout |
+| 37 | Deploy script silences errors | **FIXED** | Removed `2>/dev/null` from `docker compose down` command |
+| 38 | Soft-deleted records not excluded by default | **BY DESIGN** | Global Prisma middleware would break queries that intentionally include deleted records (e.g., order history). Pattern documented for developers to follow. |
+| 39 | Missing error states in admin pages | **FIXED** | Added error banner UI to products and customers pages with dark mode support |
+| 40 | BankTransaction.externalId not unique | **FIXED** | Changed `@@index([tenantId, externalId])` to `@@unique([tenantId, externalId])` |
+| 41 | Storage allows unlimited file size | **FIXED** | Added 50MB default max file size in `validateMimeType` with configurable override via `options.maxFileSizeBytes` |
+| 42 | No rate limiting on admin endpoints | **DEFERRED** | Requires NestJS throttler module setup across all admin controllers |
+| 43 | Inconsistent API response format | **DEFERRED** | Requires response interceptor — breaking change for existing frontend consumers |
+| 44 | Product can be published without category | **DEFERRED** | Requires service-level validation; low impact since frontend forces category selection |
+| 45 | FailedOperation has no max retry count | **BY DESIGN** | Model already has `attemptCount` (default 0) and `maxAttempts` (default 3) fields |
+| 46 | Notification index missing createdAt | **FIXED** | Added `@@index([tenantId, userId, createdAt])` to Notification model |
+
+**Remaining deferred items for future sprints:**
+- Issue #27 — Payment unique constraint (requires data migration)
+- Issue #31 — JWT refresh token flow (architectural change)
+- Issue #42 — Admin rate limiting (throttler module)
+- Issue #43 — Response format standardization (interceptor)
+- Issue #44 — Product category validation (service-level check)

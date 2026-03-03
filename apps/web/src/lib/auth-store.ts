@@ -64,6 +64,9 @@ export const useAuthStore = create<AuthState>()(
           if (response.token) {
             localStorage.setItem('customer_token', response.token);
           }
+          if (response.refresh_token) {
+            localStorage.setItem('customer_refresh_token', response.refresh_token);
+          }
           set({
             customer: response.customer,
             token: response.token,
@@ -88,6 +91,9 @@ export const useAuthStore = create<AuthState>()(
           // Handle duplicate email path where customer/token are null
           if (response.token) {
             localStorage.setItem('customer_token', response.token);
+            if (response.refresh_token) {
+              localStorage.setItem('customer_refresh_token', response.refresh_token);
+            }
             set({
               customer: response.customer,
               token: response.token,
@@ -116,6 +122,9 @@ export const useAuthStore = create<AuthState>()(
       // Logout
       logout: () => {
         localStorage.removeItem('customer_token');
+        localStorage.removeItem('customer_refresh_token');
+        localStorage.removeItem('cart_session');
+        localStorage.removeItem('cart-storage');
         set({
           customer: null,
           token: null,

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { unwrapJson } from '@/lib/admin-fetch';
 
 interface LegalPage {
   id: string;
@@ -45,7 +46,7 @@ export default function LegalPagesPage() {
         headers: getHeaders(),
       });
       if (!res.ok) throw new Error('Failed to fetch legal pages');
-      const data = await res.json();
+      const data = unwrapJson(await res.json());
       setPages(data);
     } catch (err: any) {
       setError(err.message);

@@ -250,15 +250,22 @@ export class SendGridWebhookController {
    */
   private async getTenantIdFromEmail(email: string): Promise<string | null> {
     try {
-      // Note: This fallback lookup is only used when custom_args.tenantId
-      // is not available. It may match the first tenant found for this email.
-      // Prefer passing tenantId via SendGrid custom_args for accurate scoping.
-      const customer = await this.prisma.storeCustomer.findFirst({
+      // Fallback: only used when custom_args.tenantId is not available.
+      // Prefer passing tenantId via SendGrid custom_args for accurate multi-tenant scoping.
+      const customers = await this.prisma.storeCustomer.findMany({
         where: { email: email.toLowerCase() },
         select: { tenantId: true },
+        orderBy: { createdAt: 'desc' },
       });
 
-      return customer?.tenantId || null;
+      if (customers.length > 1) {
+        this.logger.warn(
+          `Email ${email} exists in ${customers.length} tenants. ` +
+          `Using most recent. Pass tenantId via custom_args for accuracy.`
+        );
+      }
+
+      return customers[0]?.tenantId || null;
     } catch (error) {
       this.logger.error('Failed to get tenantId from email:', error);
       return null;

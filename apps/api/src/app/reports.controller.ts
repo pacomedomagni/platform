@@ -1,9 +1,11 @@
 import { Controller, Get, Query, Req, UseGuards, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { AuthGuard } from '@platform/auth';
 import { ReportsService } from '@platform/business-logic';
 
 @Controller('reports')
 @UseGuards(AuthGuard)
+@Throttle({ short: { limit: 5, ttl: 1000 }, medium: { limit: 30, ttl: 60000 } })
 export class ReportsController {
   constructor(private readonly reports: ReportsService) {}
 
@@ -58,7 +60,7 @@ export class ReportsController {
     if (!tenantId) throw new BadRequestException('Missing tenantId');
     this.ensureReportsAccess(req.user);
     if (!fromDate || !toDate) throw new BadRequestException('fromDate and toDate are required');
-    const parsedLimit = limit ? parseInt(limit, 10) : 500;
+    const parsedLimit = Math.min(limit ? parseInt(limit, 10) || 500 : 500, 1000);
     const parsedOffset = offset ? parseInt(offset, 10) : 0;
     return this.reports.getCashFlow(tenantId, fromDate, toDate, parsedLimit, parsedOffset);
   }

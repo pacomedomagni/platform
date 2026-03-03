@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { ConfirmDialog, toast } from '@platform/ui';
 import { PlusIcon, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
+import { unwrapJson } from '@/lib/admin-fetch';
 
 interface Connection {
   id: string;
@@ -68,7 +69,7 @@ export default function MarketplaceConnectionsPage() {
         headers: authHeaders(),
       });
       if (res.ok) {
-        const data = await res.json();
+        const data = unwrapJson(await res.json());
         setConnections(data);
       }
     } catch (error) {
@@ -95,7 +96,7 @@ export default function MarketplaceConnectionsPage() {
       });
 
       if (res.ok) {
-        const connection = await res.json();
+        const connection = unwrapJson(await res.json());
         setConnections([...connections, connection]);
         setShowAddModal(false);
         setNewConnection({ name: '', description: '', marketplaceId: 'EBAY_US', isDefault: false });
@@ -103,7 +104,7 @@ export default function MarketplaceConnectionsPage() {
         // Redirect to OAuth flow
         window.location.href = `/api/v1/marketplace/ebay/auth/connect?connectionId=${connection.id}`;
       } else {
-        const error = await res.json();
+        const error = unwrapJson(await res.json());
         toast({ title: 'Error', description: error.error || 'Failed to create connection', variant: 'destructive' });
       }
     } catch (error) {
@@ -153,7 +154,7 @@ export default function MarketplaceConnectionsPage() {
       if (res.ok) {
         setConnections(connections.filter((c) => c.id !== connectionId));
       } else {
-        const error = await res.json();
+        const error = unwrapJson(await res.json());
         toast({ title: 'Error', description: error.error || 'Failed to delete connection', variant: 'destructive' });
       }
     } catch (error) {
@@ -374,7 +375,7 @@ function ConnectionCard({
         headers: authHeaders(),
       });
       if (res.ok) {
-        setStatus(await res.json());
+        setStatus(unwrapJson(await res.json()));
       }
     } catch (error) {
       console.error('Failed to load status:', error);

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { unwrapJson } from './admin-fetch';
 
 export interface OnboardingChecklist {
   emailVerified: boolean;
@@ -103,7 +104,7 @@ export const useOnboardingStore = create<OnboardingStore>()(
           });
 
           if (response.ok) {
-            const status = await response.json();
+            const status = unwrapJson(await response.json());
             get().setStatus(status);
           }
         } catch (error) {
@@ -129,7 +130,7 @@ export const useOnboardingStore = create<OnboardingStore>()(
           });
 
           if (response.ok) {
-            const status = await response.json();
+            const status = unwrapJson(await response.json());
             set({ status });
           }
         } catch (error) {
@@ -211,7 +212,7 @@ export const useOnboardingStore = create<OnboardingStore>()(
           });
 
           if (response.ok) {
-            const status = await response.json();
+            const status = unwrapJson(await response.json());
             set({ status });
           }
         } catch (error) {

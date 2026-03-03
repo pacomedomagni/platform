@@ -165,9 +165,6 @@ export class EbayAuthService implements OnModuleDestroy {
    * Exchange authorization code for tokens
    */
   private async exchangeCodeForTokens(code: string) {
-    if (process.env['MOCK_EXTERNAL_SERVICES'] === 'true') {
-      return { access_token: 'mock_access_token', refresh_token: 'mock_refresh_token', expires_in: 7200, token_type: 'Bearer' };
-    }
     const appId = process.env['EBAY_APP_ID'];
     const certId = process.env['EBAY_CERT_ID'];
     const ruName = process.env['EBAY_RU_NAME'];

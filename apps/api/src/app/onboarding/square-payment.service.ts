@@ -8,7 +8,7 @@ const SQUARE_API_VERSION = '2024-12-18';
 export class SquarePaymentService {
   private readonly logger = new Logger(SquarePaymentService.name);
   private readonly apiBase: string;
-  private readonly mockMode = process.env['MOCK_EXTERNAL_SERVICES'] === 'true';
+  private readonly mockMode = process.env['MOCK_PAYMENTS'] === 'true';
 
   constructor(private readonly squareOAuth: SquareOAuthService) {
     this.apiBase =

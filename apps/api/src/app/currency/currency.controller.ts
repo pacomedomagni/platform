@@ -9,6 +9,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../tenant.middleware';
 import { CurrencyService } from './currency.service';
@@ -20,6 +21,7 @@ import {
 } from './currency.dto';
 
 @Controller('currencies')
+@Throttle({ short: { limit: 10, ttl: 1000 }, medium: { limit: 60, ttl: 60000 } })
 export class CurrencyController {
   constructor(private readonly currencyService: CurrencyService) {}
 

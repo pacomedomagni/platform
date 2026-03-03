@@ -9,12 +9,14 @@ import {
   ValidationPipe,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ProvisioningService } from './provisioning.service';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { ApiKeyGuard, RequireApiKey } from '@platform/auth';
 
 @Controller('provision')
 @UseGuards(ApiKeyGuard)
+@Throttle({ short: { limit: 3, ttl: 1000 }, medium: { limit: 10, ttl: 60000 } })
 export class ProvisioningController {
   constructor(private readonly provisioningService: ProvisioningService) {}
 

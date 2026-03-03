@@ -11,6 +11,7 @@ import {
   Request,
   ValidationPipe,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayListingsService } from '../ebay/ebay-listings.service';
@@ -28,6 +29,7 @@ import {
  */
 @Controller('marketplace/listings')
 @UseGuards(AuthGuard, RolesGuard)
+@Throttle({ short: { limit: 10, ttl: 1000 }, medium: { limit: 60, ttl: 60000 } })
 export class MarketplaceListingsController {
   constructor(private ebayListings: EbayListingsService) {}
 

@@ -15,6 +15,7 @@ import {
   clearThemeCache,
   getDefaultColors,
 } from './theme-utils';
+import { unwrapJson } from '../admin-fetch';
 
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
@@ -105,7 +106,7 @@ export function ThemeProvider({
           throw new Error(`Failed to load theme: ${response.statusText}`);
         }
       } else {
-        const data = await response.json();
+        const data = unwrapJson(await response.json());
 
         // Validate theme data
         if (!validateTheme(data)) {

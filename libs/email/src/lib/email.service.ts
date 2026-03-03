@@ -633,10 +633,17 @@ export class EmailService implements OnModuleInit {
 
     // If template is specified, render it
     if (emailOptions.template && emailOptions.context) {
-      const rendered = this.templateService.render(emailOptions.template, emailOptions.context);
-      subject = rendered.subject;
-      html = this.templateService.wrapWithLayout(rendered.html, emailOptions.context);
-      text = rendered.text;
+      try {
+        const rendered = this.templateService.render(emailOptions.template, emailOptions.context);
+        subject = rendered.subject;
+        html = this.templateService.wrapWithLayout(rendered.html, emailOptions.context);
+        text = rendered.text;
+      } catch (templateError) {
+        this.logger.error(
+          `Failed to render email template "${emailOptions.template}": ${templateError instanceof Error ? templateError.message : templateError}`
+        );
+        throw templateError;
+      }
     } else if (html && emailOptions.context) {
       // Wrap plain HTML with layout
       html = this.templateService.wrapWithLayout(html, emailOptions.context);

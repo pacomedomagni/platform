@@ -8,6 +8,7 @@ import {
   UseGuards,
   ValidationPipe,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayOrderSyncService } from './ebay-order-sync.service';
@@ -23,6 +24,7 @@ import {
  */
 @Controller('marketplace/orders')
 @UseGuards(AuthGuard, RolesGuard)
+@Throttle({ short: { limit: 10, ttl: 1000 }, medium: { limit: 30, ttl: 60000 } })
 export class EbayOrdersController {
   constructor(private orderSyncService: EbayOrderSyncService) {}
 

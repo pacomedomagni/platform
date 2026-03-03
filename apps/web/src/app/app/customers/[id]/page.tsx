@@ -135,9 +135,10 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
   const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
 
   const formatCurrency = (amount: number) => {
+    const currency = (typeof window !== 'undefined' && localStorage.getItem('tenantCurrency')) || 'USD';
     return new Intl.NumberFormat(locale, {
       style: 'currency',
-      currency: 'USD',
+      currency,
     }).format(amount);
   };
 

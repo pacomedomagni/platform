@@ -149,6 +149,9 @@ model Tenant {
   // Notifications
   notifications Notification[]
 
+  // Refresh tokens
+  refreshTokens RefreshToken[]
+
   @@map("tenants")
 }
 
@@ -172,6 +175,8 @@ model User {
   // Marketplace listing approvals
   approvedMarketplaceListings MarketplaceListing[] @relation("MarketplaceListingApprover")
   rejectedMarketplaceListings MarketplaceListing[] @relation("MarketplaceListingRejecter")
+
+  refreshTokens RefreshToken[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -991,7 +996,7 @@ model BankTransaction {
   @@index([tenantId, bankAccount])
   @@index([tenantId, transactionDate])
   @@index([tenantId, status])
-  @@index([tenantId, externalId])
+  @@unique([tenantId, externalId])
   @@map("bank_transactions")
 }
 
@@ -1228,6 +1233,7 @@ model StoreCustomer {
   wishlists               Wishlist[]
   emailPreferences        StoreCustomerPreferences?
   couponUsages            CouponUsage[]
+  refreshTokens           RefreshToken[]
 
   @@unique([tenantId, email])
   @@index([tenantId, isActive])
@@ -1345,6 +1351,7 @@ model Cart {
   @@index([tenantId, customerId])
   @@index([tenantId, sessionToken])
   @@index([tenantId, status])
+  @@index([tenantId, updatedAt])
   @@map("carts")
 }
 
@@ -1486,6 +1493,7 @@ model Order {
   @@index([tenantId, status])
   @@index([tenantId, createdAt])
   @@index([stripePaymentIntentId])
+  @@index([tenantId, paymentStatus])
   @@map("orders")
 }
 
@@ -1571,9 +1579,10 @@ model Payment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([tenantId, stripePaymentIntentId])
   @@index([orderId])
-  @@index([stripePaymentIntentId])
   @@index([giftCardId])
+  @@index([tenantId, status])
   @@map("payments")
 }
 
@@ -2946,5 +2955,27 @@ model Notification {
   @@index([tenantId])
   @@index([tenantId, userId])
   @@index([tenantId, userId, isRead])
+  @@index([tenantId, userId, createdAt])
   @@map("notifications")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  token     String    @unique
+  userId    String?
+  customerId String?
+  tenantId  String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user     User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customer StoreCustomer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+  @@index([customerId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
 }

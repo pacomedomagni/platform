@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { Upload, FileText, CheckCircle, XCircle, Loader2, Download, AlertTriangle } from 'lucide-react';
 import { Card } from '@platform/ui';
+import { unwrapJson } from '@/lib/admin-fetch';
 
 interface ImportJob {
   id: string;
@@ -43,7 +44,7 @@ export default function ProductImportPage() {
         headers: getHeaders(),
       });
       if (res.ok) {
-        const data: ImportJob = await res.json();
+        const data: ImportJob = unwrapJson(await res.json());
         setActiveJob(data);
         if (data.status === 'completed' || data.status === 'failed') {
           if (pollRef.current) {
@@ -84,11 +85,11 @@ export default function ProductImportPage() {
       });
 
       if (!res.ok) {
-        const err = await res.json();
+        const err = unwrapJson(await res.json());
         throw new Error(err.message || 'Upload failed');
       }
 
-      const data = await res.json();
+      const data = unwrapJson(await res.json());
       setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
 

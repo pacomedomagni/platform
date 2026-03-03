@@ -104,6 +104,7 @@ export default function AppLayout({
 
   const handleLogout = useCallback(() => {
     localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
     localStorage.removeItem('user');
     localStorage.removeItem('tenantId');
     router.push('/login');

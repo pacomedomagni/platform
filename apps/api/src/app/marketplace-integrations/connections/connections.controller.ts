@@ -9,6 +9,7 @@ import {
   UseGuards,
   ValidationPipe,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayStoreService } from '../ebay/ebay-store.service';
@@ -20,6 +21,7 @@ import { CreateConnectionDto } from '../shared/marketplace.dto';
  */
 @Controller('marketplace/connections')
 @UseGuards(AuthGuard, RolesGuard)
+@Throttle({ short: { limit: 10, ttl: 1000 }, medium: { limit: 30, ttl: 60000 } })
 export class ConnectionsController {
   constructor(private ebayStore: EbayStoreService) {}
 

@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Eye, EyeOff } from 'lucide-react';
+import { unwrapJson } from '@/lib/admin-fetch';
 
 const signupSchema = z.object({
   businessName: z.string().min(2, 'Business name must be at least 2 characters').max(100),
@@ -65,11 +66,11 @@ export default function SignupPage() {
       });
 
       if (!response.ok) {
-        const err = await response.json();
+        const err = unwrapJson(await response.json());
         throw new Error(err.message || 'Signup failed');
       }
 
-      const { tenantId, accessToken } = await response.json();
+      const { tenantId, accessToken } = unwrapJson(await response.json());
       localStorage.setItem('tenantId', tenantId);
 
       if (accessToken) {

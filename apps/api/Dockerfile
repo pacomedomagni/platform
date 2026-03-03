@@ -45,6 +45,9 @@ COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 # Validation: Check if main.js exists
 RUN ls -la dist/apps/api
 
+# Run as non-root user
+USER node
+
 # Expose port
 EXPOSE 3000
 

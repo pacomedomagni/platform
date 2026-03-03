@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { toast } from '@platform/ui';
 import { ArrowLeft, Save, Upload } from 'lucide-react';
 import Link from 'next/link';
+import { unwrapJson } from '@/lib/admin-fetch';
 
 interface Connection {
   id: string;
@@ -77,7 +78,7 @@ export default function CreateListingPage() {
         credentials: 'include',
       });
       if (connectionsRes.ok) {
-        const connectionsData = await connectionsRes.json();
+        const connectionsData = unwrapJson(await connectionsRes.json());
         setConnections(connectionsData.filter((c: Connection) => c.isConnected));
       }
 
@@ -86,7 +87,7 @@ export default function CreateListingPage() {
         credentials: 'include',
       });
       if (productsRes.ok) {
-        const productsData = await productsRes.json();
+        const productsData = unwrapJson(await productsRes.json());
         setProducts(productsData);
       }
 
@@ -95,7 +96,7 @@ export default function CreateListingPage() {
         credentials: 'include',
       });
       if (warehousesRes.ok) {
-        const warehousesData = await warehousesRes.json();
+        const warehousesData = unwrapJson(await warehousesRes.json());
         setWarehouses(warehousesData);
       }
     } catch (error) {
@@ -159,7 +160,7 @@ export default function CreateListingPage() {
       });
 
       if (res.ok) {
-        const listing = await res.json();
+        const listing = unwrapJson(await res.json());
 
         // Auto-publish if requested
         if (formData.autoPublish) {
@@ -182,7 +183,7 @@ export default function CreateListingPage() {
 
         router.push('/app/marketplace/listings');
       } else {
-        const error = await res.json();
+        const error = unwrapJson(await res.json());
         toast({ title: 'Error', description: error.error || 'Failed to create listing', variant: 'destructive' });
       }
     } catch (error) {

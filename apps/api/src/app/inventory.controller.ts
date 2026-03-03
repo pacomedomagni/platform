@@ -1,4 +1,5 @@
 import { Controller, Get, Query, Req, UseGuards, BadRequestException, ForbiddenException, Post, Body, Put, Param } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { AuthGuard } from '@nestjs/passport';
 import { PrismaService, Prisma } from '@platform/db';
 import { SerialStatus } from '@prisma/client';
@@ -11,6 +12,7 @@ interface RequestWithUser extends Request {
 
 @Controller('inventory')
 @UseGuards(AuthGuard('jwt'))
+@Throttle({ short: { limit: 10, ttl: 1000 }, medium: { limit: 60, ttl: 60000 } })
 export class InventoryController {
   constructor(private readonly prisma: PrismaService) {}
 

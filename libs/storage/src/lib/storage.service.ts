@@ -28,7 +28,6 @@ export class StorageService {
     'image/png',
     'image/gif',
     'image/webp',
-    'image/svg+xml',
     'image/bmp',
     'image/tiff',
     // Documents
@@ -142,7 +141,18 @@ export class StorageService {
    * STOR-3: Validate MIME type against allowlist and check for mismatches
    * between declared and detected types
    */
+  /** Default max file size: 50MB */
+  private static readonly DEFAULT_MAX_FILE_SIZE = 50 * 1024 * 1024;
+
   private validateMimeType(data: Buffer, declaredContentType: string): void {
+    // Enforce max file size even when options.maxFileSizeBytes is not set
+    const maxSize = this.options.maxFileSizeBytes || StorageService.DEFAULT_MAX_FILE_SIZE;
+    if (data.length > maxSize) {
+      throw new Error(
+        `File size ${data.length} exceeds maximum allowed size of ${maxSize} bytes`,
+      );
+    }
+
     // Validate declared content type against allowlist
     if (!StorageService.ALLOWED_MIME_TYPES.has(declaredContentType)) {
       throw new Error(

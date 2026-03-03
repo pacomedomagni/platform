@@ -1,5 +1,6 @@
 import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
+import { Throttle } from '@nestjs/throttler';
 import { AuthGuard } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayAuthService } from './ebay-auth.service';
@@ -9,6 +10,7 @@ import { EbayAuthService } from './ebay-auth.service';
  * Handles OAuth 2.0 flow for connecting eBay stores
  */
 @Controller('marketplace/ebay/auth')
+@Throttle({ short: { limit: 5, ttl: 1000 }, medium: { limit: 10, ttl: 60000 } })
 export class EbayAuthController {
   constructor(private ebayAuth: EbayAuthService) {}
 

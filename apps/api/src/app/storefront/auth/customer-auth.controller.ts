@@ -85,6 +85,19 @@ export class CustomerAuthController {
   }
 
   /**
+   * Refresh access token
+   * POST /api/v1/store/auth/refresh
+   */
+  @Post('refresh')
+  @Throttle({ short: { limit: 5, ttl: 1000 }, medium: { limit: 20, ttl: 60000 } })
+  async refresh(@Body() body: { refresh_token: string }) {
+    if (!body.refresh_token) {
+      throw new BadRequestException('Refresh token required');
+    }
+    return this.authService.refreshAccessToken(body.refresh_token);
+  }
+
+  /**
    * Get current customer profile
    * GET /api/v1/store/auth/me
    */

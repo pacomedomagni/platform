@@ -37,11 +37,13 @@ export default function CustomersPage() {
     atRisk: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [segment, setSegment] = useState('');
 
   const loadCustomers = async () => {
     setLoading(true);
+    setError(null);
     try {
       const params: any = {};
       if (search) params.search = search;
@@ -69,8 +71,9 @@ export default function CustomersPage() {
           ).length,
         });
       }
-    } catch (error: any) {
-      console.error('Failed to load customers:', error);
+    } catch (err: any) {
+      console.error('Failed to load customers:', err);
+      setError(err.message || 'Failed to load customers');
     } finally {
       setLoading(false);
     }
@@ -106,9 +109,10 @@ export default function CustomersPage() {
   const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
 
   const formatCurrency = (amount: number) => {
+    const currency = (typeof window !== 'undefined' && localStorage.getItem('tenantCurrency')) || 'USD';
     return new Intl.NumberFormat(locale, {
       style: 'currency',
-      currency: 'USD',
+      currency,
     }).format(amount);
   };
 
@@ -229,6 +233,12 @@ export default function CustomersPage() {
           </NativeSelect>
         </div>
       </Card>
+
+      {error && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-400">
+          {error}
+        </div>
+      )}
 
       {/* Customers Table */}
       <Card className="p-5">

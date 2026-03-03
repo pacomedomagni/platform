@@ -12,6 +12,7 @@ import type { StoreCustomer } from '@prisma/client';
 import { PrismaService } from '@platform/db';
 import { EmailService } from '@platform/email';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 import * as jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -35,7 +36,8 @@ if (!JWT_SECRET && !ALLOW_FALLBACK_SECRET) {
 }
 const EFFECTIVE_JWT_SECRET = JWT_SECRET || 'dev-only-secret-change-in-production';
 
-const JWT_EXPIRES_IN = '24h';
+const JWT_EXPIRES_IN = '15m';
+const REFRESH_TOKEN_EXPIRY_DAYS = 30;
 const SALT_ROUNDS = 12;
 const RESET_TOKEN_EXPIRY = 1 * 60 * 60 * 1000; // 1 hour
 const VERIFICATION_TOKEN_EXPIRY = 24 * 60 * 60 * 1000; // 24 hours
@@ -134,8 +136,9 @@ export class CustomerAuthService implements OnModuleInit {
     // Send welcome email (async - non-critical)
     this.sendWelcomeEmailAsync(customer.id, tenantId);
 
-    // Generate token
+    // Generate tokens
     const token = this.generateToken(customer.id, tenantId);
+    const refreshToken = await this.createRefreshToken(customer.id, tenantId);
 
     // Fire-and-forget: trigger customer.created webhook
     this.webhookService.triggerEvent({ tenantId }, {
@@ -152,6 +155,7 @@ export class CustomerAuthService implements OnModuleInit {
     return {
       customer: this.mapCustomerToResponse(customer),
       token,
+      refresh_token: refreshToken,
     };
   }
 
@@ -184,12 +188,14 @@ export class CustomerAuthService implements OnModuleInit {
       data: { lastLoginAt: new Date() },
     });
 
-    // Generate token
+    // Generate tokens
     const token = this.generateToken(customer.id, tenantId, customer.tokenVersion ?? 0);
+    const refreshToken = await this.createRefreshToken(customer.id, tenantId);
 
     return {
       customer: this.mapCustomerToResponse(customer),
       token,
+      refresh_token: refreshToken,
     };
   }
 
@@ -692,6 +698,68 @@ export class CustomerAuthService implements OnModuleInit {
 
       return { success: true };
     });
+  }
+
+  // ============ REFRESH TOKENS ============
+
+  /**
+   * Refresh access token using a valid refresh token
+   */
+  async refreshAccessToken(refreshTokenValue: string) {
+    const tokenRecord = await this.prisma.refreshToken.findUnique({
+      where: { token: refreshTokenValue },
+      include: { customer: true },
+    });
+
+    if (!tokenRecord || !tokenRecord.customer) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    if (tokenRecord.revokedAt) {
+      throw new UnauthorizedException('Refresh token has been revoked');
+    }
+
+    if (tokenRecord.expiresAt < new Date()) {
+      throw new UnauthorizedException('Refresh token has expired');
+    }
+
+    const customer = tokenRecord.customer;
+
+    if (!customer.isActive) {
+      throw new UnauthorizedException('Account is deactivated');
+    }
+
+    // Revoke old refresh token (rotation)
+    await this.prisma.refreshToken.update({
+      where: { id: tokenRecord.id },
+      data: { revokedAt: new Date() },
+    });
+
+    // Issue new tokens
+    const token = this.generateToken(customer.id, customer.tenantId, customer.tokenVersion ?? 0);
+    const newRefreshToken = await this.createRefreshToken(customer.id, customer.tenantId);
+
+    return {
+      token,
+      refresh_token: newRefreshToken,
+    };
+  }
+
+  private async createRefreshToken(customerId: string, tenantId: string): Promise<string> {
+    const token = crypto.randomBytes(64).toString('hex');
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_EXPIRY_DAYS);
+
+    await this.prisma.refreshToken.create({
+      data: {
+        token,
+        customerId,
+        tenantId,
+        expiresAt,
+      },
+    });
+
+    return token;
   }
 
   // ============ HELPERS ============

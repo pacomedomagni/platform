@@ -11,6 +11,7 @@ import {
   Request,
 } from '@nestjs/common';
 import { Request as ExpressRequest } from 'express';
+import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles, AuthenticatedUser } from '@platform/auth';
 import { Tenant } from '../tenant.middleware';
 import { StockMovementService } from './stock-movement.service';
@@ -43,6 +44,7 @@ interface RequestWithUser extends ExpressRequest {
 
 @Controller('inventory-management')
 @UseGuards(AuthGuard, RolesGuard)
+@Throttle({ short: { limit: 10, ttl: 1000 }, medium: { limit: 60, ttl: 60000 } })
 export class InventoryManagementController {
   constructor(
     private readonly stockMovement: StockMovementService,

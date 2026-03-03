@@ -96,10 +96,16 @@ export async function apiFetch<T>(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: 'Request failed' }));
-    throw new Error(error.message || `HTTP ${response.status}`);
+    const errorData = error?.data || error;
+    throw new Error(errorData.message || `HTTP ${response.status}`);
   }
 
-  return response.json();
+  const json = await response.json();
+  // Unwrap standardized { data, meta } envelope
+  if (json && typeof json === 'object' && 'data' in json && 'meta' in json) {
+    return json.data as T;
+  }
+  return json as T;
 }
 
 // ==================== PRODUCTS API ====================
@@ -378,6 +384,7 @@ export interface Customer {
 export interface AuthResponse {
   customer: Customer | null;
   token: string | null;
+  refresh_token?: string | null;
   message?: string;
 }
 

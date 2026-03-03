@@ -80,7 +80,7 @@ export class AdminCustomersController {
       search,
       segment,
       page: page ? parseInt(page, 10) : undefined,
-      limit: limit ? parseInt(limit, 10) : undefined,
+      limit: Math.min(limit ? parseInt(limit, 10) || 50 : 50, 200),
     });
   }
 

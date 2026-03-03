@@ -1,16 +1,16 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { MonitoringService } from './monitoring.service';
-import { AuthGuard } from '@nestjs/passport';
+import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 
 /**
  * Monitoring Controller
  * Provides metrics and health check endpoints for system monitoring
- *
- * Security: Should be protected by authentication in production
- * Consider using API keys or internal-only network access
  */
 @Controller('monitoring')
-// @UseGuards(AuthGuard('jwt')) // Uncomment in production
+@UseGuards(AuthGuard, RolesGuard)
+@Roles('admin')
+@Throttle({ short: { limit: 10, ttl: 1000 }, medium: { limit: 30, ttl: 60000 } })
 export class MonitoringController {
   constructor(private readonly monitoringService: MonitoringService) {}
 
@@ -48,7 +48,7 @@ export class MonitoringController {
    */
   @Get('failed-operations')
   async getFailedOperations(@Query('limit') limit?: string) {
-    const limitNum = limit ? parseInt(limit, 10) : 100;
+    const limitNum = Math.min(limit ? parseInt(limit, 10) || 100 : 100, 200);
     return this.monitoringService.getFailedOperationsReport(limitNum);
   }
 

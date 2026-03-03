@@ -32,6 +32,9 @@ COPY --from=builder /app/dist/apps/web/package.json ./package.json
 # Install production dependencies (Next.js needs them to run the server)
 RUN npm install --omit=dev
 
+# Run as non-root user
+USER node
+
 EXPOSE 3000
 
 CMD ["npm", "start"]

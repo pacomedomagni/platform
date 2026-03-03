@@ -2,6 +2,7 @@
  * Product Reviews API Client
  */
 import { resolveTenantId } from './store-api';
+import { unwrapJson } from './admin-fetch';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
 
@@ -43,7 +44,7 @@ async function apiFetch<T>(
     throw new Error(error.message || `HTTP ${response.status}`);
   }
 
-  return response.json();
+  return unwrapJson(await response.json());
 }
 
 // L3: Use crypto.randomUUID() instead of Math.random() for better entropy
@@ -164,7 +165,7 @@ export const reviewsApi = {
       throw new Error('Failed to upload images');
     }
 
-    const data = await response.json();
+    const data = unwrapJson(await response.json());
     return data.urls;
   },
 };

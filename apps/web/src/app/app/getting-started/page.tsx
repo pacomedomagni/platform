@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { Card } from '@platform/ui';
 import { Store, Truck, Package, PartyPopper, Loader2, Upload, X, Check, Globe, Link2 } from 'lucide-react';
 import Link from 'next/link';
+import { unwrapJson } from '@/lib/admin-fetch';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -155,7 +156,7 @@ export default function GettingStartedPage() {
           headers: authHeaders(),
         });
         if (!res.ok) throw new Error('Failed to load settings');
-        const data: StoreSettings = await res.json();
+        const data: StoreSettings = unwrapJson(await res.json());
         setBusinessName(data.businessName || '');
         if (data.defaultTaxRate != null) setTaxRatePercent(String(+(data.defaultTaxRate * 100).toFixed(4)));
         if (data.defaultShippingRate != null) setShippingRate(String(data.defaultShippingRate));
@@ -180,7 +181,7 @@ export default function GettingStartedPage() {
         headers: authHeaders(),
       });
       if (res.ok) {
-        const data = await res.json();
+        const data = unwrapJson(await res.json());
         setEbayConnections(
           Array.isArray(data)
             ? data.map((connection) => ({
@@ -214,10 +215,10 @@ export default function GettingStartedPage() {
         body: JSON.stringify(body),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
+        const err = unwrapJson(await res.json().catch(() => ({})));
         throw new Error(err.message || 'Failed to save');
       }
-      const updated = await res.json();
+      const updated = unwrapJson(await res.json());
       if (updated.storeUrl) setStoreUrl(updated.storeUrl);
       if (updated.customDomain !== undefined) setCustomDomain(updated.customDomain || '');
       if (updated.customDomainStatus !== undefined) setCustomDomainStatus(updated.customDomainStatus);
@@ -299,11 +300,11 @@ export default function GettingStartedPage() {
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
+        const err = unwrapJson(await res.json().catch(() => ({})));
         throw new Error(err.message || 'Failed to verify domain');
       }
 
-      const data = await res.json();
+      const data = unwrapJson(await res.json());
       setCustomDomainStatus(data.status || 'pending');
       if (data.status === 'verified') {
         setCustomDomainVerifiedAt(data.verifiedAt || new Date().toISOString());
@@ -336,11 +337,11 @@ export default function GettingStartedPage() {
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
+        const err = unwrapJson(await res.json().catch(() => ({})));
         throw new Error(err.error || err.message || 'Failed to create connection');
       }
 
-      const connection = await res.json();
+      const connection = unwrapJson(await res.json());
       setEbayConnections((prev) => [
         ...prev,
         { id: connection.id, name: connection.name, isConnected: Boolean(connection.isConnected) },
@@ -375,7 +376,7 @@ export default function GettingStartedPage() {
       });
 
       if (!res.ok) throw new Error('Failed to upload image');
-      const data = await res.json();
+      const data = unwrapJson(await res.json());
       setProductImage(data.url || data.imageUrl || data.path);
       setProductImageName(file.name);
     } catch (err: any) {
@@ -408,7 +409,7 @@ export default function GettingStartedPage() {
         });
 
         if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
+          const err = unwrapJson(await res.json().catch(() => ({})));
           throw new Error(err.message || 'Failed to create product');
         }
       } catch (err: any) {

@@ -7,6 +7,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { Response } from 'express';
+import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { SalesAnalyticsService } from './sales-analytics.service';
 import { InventoryAnalyticsService } from './inventory-analytics.service';
@@ -20,6 +21,7 @@ import {
 
 @Controller('analytics')
 @UseGuards(AuthGuard, RolesGuard)
+@Throttle({ short: { limit: 5, ttl: 1000 }, medium: { limit: 30, ttl: 60000 } })
 export class AnalyticsController {
   constructor(
     private readonly salesAnalytics: SalesAnalyticsService,

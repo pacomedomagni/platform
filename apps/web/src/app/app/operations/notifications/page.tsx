@@ -21,6 +21,7 @@ import {
   FileText,
   Loader2,
 } from 'lucide-react';
+import { unwrapJson } from '@/lib/admin-fetch';
 
 interface Notification {
   id: string;
@@ -66,7 +67,7 @@ async function fetchNotifications(params?: {
     headers: getHeaders(),
   });
   if (!res.ok) throw new Error('Failed to fetch notifications');
-  return res.json();
+  return unwrapJson(await res.json());
 }
 
 async function markAsRead(id: string) {
@@ -75,7 +76,7 @@ async function markAsRead(id: string) {
     headers: getHeaders(),
   });
   if (!res.ok) throw new Error('Failed to mark as read');
-  return res.json();
+  return unwrapJson(await res.json());
 }
 
 async function markAllAsRead() {
@@ -84,7 +85,7 @@ async function markAllAsRead() {
     headers: getHeaders(),
   });
   if (!res.ok) throw new Error('Failed to mark all as read');
-  return res.json();
+  return unwrapJson(await res.json());
 }
 
 async function deleteNotification(id: string) {
@@ -101,7 +102,7 @@ async function deleteRead() {
     headers: getHeaders(),
   });
   if (!res.ok) throw new Error('Failed to delete read');
-  return res.json();
+  return unwrapJson(await res.json());
 }
 
 const ICON_MAP: Record<string, typeof Bell> = {

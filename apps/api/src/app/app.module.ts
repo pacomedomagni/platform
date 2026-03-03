@@ -24,6 +24,7 @@ import { CurrencyModule } from './currency/currency.module';
 import { MarketplaceIntegrationsModule } from './marketplace-integrations/marketplace-integrations.module';
 import { LoggerModule } from './common/logger';
 import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
+import { ResponseTransformInterceptor } from './common/interceptors/response-transform.interceptor';
 import { SentryInterceptor } from './sentry/sentry.interceptor';
 import { EmailWorker } from './workers/email.worker';
 import { WorkersModule } from './workers/workers.module';
@@ -98,6 +99,11 @@ import { DomainResolverModule } from './storefront/domain-resolver/domain-resolv
     {
       provide: APP_INTERCEPTOR,
       useClass: TenantContextInterceptor,
+    },
+    // Standardize all API responses into { data, meta } envelope
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: ResponseTransformInterceptor,
     },
     // Sentry context interceptor
     {

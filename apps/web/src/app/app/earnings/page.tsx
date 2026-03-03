@@ -15,6 +15,7 @@ import {
   CreditCard,
 } from 'lucide-react';
 import Link from 'next/link';
+import { unwrapJson } from '@/lib/admin-fetch';
 
 interface BalanceAmount {
   amount: number;
@@ -129,7 +130,7 @@ export default function EarningsPage() {
         return;
       }
       if (!res.ok) throw new Error('Failed to load earnings');
-      const json = await res.json();
+      const json = unwrapJson(await res.json());
       setData(json);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
@@ -151,7 +152,7 @@ export default function EarningsPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Failed to get dashboard link');
-      const { url } = await res.json();
+      const { url } = unwrapJson(await res.json());
       window.open(url, '_blank');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to open dashboard');

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { unwrapJson } from '@/lib/admin-fetch';
 
 interface OnboardingStatus {
   tenantId: string;
@@ -28,7 +29,7 @@ export default function OnboardingStatusPage() {
     try {
       const res = await fetch(`/api/v1/onboarding/${tenantId}/status`);
       if (!res.ok) throw new Error('Failed to fetch status');
-      const data = await res.json();
+      const data = unwrapJson(await res.json());
       setStatus(data);
       return data;
     } catch (err: any) {
@@ -77,11 +78,11 @@ export default function OnboardingStatusPage() {
       });
 
       if (!res.ok) {
-        const err = await res.json();
+        const err = unwrapJson(await res.json());
         throw new Error(err.message || 'Failed to initiate payment setup');
       }
 
-      const { url } = await res.json();
+      const { url } = unwrapJson(await res.json());
       window.location.href = url;
     } catch (err: any) {
       setError(err.message);

@@ -1,4 +1,5 @@
 import { MetadataRoute } from 'next';
+import { unwrapJson } from '@/lib/admin-fetch';
 
 const BASE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://example.com';
 
@@ -50,7 +51,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     });
 
     if (response.ok) {
-      const data = await response.json();
+      const data = unwrapJson(await response.json());
       productPages = data.products?.map((product: { slug: string; updatedAt?: string }) => ({
         url: `${BASE_URL}/storefront/products/${product.slug}`,
         lastModified: product.updatedAt ? new Date(product.updatedAt) : new Date(),

@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { ConfirmDialog } from '@platform/ui';
 import Link from 'next/link';
+import { unwrapJson } from '@/lib/admin-fetch';
 
 interface ShippingZone {
   id: string;
@@ -65,7 +66,7 @@ export default function ShippingTaxPage() {
       const headers = getHeaders();
       const res = await fetch('/api/v1/store/admin/settings', { headers });
       if (!res.ok) throw new Error('Failed to fetch settings');
-      const data = await res.json();
+      const data = unwrapJson(await res.json());
 
       setTaxRateDisplay(
         data.defaultTaxRate != null ? String(+(data.defaultTaxRate * 100).toFixed(4)) : ''
@@ -86,7 +87,7 @@ export default function ShippingTaxPage() {
       const headers = getHeaders();
       const res = await fetch('/api/v1/store/admin/shipping/zones', { headers });
       if (res.ok) {
-        const data = await res.json();
+        const data = unwrapJson(await res.json());
         setZones(data);
       }
     } catch {

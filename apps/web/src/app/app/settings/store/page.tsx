@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { unwrapJson } from '@/lib/admin-fetch';
 
 interface StoreSettings {
   businessName: string;
@@ -29,7 +30,7 @@ export default function StoreDetailsPage() {
         },
       });
       if (!res.ok) throw new Error('Failed to fetch store settings');
-      const data = await res.json();
+      const data = unwrapJson(await res.json());
       setSettings(data);
       setBusinessName(data.businessName || '');
     } catch (err: any) {

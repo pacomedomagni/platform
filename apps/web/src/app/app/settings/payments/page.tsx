@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { unwrapJson } from '@/lib/admin-fetch';
 
 interface TenantPaymentInfo {
   paymentProvider: string | null;
@@ -30,7 +31,7 @@ export default function PaymentSettingsPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Failed to fetch payment info');
-      const data = await res.json();
+      const data = unwrapJson(await res.json());
       setInfo({
         paymentProvider: data.paymentProvider,
         paymentProviderStatus: data.paymentProviderStatus,
@@ -60,7 +61,7 @@ export default function PaymentSettingsPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Failed to get dashboard link');
-      const { url } = await res.json();
+      const { url } = unwrapJson(await res.json());
       window.open(url, '_blank');
     } catch (err: any) {
       setError(err.message);
@@ -76,7 +77,7 @@ export default function PaymentSettingsPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error('Failed to initiate reconnection');
-      const { url } = await res.json();
+      const { url } = unwrapJson(await res.json());
       window.location.href = url;
     } catch (err: any) {
       setError(err.message);

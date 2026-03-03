@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { Card } from '@platform/ui';
 import { CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import Link from 'next/link';
+import { unwrapJson } from '@/lib/admin-fetch';
 
 function VerifyEmailContent() {
   const searchParams = useSearchParams();
@@ -28,11 +29,11 @@ function VerifyEmailContent() {
         });
 
         if (res.ok) {
-          const data = await res.json();
+          const data = unwrapJson(await res.json());
           setStatus('success');
           setMessage(`Your email ${data.email} has been verified!`);
         } else {
-          const err = await res.json();
+          const err = unwrapJson(await res.json());
           setStatus('error');
           setMessage(err.message || 'Verification failed. The token may be invalid or expired.');
         }

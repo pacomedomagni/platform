@@ -90,10 +90,12 @@ export default function CheckoutPage() {
 
   // Initialize cart and load payment config
   useEffect(() => {
+    let cancelled = false;
     initializeCart();
 
     // Load payment config (Stripe or Square depending on tenant)
     paymentsApi.getConfig().then(config => {
+      if (cancelled) return;
       setPaymentProvider(config.paymentProvider || 'stripe');
       if (config.paymentProvider === 'square') {
         setSquareApplicationId(config.squareApplicationId);
@@ -101,7 +103,9 @@ export default function CheckoutPage() {
       } else if (config.publicKey) {
         setStripePublicKey(config.publicKey);
       }
-    }).catch(console.error);
+    }).catch(err => { if (!cancelled) console.error(err); });
+
+    return () => { cancelled = true; };
   }, [initializeCart]);
 
   // Pre-fill form if customer is logged in
@@ -157,7 +161,9 @@ export default function CheckoutPage() {
 
   useEffect(() => {
     if (watchedCountry && items.length > 0) {
+      const controller = new AbortController();
       fetchShippingRates(watchedCountry, watchedState, watchedPostalCode);
+      return () => controller.abort();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchedCountry, watchedState, watchedPostalCode, subtotal]);

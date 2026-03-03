@@ -2,6 +2,7 @@
 
 import { useEffect, useState, Suspense } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { unwrapJson } from '@/lib/admin-fetch';
 
 function OnboardingCompleteContent() {
   const { tenantId } = useParams();
@@ -28,7 +29,7 @@ function OnboardingCompleteContent() {
         });
 
         if (!res.ok) {
-          const err = await res.json();
+          const err = unwrapJson(await res.json());
           throw new Error(err.message || 'Failed to complete onboarding');
         }
 

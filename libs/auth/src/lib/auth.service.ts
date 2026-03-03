@@ -5,6 +5,7 @@ import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 
 const SALT_ROUNDS = 12;
+const REFRESH_TOKEN_EXPIRY_DAYS = 30;
 
 @Injectable()
 export class AuthService {
@@ -62,8 +63,12 @@ export class AuthService {
             aud: 'admin',
         };
 
+        const accessToken = jwt.sign(payload, jwtSecret, { expiresIn: '15m' });
+        const refreshToken = await this.createRefreshToken(user.id, user.tenantId);
+
         return {
-            access_token: jwt.sign(payload, jwtSecret, { expiresIn: '1d' }),
+            access_token: accessToken,
+            refresh_token: refreshToken,
             user: {
                 id: user.id,
                 email: user.email,
@@ -73,5 +78,76 @@ export class AuthService {
                 roles: user.roles,
             },
         };
+    }
+
+    /**
+     * Refresh access token using a valid refresh token
+     */
+    async refreshAccessToken(refreshTokenValue: string) {
+        const jwtSecret = process.env['JWT_SECRET'];
+        if (!jwtSecret) {
+            throw new Error('JWT_SECRET must be set');
+        }
+
+        const tokenRecord = await this.db.refreshToken.findUnique({
+            where: { token: refreshTokenValue },
+            include: { user: true },
+        });
+
+        if (!tokenRecord || !tokenRecord.user) {
+            throw new UnauthorizedException('Invalid refresh token');
+        }
+
+        if (tokenRecord.revokedAt) {
+            throw new UnauthorizedException('Refresh token has been revoked');
+        }
+
+        if (tokenRecord.expiresAt < new Date()) {
+            throw new UnauthorizedException('Refresh token has expired');
+        }
+
+        const user = tokenRecord.user;
+
+        // Revoke old refresh token (rotation)
+        await this.db.refreshToken.update({
+            where: { id: tokenRecord.id },
+            data: { revokedAt: new Date() },
+        });
+
+        // Issue new tokens
+        const payload = {
+            username: user.email,
+            email: user.email,
+            sub: user.id,
+            tenant_id: user.tenantId,
+            roles: user.roles,
+            iss: 'admin',
+            aud: 'admin',
+        };
+
+        const accessToken = jwt.sign(payload, jwtSecret, { expiresIn: '15m' });
+        const newRefreshToken = await this.createRefreshToken(user.id, user.tenantId);
+
+        return {
+            access_token: accessToken,
+            refresh_token: newRefreshToken,
+        };
+    }
+
+    private async createRefreshToken(userId: string, tenantId: string): Promise<string> {
+        const token = crypto.randomBytes(64).toString('hex');
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_EXPIRY_DAYS);
+
+        await this.db.refreshToken.create({
+            data: {
+                token,
+                userId,
+                tenantId,
+                expiresAt,
+            },
+        });
+
+        return token;
     }
 }

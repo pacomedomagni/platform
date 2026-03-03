@@ -1,10 +1,12 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { AuthGuard } from '@platform/auth';
 import { Tenant } from '../tenant.middleware';
 import { DashboardService } from './dashboard.service';
 
 @Controller('dashboard')
 @UseGuards(AuthGuard)
+@Throttle({ short: { limit: 10, ttl: 1000 }, medium: { limit: 60, ttl: 60000 } })
 export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
 

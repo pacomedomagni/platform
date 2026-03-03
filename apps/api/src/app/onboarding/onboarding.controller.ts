@@ -11,6 +11,7 @@ import {
   ValidationPipe,
   ForbiddenException,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, AuthenticatedUser } from '@platform/auth';
 import { OnboardingService } from './onboarding.service';
 import { SignupDto } from './dto/signup.dto';
@@ -21,6 +22,7 @@ interface RequestWithUser extends Request {
 }
 
 @Controller('onboarding')
+@Throttle({ short: { limit: 5, ttl: 1000 }, medium: { limit: 20, ttl: 60000 } })
 export class OnboardingController {
   constructor(private readonly onboardingService: OnboardingService) {}
 

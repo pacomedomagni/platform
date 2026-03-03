@@ -448,6 +448,28 @@ export class ProductsService {
 
       const shouldPublish = dto.isPublished === true;
 
+      // Validate required fields before publishing
+      if (shouldPublish) {
+        if (!dto.displayName || !dto.displayName.trim()) {
+          throw new BadRequestException('Product must have a display name before publishing');
+        }
+        if (dto.price === undefined || dto.price === null || Number(dto.price) <= 0) {
+          throw new BadRequestException('Product must have a valid price before publishing');
+        }
+        if (!dto.images?.length) {
+          throw new BadRequestException('Product must have at least one image before publishing');
+        }
+        if (!dto.categoryId) {
+          throw new BadRequestException('Product must be assigned to a category before publishing');
+        }
+        const category = await tx.productCategory.findFirst({
+          where: { id: dto.categoryId, tenantId },
+        });
+        if (!category) {
+          throw new BadRequestException('Assigned category does not exist');
+        }
+      }
+
       return tx.productListing.create({
         data: {
           tenantId,
@@ -546,6 +568,7 @@ export class ProductsService {
             // Validate required fields before publishing
             const displayName = dto.displayName || existing.displayName;
             const price = dto.price ?? existing.price;
+            const categoryId = dto.categoryId || existing.categoryId;
 
             if (!displayName || !displayName.trim()) {
               throw new BadRequestException('Product must have a display name before publishing');
@@ -555,6 +578,16 @@ export class ProductsService {
             }
             if (!existing.images?.length && !dto.images?.length) {
               throw new BadRequestException('Product must have at least one image before publishing');
+            }
+            if (!categoryId) {
+              throw new BadRequestException('Product must be assigned to a category before publishing');
+            }
+            // Verify category exists and belongs to this tenant
+            const category = await tx.productCategory.findFirst({
+              where: { id: categoryId, tenantId },
+            });
+            if (!category) {
+              throw new BadRequestException('Assigned category does not exist');
             }
 
             updateData.publishedAt = new Date();

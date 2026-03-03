@@ -5,7 +5,7 @@ import Stripe from 'stripe';
 export class StripeService {
   private readonly stripe: Stripe | null;
   private readonly logger = new Logger(StripeService.name);
-  private readonly mockMode = process.env['MOCK_EXTERNAL_SERVICES'] === 'true';
+  private readonly mockMode = process.env['MOCK_PAYMENTS'] === 'true';
 
   constructor() {
     const secretKey = process.env['STRIPE_SECRET_KEY'];

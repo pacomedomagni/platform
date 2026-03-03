@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Upload, X, Loader2, Save } from 'lucide-react';
 import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
+import { unwrapJson } from '@/lib/admin-fetch';
 
 interface Category {
   id: string;
@@ -72,7 +73,7 @@ export default function EditProductPage() {
       const headers = getHeaders();
       const res = await fetch('/api/v1/store/categories', { headers });
       if (res.ok) {
-        const data = await res.json();
+        const data = unwrapJson(await res.json());
         setCategories(Array.isArray(data) ? data : data.data ?? []);
       }
     } catch {
@@ -95,7 +96,7 @@ export default function EditProductPage() {
         throw new Error('Failed to load product');
       }
 
-      const product: Product = await res.json();
+      const product: Product = unwrapJson(await res.json());
 
       setDisplayName(product.displayName || '');
       setSlug(product.slug || '');
@@ -147,7 +148,7 @@ export default function EditProductPage() {
           throw new Error(`Failed to upload ${files[i].name}`);
         }
 
-        const data = await res.json();
+        const data = unwrapJson(await res.json());
         setImages((prev) => [...prev, data.url]);
         setIsDirty(true);
       } catch (err: any) {
@@ -217,7 +218,7 @@ export default function EditProductPage() {
       });
 
       if (!res.ok) {
-        const errData = await res.json().catch(() => null);
+        const errData = unwrapJson(await res.json().catch(() => null));
         throw new Error(errData?.message || 'Failed to update product');
       }
 

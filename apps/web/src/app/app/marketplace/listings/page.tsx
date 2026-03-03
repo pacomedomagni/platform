@@ -15,6 +15,7 @@ import {
   Power,
   Upload,
 } from 'lucide-react';
+import { unwrapJson } from '@/lib/admin-fetch';
 
 interface Connection {
   id: string;
@@ -70,7 +71,7 @@ export default function MarketplaceListingsPage() {
         credentials: 'include',
       });
       if (connectionsRes.ok) {
-        const connectionsData = await connectionsRes.json();
+        const connectionsData = unwrapJson(await connectionsRes.json());
         setConnections(connectionsData);
       }
 
@@ -87,7 +88,7 @@ export default function MarketplaceListingsPage() {
         credentials: 'include',
       });
       if (listingsRes.ok) {
-        const listingsData = await listingsRes.json();
+        const listingsData = unwrapJson(await listingsRes.json());
         setListings(listingsData);
       }
     } catch (error) {
@@ -116,7 +117,7 @@ export default function MarketplaceListingsPage() {
         toast({ title: 'Success', description: 'Listing published successfully!' });
         loadData();
       } else {
-        const error = await res.json();
+        const error = unwrapJson(await res.json());
         toast({ title: 'Error', description: error.error || 'Failed to publish listing', variant: 'destructive' });
       }
     } catch (error) {
@@ -144,7 +145,7 @@ export default function MarketplaceListingsPage() {
         toast({ title: 'Success', description: 'Listing ended successfully' });
         loadData();
       } else {
-        const error = await res.json();
+        const error = unwrapJson(await res.json());
         toast({ title: 'Error', description: error.error || 'Failed to end listing', variant: 'destructive' });
       }
     } catch (error) {
@@ -165,7 +166,7 @@ export default function MarketplaceListingsPage() {
         toast({ title: 'Success', description: 'Inventory synced successfully' });
         loadData();
       } else {
-        const error = await res.json();
+        const error = unwrapJson(await res.json());
         toast({ title: 'Error', description: error.error || 'Failed to sync inventory', variant: 'destructive' });
       }
     } catch (error) {
@@ -194,7 +195,7 @@ export default function MarketplaceListingsPage() {
       if (res.ok) {
         setListings(listings.filter((l) => l.id !== listingId));
       } else {
-        const error = await res.json();
+        const error = unwrapJson(await res.json());
         toast({ title: 'Error', description: error.error || 'Failed to delete listing', variant: 'destructive' });
       }
     } catch (error) {

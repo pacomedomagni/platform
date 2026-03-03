@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Card, Skeleton, toast } from '@platform/ui';
 import { DollarSign, ShoppingCart, Package, Activity, CheckCircle, Circle, ArrowRight, ExternalLink, Loader2, Rocket, X, Mail, FileText, Globe, Plus, CreditCard, Sparkles, Banknote, AlertTriangle, TrendingUp } from 'lucide-react';
 import Link from 'next/link';
+import { unwrapJson } from '@/lib/admin-fetch';
 
 interface DashboardData {
   totalRevenue: number;
@@ -40,9 +41,10 @@ interface DashboardData {
 const _locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
 
 function formatCurrency(amount: number): string {
+  const currency = (typeof window !== 'undefined' && localStorage.getItem('tenantCurrency')) || 'USD';
   return new Intl.NumberFormat(_locale, {
     style: 'currency',
-    currency: 'USD',
+    currency,
     minimumFractionDigits: 2,
   }).format(amount);
 }
@@ -108,7 +110,7 @@ export default function Dashboard() {
           return;
         }
         if (!res.ok) throw new Error('Failed to load dashboard');
-        const json = await res.json();
+        const json = unwrapJson(await res.json());
         setData(json);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'An error occurred');
@@ -247,7 +249,7 @@ export default function Dashboard() {
         },
       });
       if (!res.ok) {
-        const err = await res.json();
+        const err = unwrapJson(await res.json());
         toast({ title: 'Publish failed', description: err.message || 'Failed to publish store', variant: 'destructive' });
       } else {
         window.location.reload();

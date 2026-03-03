@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Plus, Package, Search } from 'lucide-react';
+import { unwrapJson } from '@/lib/admin-fetch';
 
 interface Product {
   id: string;
@@ -53,7 +54,7 @@ export default function ProductsPage() {
         throw new Error('Failed to fetch products');
       }
 
-      const data = await res.json();
+      const data = unwrapJson(await res.json());
       setProducts(data.data || data || []);
       if (data.pagination) {
         setPagination(data.pagination);
@@ -83,9 +84,10 @@ export default function ProductsPage() {
 
   const formatCurrency = (amount: number) => {
     const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
+    const currency = (typeof window !== 'undefined' && localStorage.getItem('tenantCurrency')) || 'USD';
     return new Intl.NumberFormat(locale, {
       style: 'currency',
-      currency: 'USD',
+      currency,
     }).format(amount);
   };
 
@@ -126,7 +128,7 @@ export default function ProductsPage() {
 
       {/* Error State */}
       {error && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-400">
           {error}
         </div>
       )}

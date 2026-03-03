@@ -6,6 +6,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { unwrapJson } from './admin-fetch';
 
 export interface StoreCurrency {
   id: string;
@@ -77,7 +78,7 @@ export const useCurrencyStore = create<CurrencyState>()(
             throw new Error('Failed to load currencies');
           }
 
-          const currencies: StoreCurrency[] = await response.json();
+          const currencies: StoreCurrency[] = unwrapJson(await response.json());
           const defaultCurrency = currencies.find((c) => c.isDefault) || currencies[0];
 
           set({
