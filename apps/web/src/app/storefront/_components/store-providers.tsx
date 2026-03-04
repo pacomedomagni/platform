@@ -3,7 +3,7 @@
  */
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useCartStore } from '../../../lib/cart-store';
 import { useAuthStore } from '../../../lib/auth-store';
 import { useCurrencyStore } from '../../../lib/currency-store';
@@ -11,14 +11,10 @@ import { useOnboardingStore } from '../../../lib/onboarding-store';
 import { ThemeProvider } from '../../../lib/theme';
 import { FontLoader } from '../../../lib/theme/font-loader';
 import { ThemeStyles } from '../../../lib/theme/theme-styles';
-
-// Get tenant ID from environment or context
-// In a real app, this would come from subdomain/domain/auth context
-const getTenantId = (): string => {
-  return process.env.NEXT_PUBLIC_TENANT_ID || 'default-tenant';
-};
+import { resolveTenantId } from '../../../lib/store-api';
 
 export function StoreProviders({ children }: { children: React.ReactNode }) {
+  const [tenantId, setTenantId] = useState<string | null>(null);
   const initCart = useCartStore((state) => state.initCart);
   const loadProfile = useAuthStore((state) => state.loadProfile);
   const token = useAuthStore((state) => state.token);
@@ -27,6 +23,8 @@ export function StoreProviders({ children }: { children: React.ReactNode }) {
   const fetchOnboardingStatus = useOnboardingStore((state) => state.fetchStatus);
 
   useEffect(() => {
+    resolveTenantId().then(setTenantId);
+
     // Initialize cart
     initCart();
 
@@ -46,7 +44,7 @@ export function StoreProviders({ children }: { children: React.ReactNode }) {
     }
   }, [isAuthenticated, fetchOnboardingStatus]);
 
-  const tenantId = getTenantId();
+  if (!tenantId) return null;
 
   return (
     <ThemeProvider

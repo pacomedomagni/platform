@@ -19,13 +19,13 @@ export default function DocTypeListPage() {
             setLoading(true);
             try {
                 // 1. Fetch Meta
-                const metaRes = await api.get(`/v1/meta/${docTypeName}`);
+                const metaRes = await api.get(`/v1/doc/meta/${docTypeName}`);
                 if (metaRes.data) {
                     setDocType(metaRes.data);
                 }
 
                 // 2. Fetch Data
-                const dataRes = await api.get(`/v1/${docTypeName}`);
+                const dataRes = await api.get(`/v1/doc/${docTypeName}`);
                 if (Array.isArray(dataRes.data)) {
                     setData(dataRes.data);
                 }

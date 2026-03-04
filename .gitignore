@@ -78,6 +78,7 @@ out
 /libs/db/prisma/migrations/*.sql
 prisma/dev.db
 prisma/dev.db-journal
+*.sql.bak
 
 # Environment Variables
 .env

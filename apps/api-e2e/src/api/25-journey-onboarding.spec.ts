@@ -162,6 +162,7 @@ describe('Journey: Merchant Onboarding', () => {
           categoryId: store.journeyCategoryId,
           description: 'A product for the E2E journey test',
           isPublished: true,
+          images: ['https://placehold.co/400x400'],
         },
         { headers: jHeaders() },
       );

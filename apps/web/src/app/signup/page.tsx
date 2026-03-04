@@ -9,6 +9,8 @@ import Link from 'next/link';
 import { Eye, EyeOff } from 'lucide-react';
 import { unwrapJson } from '@/lib/admin-fetch';
 
+const PLATFORM_DOMAIN = process.env.NEXT_PUBLIC_PLATFORM_DOMAIN || 'noslag.com';
+
 const signupSchema = z.object({
   businessName: z.string().min(2, 'Business name must be at least 2 characters').max(100),
   email: z.string().email('Invalid email address'),
@@ -323,7 +325,7 @@ export default function SignupPage() {
                     placeholder="my-store"
                   />
                   <span className="flex items-center rounded-r-lg border border-l-0 border-slate-300 bg-slate-50 px-4 text-sm text-slate-500">
-                    .noslag.com
+                    .{PLATFORM_DOMAIN}
                   </span>
                 </div>
                 {form.formState.errors.subdomain && (
@@ -433,7 +435,7 @@ export default function SignupPage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-slate-500">Store URL</span>
-                  <span className="text-sm font-medium">{form.watch('subdomain')}.noslag.com</span>
+                  <span className="text-sm font-medium">{form.watch('subdomain')}.{PLATFORM_DOMAIN}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-slate-500">Payment Provider</span>

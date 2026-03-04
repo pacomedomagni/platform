@@ -27,7 +27,7 @@ export function ImageGallery({ images, alt }: { images: string[]; alt: string })
         <div className="flex gap-2 overflow-x-auto pb-1">
           {images.map((image, index) => (
             <button
-              key={index}
+              key={image}
               type="button"
               onClick={() => setSelectedIndex(index)}
               className={`flex-shrink-0 h-16 w-16 rounded-lg overflow-hidden border-2 transition-colors ${

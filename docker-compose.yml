@@ -86,13 +86,34 @@ services:
     restart: always
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://noslag:noslag_password@noslag_postgres:5432/noslag_db?schema=public}
-      APP_DATABASE_URL: ${APP_DATABASE_URL:-postgresql://app_user:app_password@noslag_postgres:5432/noslag_db?schema=public}
+      APP_DATABASE_URL: ${APP_DATABASE_URL:-postgresql://noslag:noslag_password@noslag_postgres:5432/noslag_db?schema=public}
+      REDIS_HOST: noslag_redis
+      REDIS_PORT: "6379"
       REDIS_URL: ${REDIS_URL:-redis://noslag_redis:6379}
       KEYCLOAK_JWKS_URI: ${KEYCLOAK_JWKS_URI:-http://noslag_keycloak:8080/realms/noslag/protocol/openid-connect/certs}
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-http://localhost:8080/realms/noslag}
       PORT: ${PORT:-3000}
-      NODE_ENV: ${NODE_ENV:-production}
+      NODE_ENV: ${NODE_ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      JWT_SECRET: ${JWT_SECRET:-local-dev-jwt-secret-change-in-production}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-local-dev-encryption-key-change-in-production}
+      ALLOW_TENANT_HEADER: "true"
+      S3_ENDPOINT: http://noslag_minio:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: noslag-uploads
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-minioadmin}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
+      DOMAIN: ${DOMAIN:-noslag.com}
+      MOCK_PAYMENTS: "true"
+      SENDGRID_WEBHOOK_VERIFICATION_KEY: ${SENDGRID_WEBHOOK_VERIFICATION_KEY:-local-dev-placeholder}
+      PROVISION_API_KEY: ${PROVISION_API_KEY:-local-dev-provision-key}
+      ENABLE_DEV_PASSWORD_LOGIN: "true"
+      MOCK_EXTERNAL_SERVICES: "true"
+      EBAY_APP_ID: mock-ebay-app-id
+      EBAY_CERT_ID: mock-ebay-cert-id
+      EBAY_RU_NAME: mock-ebay-ru-name
+      EBAY_SANDBOX: "true"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.noslag-api.rule=Host(`api.localhost`) || PathPrefix(`/api`)"
@@ -130,6 +151,9 @@ services:
     restart: always
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost/api/v1}
+      API_INTERNAL_URL: http://noslag_api:3000
+    ports:
+      - "127.0.0.1:4200:3000"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.noslag-web.rule=Host(`localhost`)"

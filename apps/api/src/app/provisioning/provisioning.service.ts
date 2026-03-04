@@ -105,7 +105,6 @@ export class ProvisioningService implements OnModuleDestroy {
     });
 
     // Start async provisioning
-    // In production, this would be a queue job. For now, we run it in background.
     this.provisionTenantAsync(tenant.id, dto).catch((err) => {
       this.logger.error(`Provisioning failed for tenant ${tenant.id}: ${err.message}`);
     });

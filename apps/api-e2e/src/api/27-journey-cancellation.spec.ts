@@ -17,7 +17,7 @@ describe('Journey: Order Cancellation & Refund', () => {
       try {
         const prodRes = await axios.post(
           '/store/admin/products/simple',
-          { name: 'Journey Cancel Product', price: 19.99, isPublished: true },
+          { name: 'Journey Cancel Product', price: 19.99, isPublished: true, images: ['https://placehold.co/400x400'] },
           { headers: adminHeaders() },
         );
         if (prodRes.status === 201) {

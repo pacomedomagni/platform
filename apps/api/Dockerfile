@@ -6,7 +6,7 @@ WORKDIR /app
 COPY package*.json ./
 COPY .npmrc* ./
 
-# Install dependencies (including dev dependencies for building)
+# Install all dependencies (dev needed for build)
 RUN npm install
 
 ENV NX_DAEMON=false
@@ -18,38 +18,32 @@ COPY . .
 RUN npx prisma generate
 
 # Build the API
-# We assume the machine context has the Nx CLI available via npx
 RUN npx nx build api --configuration=production
+
+# Note: We keep full node_modules because npm prune can break hoisted deps
+# in monorepo setups. The webpack bundle handles tree-shaking for code.
 
 # --- Production Stage ---
 FROM node:20-alpine
 
 WORKDIR /app
 
-# Install production dependencies only (optional for optimization, but for now we keep it simple)
-# In valid monorepo setups, we might just copy the node_modules from builder or prune.
-# For simplicity in this Phase 1 check, we'll carry over the builder's modules 
-# or reinstall only prod. Let's just reinstall prod to keep image small.
-COPY package*.json ./
-RUN npm install --omit=dev
+ENV NODE_ENV=production
 
-# Copy Prisma schema and generate client again (needed for native binaries on Alpine)
-COPY prisma ./prisma
+# Copy pruned node_modules from builder (has all runtime deps)
+COPY --from=builder /app/node_modules ./node_modules
+
+# Copy Prisma schema and regenerate client for Alpine native binaries
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 RUN npx prisma generate
 
 # Copy built artifact
 COPY --from=builder /app/dist/apps/api ./dist/apps/api
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
-
-# Validation: Check if main.js exists
-RUN ls -la dist/apps/api
 
 # Run as non-root user
 USER node
 
-# Expose port
 EXPOSE 3000
 
-# Start command
 CMD ["node", "dist/apps/api/main.js"]

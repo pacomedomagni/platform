@@ -59,6 +59,17 @@ export class CheckoutService {
       return this.mapOrderToCheckoutResponse(existingOrder, clientSecret);
     }
 
+    // Clear cartId from any cancelled orders to avoid unique constraint conflict
+    // (e.g. customer cancelled then re-ordered using the same cart)
+    await this.prisma.order.updateMany({
+      where: {
+        cartId: dto.cartId,
+        tenantId,
+        status: 'CANCELLED',
+      },
+      data: { cartId: null },
+    });
+
     // Run database operations inside a transaction; Stripe call stays outside
     const txResult = await this.prisma.$transaction(async (tx) => {
       // PAY-3: Lock cart row to prevent TOCTOU race

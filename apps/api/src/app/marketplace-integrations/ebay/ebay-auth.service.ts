@@ -165,6 +165,17 @@ export class EbayAuthService implements OnModuleDestroy {
    * Exchange authorization code for tokens
    */
   private async exchangeCodeForTokens(code: string) {
+    // In mock mode, return fake tokens instead of calling real eBay API
+    if (process.env.MOCK_EXTERNAL_SERVICES === 'true') {
+      this.logger.log('[MOCK] Returning mock OAuth tokens');
+      return {
+        access_token: `mock_access_token_${Date.now()}`,
+        refresh_token: `mock_refresh_token_${Date.now()}`,
+        expires_in: 7200,
+        token_type: 'Bearer',
+      };
+    }
+
     const appId = process.env['EBAY_APP_ID'];
     const certId = process.env['EBAY_CERT_ID'];
     const ruName = process.env['EBAY_RU_NAME'];

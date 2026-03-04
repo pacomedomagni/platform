@@ -6,20 +6,14 @@
 import { themesApi } from '../api/themes';
 import type { Theme, CreateThemeDto, UpdateThemeDto } from '../theme/types';
 import { sanitizeCSS } from '../theme/theme-engine';
-
-const getCurrentTenantId = (): string => {
-  if (typeof window !== 'undefined') {
-    return localStorage.getItem('tenantId') || '';
-  }
-  return '';
-};
+import { resolveTenantId } from '../store-api';
 
 class ThemeService {
   /**
    * Get all themes for current tenant
    */
   async getAllThemes(): Promise<Theme[]> {
-    const tenantId = getCurrentTenantId();
+    const tenantId = await resolveTenantId();
     return themesApi.getThemes(tenantId);
   }
 
@@ -28,7 +22,7 @@ class ThemeService {
    */
   async getActiveTheme(): Promise<Theme | null> {
     try {
-      const tenantId = getCurrentTenantId();
+      const tenantId = await resolveTenantId();
       return await themesApi.getActiveTheme(tenantId);
     } catch (error) {
       console.error('No active theme found:', error);
@@ -40,7 +34,7 @@ class ThemeService {
    * Get theme by ID
    */
   async getTheme(id: string): Promise<Theme> {
-    const tenantId = getCurrentTenantId();
+    const tenantId = await resolveTenantId();
     return themesApi.getTheme(id, tenantId);
   }
 
@@ -48,7 +42,7 @@ class ThemeService {
    * Create new theme
    */
   async createTheme(data: Partial<CreateThemeDto>): Promise<Theme> {
-    const tenantId = getCurrentTenantId();
+    const tenantId = await resolveTenantId();
     const createData: CreateThemeDto = {
       name: data.name || 'New Theme',
       description: data.description,
@@ -66,7 +60,7 @@ class ThemeService {
    * Update theme
    */
   async updateTheme(id: string, data: Partial<Theme>): Promise<Theme> {
-    const tenantId = getCurrentTenantId();
+    const tenantId = await resolveTenantId();
     return themesApi.updateTheme(id, tenantId, data);
   }
 
@@ -74,7 +68,7 @@ class ThemeService {
    * Delete theme
    */
   async deleteTheme(id: string): Promise<void> {
-    const tenantId = getCurrentTenantId();
+    const tenantId = await resolveTenantId();
     return themesApi.deleteTheme(id, tenantId);
   }
 
@@ -82,7 +76,7 @@ class ThemeService {
    * Activate theme
    */
   async activateTheme(id: string): Promise<Theme> {
-    const tenantId = getCurrentTenantId();
+    const tenantId = await resolveTenantId();
     return themesApi.activateTheme(id, tenantId);
   }
 
@@ -93,7 +87,7 @@ class ThemeService {
     id: string,
     options?: { name?: string; description?: string }
   ): Promise<Theme> {
-    const tenantId = getCurrentTenantId();
+    const tenantId = await resolveTenantId();
     const originalTheme = await this.getTheme(id);
     const newName = options?.name || `${originalTheme.name} (Copy)`;
 
@@ -104,7 +98,8 @@ class ThemeService {
    * Get preset themes
    */
   async getPresets(): Promise<Theme[]> {
-    const presets = await themesApi.getPresets();
+    const tenantId = await resolveTenantId();
+    const presets = await themesApi.getPresets(tenantId);
     return presets as unknown as Theme[];
   }
 }

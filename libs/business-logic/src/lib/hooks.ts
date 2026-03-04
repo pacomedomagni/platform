@@ -1668,8 +1668,31 @@ export class BusinessLogicService {
         return new Date(`${value}T00:00:00.000Z`);
     }
 
+    private static readonly ALLOWED_DOC_TYPES = new Set([
+        'Sales Order',
+        'Sales Order Item',
+        'Purchase Order',
+        'Purchase Order Item',
+        'Delivery Note',
+        'Delivery Note Item',
+        'Purchase Receipt',
+        'Purchase Receipt Item',
+        'Sales Invoice',
+        'Sales Invoice Item',
+        'Purchase Invoice',
+        'Purchase Invoice Item',
+        'Payment Entry',
+        'Journal Entry',
+        'Quotation',
+        'Bank Reconciliation',
+        'Invoice',
+    ]);
+
     private toTableName(docType: string): string {
-        const compact = (docType ?? '').replace(/\s+/g, '');
+        if (!BusinessLogicService.ALLOWED_DOC_TYPES.has(docType)) {
+            throw new Error(`Invalid document type: ${docType}`);
+        }
+        const compact = docType.replace(/\s+/g, '');
         return `tab${compact}`;
     }
 

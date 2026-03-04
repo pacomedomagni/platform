@@ -24,7 +24,7 @@ function buildHeaders(tenantId: string): HeadersInit {
 
   // Add auth token for admin operations
   if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('admin_token') || localStorage.getItem('access_token');
+    const token = localStorage.getItem('access_token');
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
@@ -81,8 +81,10 @@ async function getTheme(id: string, tenantId: string): Promise<Theme> {
 /**
  * Get available theme presets
  */
-async function getPresets(): Promise<ThemePreset[]> {
-  const response = await fetch(`${BASE_URL}/themes/presets`);
+async function getPresets(tenantId: string): Promise<ThemePreset[]> {
+  const response = await fetch(`${BASE_URL}/themes/presets`, {
+    headers: buildHeaders(tenantId),
+  });
 
   return handleResponse<ThemePreset[]>(response);
 }
@@ -90,8 +92,10 @@ async function getPresets(): Promise<ThemePreset[]> {
 /**
  * Get a specific preset by type
  */
-async function getPreset(type: string): Promise<ThemePreset> {
-  const response = await fetch(`${BASE_URL}/themes/presets/${type}`);
+async function getPreset(type: string, tenantId: string): Promise<ThemePreset> {
+  const response = await fetch(`${BASE_URL}/themes/presets/${type}`, {
+    headers: buildHeaders(tenantId),
+  });
 
   return handleResponse<ThemePreset>(response);
 }

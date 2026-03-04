@@ -266,21 +266,12 @@ export default function StorefrontLayout({ children }: { children: React.ReactNo
                 <address className="not-italic">
                   <p>
                     <a
-                      href="mailto:sales@noslag.com"
+                      href="mailto:support@noslag.com"
                       className="hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded"
                     >
-                      sales@noslag.com
+                      support@noslag.com
                     </a>
                   </p>
-                  <p>
-                    <a
-                      href="tel:+14150000000"
-                      className="hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded"
-                    >
-                      +1 (415) 000-0000
-                    </a>
-                  </p>
-                  <p>Dubai · Lagos · London</p>
                 </address>
               </div>
             </div>

@@ -11,7 +11,7 @@ describe('Marketplace Endpoints', () => {
       try {
         const prodRes = await axios.post(
           '/store/admin/products/simple',
-          { name: 'Marketplace Test Product', price: 24.99, isPublished: true },
+          { name: 'Marketplace Test Product', price: 24.99, isPublished: true, images: ['https://placehold.co/400x400'] },
           { headers: adminHeaders() },
         );
         if (prodRes.status === 201) {

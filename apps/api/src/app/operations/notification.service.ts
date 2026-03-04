@@ -116,11 +116,6 @@ export class NotificationService implements OnModuleInit, OnModuleDestroy {
   // Create Notifications
   // ==========================================
 
-  // TODO (M-NT-4): Email notification integration is planned. When implemented,
-  // the `create` method should check user notification preferences and optionally
-  // dispatch an email via the EmailModule for high-priority or urgent notifications.
-  // This will require injecting EmailService and adding a NotificationPreference model.
-
   /**
    * Create a notification for a user
    */

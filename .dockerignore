@@ -69,7 +69,6 @@ docs
 .eslintcache
 .prettierrc
 prettier.config.js
-eslint.config.mjs
 jest.config.ts
 jest.preset.js
 tsconfig.spec.json

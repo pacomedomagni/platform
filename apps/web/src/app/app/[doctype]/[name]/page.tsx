@@ -20,14 +20,14 @@ export default function DocTypeFormPage() {
             setLoading(true);
             try {
                 // 1. Fetch Meta
-                const metaRes = await api.get(`/v1/meta/${docTypeName}`);
+                const metaRes = await api.get(`/v1/doc/meta/${docTypeName}`);
                 if (metaRes.data) {
                     setDocType(metaRes.data);
                 }
 
                 // 2. Fetch Data if not new
                 if (docName !== 'new' && docName !== 'New DocType') {
-                    const dataRes = await api.get(`/v1/${docTypeName}/${docName}`);
+                    const dataRes = await api.get(`/v1/doc/${docTypeName}/${docName}`);
                     setData(dataRes.data);
                 } else {
                     setData({});
@@ -46,9 +46,9 @@ export default function DocTypeFormPage() {
     const handleSave = async (formData: any) => {
         try {
             if (docName === 'new') {
-                await api.post(`/v1/${docTypeName}`, formData);
+                await api.post(`/v1/doc/${docTypeName}`, formData);
             } else {
-                await api.put(`/v1/${docTypeName}/${docName}`, formData);
+                await api.put(`/v1/doc/${docTypeName}/${docName}`, formData);
             }
             router.push(`/app/${docTypeName}`);
         } catch (e) {
@@ -59,14 +59,14 @@ export default function DocTypeFormPage() {
     };
 
     const handleSubmit = async () => {
-        await api.put(`/v1/${docTypeName}/${docName}/submit`);
-        const dataRes = await api.get(`/v1/${docTypeName}/${docName}`);
+        await api.put(`/v1/doc/${docTypeName}/${docName}/submit`);
+        const dataRes = await api.get(`/v1/doc/${docTypeName}/${docName}`);
         setData(dataRes.data);
     };
 
     const handleCancel = async () => {
-        await api.put(`/v1/${docTypeName}/${docName}/cancel`);
-        const dataRes = await api.get(`/v1/${docTypeName}/${docName}`);
+        await api.put(`/v1/doc/${docTypeName}/${docName}/cancel`);
+        const dataRes = await api.get(`/v1/doc/${docTypeName}/${docName}`);
         setData(dataRes.data);
     };
 

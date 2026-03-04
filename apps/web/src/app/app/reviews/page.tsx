@@ -323,7 +323,7 @@ export default function AdminReviewsPage() {
                         <div className="flex gap-2">
                           {review.images.slice(0, 4).map((image, index) => (
                             <div
-                              key={index}
+                              key={image}
                               className="h-16 w-16 overflow-hidden rounded-lg border border-slate-200"
                             >
                               <img

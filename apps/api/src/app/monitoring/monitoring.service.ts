@@ -56,7 +56,6 @@ export class MonitoringService {
       stockReservations: stockMetrics,
       systemHealth,
       performance: {
-        // TODO: Implement performance metrics from logging
         avgStockLockWaitTime: undefined,
         avgCartOperationDuration: undefined,
         avgCheckoutDuration: undefined,

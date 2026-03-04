@@ -49,7 +49,7 @@ describe('Journey: Purchase Lifecycle', () => {
       try {
         const prodRes = await axios.post(
           '/store/admin/products/simple',
-          { name: 'Journey Test Product', price: 29.99, isPublished: true },
+          { name: 'Journey Test Product', price: 29.99, isPublished: true, images: ['https://placehold.co/400x400'] },
           { headers: adminHeaders() },
         );
         if (prodRes.status === 201) {

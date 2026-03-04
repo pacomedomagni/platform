@@ -139,6 +139,7 @@ describe('Products & Categories', () => {
           isPublished: true,
           isFeatured: false,
           categoryId: store.categoryIds[0],
+          images: ['https://placehold.co/400x400'],
         },
         { headers: adminHeaders() }
       );
@@ -163,6 +164,7 @@ describe('Products & Categories', () => {
           isPublished: true,
           isFeatured: true,
           categoryId: store.categoryIds[0],
+          images: ['https://placehold.co/400x400'],
         },
         { headers: adminHeaders() }
       );

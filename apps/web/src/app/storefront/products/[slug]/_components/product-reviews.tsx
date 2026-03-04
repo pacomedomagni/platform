@@ -331,7 +331,7 @@ function ReviewCard({ review, onVote, hasVoted }: ReviewCardProps) {
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
               {displayImages.map((image, index) => (
                 <div
-                  key={index}
+                  key={image}
                   className="aspect-square overflow-hidden rounded-lg border border-slate-200"
                 >
                   <img

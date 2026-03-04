@@ -17,10 +17,6 @@ const Decimal = Prisma.Decimal;
 /**
  * eBay Order Sync Service
  * Handles syncing orders from eBay, querying synced orders, and pushing fulfillments back to eBay.
- *
- * TODO: Implement eBay Platform Notifications (webhook/push-based order sync)
- * instead of relying solely on polling. This would reduce latency and API calls.
- * See: https://developer.ebay.com/marketplace-account-deletion
  */
 @Injectable()
 export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
@@ -235,10 +231,6 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
               paymentDate,
               itemsData: lineItems,
               syncStatus: SyncStatus.SYNCED,
-              // TODO (L6): Map eBay orders to local Order records.
-              // When a marketplace order is created, a corresponding local Order should be
-              // created (or linked) so that fulfillment, invoicing, and reporting workflows
-              // can operate on marketplace orders seamlessly.
             },
             update: {
               externalStatus,

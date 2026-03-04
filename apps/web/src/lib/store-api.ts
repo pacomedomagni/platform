@@ -16,7 +16,7 @@ export async function resolveTenantId(): Promise<string> {
   if (_resolvedTenantId) return _resolvedTenantId;
 
   if (typeof window === 'undefined') {
-    return process.env.NEXT_PUBLIC_TENANT_ID || 'default';
+    return 'default';
   }
 
   // Check sessionStorage
@@ -40,9 +40,7 @@ export async function resolveTenantId(): Promise<string> {
     // Resolve API unavailable — fall through to defaults
   }
 
-  // Fallback: env var or localStorage (admin panel / dev)
-  const envTenant = process.env.NEXT_PUBLIC_TENANT_ID;
-  if (envTenant) return envTenant;
+  // Fallback: localStorage (admin panel / dev)
   const storedTenant = localStorage.getItem('tenantId');
   if (storedTenant) return storedTenant;
 

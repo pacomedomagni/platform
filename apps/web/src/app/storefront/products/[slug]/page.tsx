@@ -13,14 +13,6 @@ import {
   LocalizedProductName,
   LocalizedProductDescription,
 } from './_components/localized-product-info';
-/**
- * Architectural note: This server component calls the storefront API using
- * NEXT_PUBLIC_TENANT_ID. In production, each deployment (or subdomain) should
- * have its own NEXT_PUBLIC_TENANT_ID configured at build/deploy time, or the
- * page should use incoming request headers (e.g. Host) for tenant resolution
- * via Next.js middleware. The current approach works for single-tenant
- * deployments but does not support runtime multi-tenancy without middleware.
- */
 import { productsApi } from '@/lib/store-api';
 import {
   generateProductSchema,

@@ -11,7 +11,7 @@ export class EbayClientService {
   private readonly logger = new Logger(EbayClientService.name);
   private readonly MAX_RETRIES = 3;
   private readonly BASE_DELAY_MS = 1000;
-  private readonly mockMode = false; // Marketplace always uses real APIs (sandbox via EBAY_SANDBOX)
+  private readonly mockMode = process.env.MOCK_EXTERNAL_SERVICES === 'true';
 
   /**
    * Execute an eBay API call with automatic rate limit (HTTP 429) retry handling.

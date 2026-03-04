@@ -173,7 +173,6 @@ export const useAuthStore = create<AuthState>()(
 
         try {
           const response = await authApi.changePassword(currentPassword, newPassword);
-          // H3: If the backend returns a new token (with updated tokenVersion), update the stored token
           if (response && typeof response === 'object' && 'token' in response && (response as any).token) {
             const newToken = (response as any).token;
             localStorage.setItem('customer_token', newToken);

@@ -53,7 +53,6 @@ import { DomainResolverModule } from './storefront/domain-resolver/domain-resolv
     }),
     DbModule,
     AuthModule,
-    MetaModule,
     BusinessLogicModule,
     QueueModule.forRoot({
       connection: {
@@ -85,6 +84,9 @@ import { DomainResolverModule } from './storefront/domain-resolver/domain-resolv
     WorkersModule,
     MonitoringModule,
     OnboardingModule,
+    // MetaModule MUST be last — its UniversalController has catch-all routes
+    // (@Get(':doctype')) that would shadow all other routes if registered first
+    MetaModule,
   ],
   controllers: [AppController, InventoryController, ReportsController],
   providers: [

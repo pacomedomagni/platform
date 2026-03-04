@@ -7,6 +7,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { unwrapJson } from './admin-fetch';
+import { resolveTenantId } from './store-api';
 
 export interface StoreCurrency {
   id: string;
@@ -34,25 +35,6 @@ interface CurrencyState {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
 
-function getTenantId(): string {
-  if (typeof window === 'undefined') return process.env.NEXT_PUBLIC_TENANT_ID || 'default';
-
-  // 1. Check sessionStorage for resolved tenant ID (set by store-api.ts resolveTenantId)
-  const cached = sessionStorage.getItem('resolved_tenant_id');
-  if (cached) return cached;
-
-  // 2. Fall back to env var
-  if (process.env.NEXT_PUBLIC_TENANT_ID) return process.env.NEXT_PUBLIC_TENANT_ID;
-
-  // 3. Fall back to subdomain extraction
-  const hostname = window.location.hostname;
-  const parts = hostname.split('.');
-  if (parts.length > 2) {
-    return parts[0];
-  }
-  return 'default';
-}
-
 export const useCurrencyStore = create<CurrencyState>()(
   persist(
     (set, get) => ({
@@ -67,10 +49,11 @@ export const useCurrencyStore = create<CurrencyState>()(
         set({ isLoading: true, error: null });
 
         try {
+          const tenantId = await resolveTenantId();
           const response = await fetch(`${API_BASE}/v1/store/currencies`, {
             headers: {
               'Content-Type': 'application/json',
-              'x-tenant-id': getTenantId(),
+              'x-tenant-id': tenantId,
             },
           });
 

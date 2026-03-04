@@ -10,6 +10,7 @@ COPY .npmrc* ./
 RUN npm install
 
 ENV NX_DAEMON=false
+ENV NEXT_TELEMETRY_DISABLED=1
 
 # Copy source code
 COPY . .
@@ -21,20 +22,19 @@ RUN npx nx build web --configuration=production
 FROM node:20-alpine AS runner
 WORKDIR /app
 
-ENV NODE_ENV production
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
 
-# Copy built artifacts from builder
-# Next.js via Nx output is usually in dist/apps/web
-COPY --from=builder /app/dist/apps/web/public ./public
-COPY --from=builder /app/dist/apps/web/.next ./.next
-COPY --from=builder /app/dist/apps/web/package.json ./package.json
+# Copy public assets
+COPY --from=builder /app/apps/web/public ./public
 
-# Install production dependencies (Next.js needs them to run the server)
-RUN npm install --omit=dev
+# Copy Next.js standalone build
+COPY --from=builder /app/apps/web/.next/standalone ./
+COPY --from=builder /app/apps/web/.next/static ./apps/web/.next/static
 
 # Run as non-root user
 USER node
 
 EXPOSE 3000
 
-CMD ["npm", "start"]
+CMD ["node", "apps/web/server.js"]

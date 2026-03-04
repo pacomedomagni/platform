@@ -15,7 +15,7 @@ export class EbayStoreService {
   private readonly clientCache = new Map<string, { client: eBayApi; expiry: number }>();
   private readonly refreshLocks = new Map<string, Promise<any>>();
   private readonly TOKEN_BUFFER_MS = 60000; // Refresh 1 min before expiry
-  private readonly mockMode = false; // Marketplace always uses real APIs (sandbox via EBAY_SANDBOX)
+  private readonly mockMode = process.env.MOCK_EXTERNAL_SERVICES === 'true';
 
   constructor(
     private prisma: PrismaService,

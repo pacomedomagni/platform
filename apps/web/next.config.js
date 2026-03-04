@@ -10,17 +10,19 @@ const nextConfig = {
   // Use this to set Nx-specific options
   // See: https://nx.dev/recipes/next/next-config-setup
   nx: {},
+  output: 'standalone',
   // Exclude Nx packages from Turbopack bundling
   serverExternalPackages: ['@nx/devkit', 'nx'],
   async rewrites() {
+    const apiUrl = process.env.API_INTERNAL_URL || 'http://localhost:3000';
     return [
       {
         source: '/api/v1/:path*',
-        destination: 'http://localhost:3000/api/v1/:path*',
+        destination: `${apiUrl}/api/v1/:path*`,
       },
       {
         source: '/api/:path*',
-        destination: 'http://localhost:3000/api/v1/:path*',
+        destination: `${apiUrl}/api/v1/:path*`,
       },
     ];
   },
