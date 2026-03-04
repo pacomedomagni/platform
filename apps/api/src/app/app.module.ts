@@ -1,5 +1,5 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
-import { APP_INTERCEPTOR, APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_INTERCEPTOR, APP_GUARD } from '@nestjs/core';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ClsModule } from 'nestjs-cls';
 import { DbModule } from '@platform/db';
@@ -25,6 +25,7 @@ import { MarketplaceIntegrationsModule } from './marketplace-integrations/market
 import { LoggerModule } from './common/logger';
 import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
 import { ResponseTransformInterceptor } from './common/interceptors/response-transform.interceptor';
+import { AllExceptionsFilter } from './common/filters';
 import { EmailWorker } from './workers/email.worker';
 import { WorkersModule } from './workers/workers.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
@@ -92,6 +93,11 @@ import { DomainResolverModule } from './storefront/domain-resolver/domain-resolv
   providers: [
     AppService,
     EmailWorker,
+    // Global exception filter — logs all unhandled errors via Pino → Loki
+    {
+      provide: APP_FILTER,
+      useClass: AllExceptionsFilter,
+    },
     // Global rate limiting guard (disabled in development/test to avoid per-endpoint @Throttle overrides)
     ...(process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test'
       ? []

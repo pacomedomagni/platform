@@ -169,6 +169,9 @@ services:
       SQUARE_ENVIRONMENT: ${SQUARE_ENVIRONMENT:-sandbox}
       # Seeder
       SYNC_CORE_DOCTYPES: "true"
+    labels:
+      - "logging=promtail"
+      - "environment=staging"
     ports:
       - "6000:3000"
     depends_on:
@@ -181,7 +184,7 @@ services:
       keycloak:
         condition: service_started
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/v1/health"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/api/v1/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -222,6 +225,48 @@ services:
     networks:
       - noslag
 
+  loki:
+    image: grafana/loki:2.9.4
+    container_name: noslag-stg-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki-config.yml
+    ports:
+      - "127.0.0.1:6100:3100"
+    volumes:
+      - ./docker/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - noslag_loki_data:/loki
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3100/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+    networks:
+      - noslag
+
+  promtail:
+    image: grafana/promtail:2.9.4
+    container_name: noslag-stg-promtail
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+      - ./docker/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      loki:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.15'
+    networks:
+      - noslag
+
 networks:
   noslag:
     driver: bridge
@@ -229,3 +274,4 @@ networks:
 volumes:
   noslag_postgres_data:
   noslag_minio_data:
+  noslag_loki_data:

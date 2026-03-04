@@ -29,10 +29,14 @@ export class SendGridWebhookController {
     const key = process.env['SENDGRID_WEBHOOK_VERIFICATION_KEY'];
     const env = process.env['NODE_ENV'];
 
-    if (!key && (env === 'production' || env === 'staging')) {
+    if (!key && env === 'production') {
       throw new Error(
-        'SENDGRID_WEBHOOK_VERIFICATION_KEY must be set in production/staging environments',
+        'SENDGRID_WEBHOOK_VERIFICATION_KEY must be set in production',
       );
+    }
+
+    if (!key && env === 'staging') {
+      this.logger.warn('SENDGRID_WEBHOOK_VERIFICATION_KEY not set — webhook signature verification disabled');
     }
 
     this.verificationKey = key || '';
