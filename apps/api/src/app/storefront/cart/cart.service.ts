@@ -176,15 +176,42 @@ export class CartService {
         throw new NotFoundException('Product not found');
       }
 
+      // Resolve variant if specified
+      let variant: { id: string; itemId: string | null; price: any; item?: { id: string; warehouseItemBalances: any[] } | null } | null = null;
+      if (dto.variantId) {
+        variant = await tx.productVariant.findFirst({
+          where: {
+            id: dto.variantId,
+            productListingId: dto.productId,
+            tenantId,
+          },
+          include: {
+            item: {
+              include: {
+                warehouseItemBalances: true,
+              },
+            },
+          },
+        });
+
+        if (!variant) {
+          throw new NotFoundException('Product variant not found');
+        }
+      }
+
+      // Determine which inventory item to use for stock checks
+      const stockItemId = variant?.item?.id || product.item.id;
+      const effectivePrice = variant?.price ?? product.price;
+
       // Acquire advisory lock to prevent concurrent stock modifications
-      const itemKey = `${tenantId}:${product.item.id}`;
+      const itemKey = `${tenantId}:${stockItemId}`;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${itemKey}))`;
 
       // Check available stock INSIDE transaction (after lock acquired)
       const balances = await tx.warehouseItemBalance.findMany({
         where: {
           tenantId,
-          itemId: product.item.id,
+          itemId: stockItemId,
         },
       });
 
@@ -193,11 +220,12 @@ export class CartService {
         0
       );
 
-      // Check if item already in cart
+      // Check if item already in cart (same product + same variant)
       const existingItem = await tx.cartItem.findFirst({
         where: {
           cartId,
           productId: dto.productId,
+          variantId: dto.variantId || null,
         },
       });
 
@@ -212,7 +240,6 @@ export class CartService {
       }
 
       // Create or update cart item atomically
-      // (avoids Prisma upsert issue with nullable variantId in compound unique)
       if (existingItem) {
         await tx.cartItem.update({
           where: { id: existingItem.id },
@@ -224,14 +251,15 @@ export class CartService {
             tenantId,
             cartId,
             productId: dto.productId,
+            variantId: dto.variantId || null,
             quantity: dto.quantity,
-            price: product.price,
+            price: effectivePrice,
           },
         });
       }
 
       // Reserve stock for this item
-      await this.reserveStock(tx, tenantId, product.item.id, dto.quantity);
+      await this.reserveStock(tx, tenantId, stockItemId, dto.quantity);
 
       // Recalculate cart totals
       await this.recalculateCartInTx(tx, cartId);
@@ -280,6 +308,11 @@ export class CartService {
               },
             },
           },
+          variant: {
+            include: {
+              item: true,
+            },
+          },
         },
       });
 
@@ -287,6 +320,8 @@ export class CartService {
         throw new NotFoundException('Cart item not found');
       }
 
+      // Use variant's inventory item if available
+      const stockItemId = (cartItem as any).variant?.item?.id || cartItem.product.item.id;
       const oldQuantity = cartItem.quantity;
 
       if (dto.quantity === 0) {
@@ -294,7 +329,7 @@ export class CartService {
         await this.releaseReservation(
           tx,
           tenantId,
-          cartItem.product.item.id,
+          stockItemId,
           oldQuantity
         );
         await tx.cartItem.delete({
@@ -302,14 +337,14 @@ export class CartService {
         });
       } else {
         // Acquire advisory lock to prevent concurrent stock modifications
-        const itemKey = `${tenantId}:${cartItem.product.item.id}`;
+        const itemKey = `${tenantId}:${stockItemId}`;
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${itemKey}))`;
 
         // Check stock (including current reservation)
         const balances = await tx.warehouseItemBalance.findMany({
           where: {
             tenantId,
-            itemId: cartItem.product.item.id,
+            itemId: stockItemId,
           },
         });
 
@@ -331,7 +366,7 @@ export class CartService {
         await this.updateReservation(
           tx,
           tenantId,
-          cartItem.product.item.id,
+          stockItemId,
           oldQuantity,
           dto.quantity
         );
@@ -377,6 +412,11 @@ export class CartService {
               item: true,
             },
           },
+          variant: {
+            include: {
+              item: true,
+            },
+          },
         },
       });
 
@@ -384,11 +424,12 @@ export class CartService {
         throw new NotFoundException('Cart item not found');
       }
 
-      // Release stock reservation
+      // Release stock reservation (use variant's inventory item if available)
+      const stockItemId = (cartItem as any).variant?.item?.id || cartItem.product.item.id;
       await this.releaseReservation(
         tx,
         tenantId,
-        cartItem.product.item.id,
+        stockItemId,
         cartItem.quantity
       );
 
@@ -1088,6 +1129,21 @@ export class CartService {
             },
           },
         },
+        variant: {
+          include: {
+            item: {
+              include: {
+                warehouseItemBalances: true,
+              },
+            },
+            attributes: {
+              include: {
+                attributeType: true,
+                attributeValue: true,
+              },
+            },
+          },
+        },
       },
       orderBy: { createdAt: 'asc' as const },
     },
@@ -1111,14 +1167,19 @@ export class CartService {
       id: cart.id,
       customerId: cart.customerId,
       sessionToken: cart.sessionToken,
-      items: cart.items.map((item) => {
-        const availableQty = item.product?.item?.warehouseItemBalances
-          ? item.product.item.warehouseItemBalances.reduce(
-              (sum: number, b: WarehouseItemBalance) => sum + Number(b.actualQty) - Number(b.reservedQty),
-              0
-            )
-          : 0;
-        const currentPrice = Number(item.product.price);
+      items: cart.items.map((item: any) => {
+        // Use variant's inventory item for stock if available, otherwise product's
+        const stockBalances = item.variant?.item?.warehouseItemBalances
+          || item.product?.item?.warehouseItemBalances
+          || [];
+        const availableQty = stockBalances.reduce(
+          (sum: number, b: WarehouseItemBalance) => sum + Number(b.actualQty) - Number(b.reservedQty),
+          0
+        );
+        // Use variant price if present, otherwise product price
+        const currentPrice = item.variant?.price != null
+          ? Number(item.variant.price)
+          : Number(item.product.price);
         const cartPrice = Number(item.price);
         const priceChanged = Math.abs(currentPrice - cartPrice) >= 0.01;
 
@@ -1128,7 +1189,7 @@ export class CartService {
             id: item.product.id,
             slug: item.product.slug,
             displayName: item.product.displayName,
-            price: currentPrice,
+            price: Number(item.product.price),
             compareAtPrice: item.product.compareAtPrice
               ? Number(item.product.compareAtPrice)
               : null,
@@ -1141,6 +1202,17 @@ export class CartService {
                 : 'in_stock',
             availableQuantity: availableQty > 0 ? availableQty : 0,
           },
+          ...(item.variant && {
+            variant: {
+              id: item.variant.id,
+              sku: item.variant.sku,
+              price: item.variant.price != null ? Number(item.variant.price) : null,
+              attributes: item.variant.attributes?.map((a: any) => ({
+                type: a.attributeType?.displayName || a.attributeType?.name,
+                value: a.attributeValue?.value,
+              })) || [],
+            },
+          }),
           quantity: item.quantity,
           unitPrice: cartPrice,
           totalPrice: cartPrice * item.quantity,

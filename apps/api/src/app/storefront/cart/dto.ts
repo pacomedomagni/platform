@@ -5,6 +5,10 @@ export class AddToCartDto {
   @IsUUID()
   productId: string;
 
+  @IsOptional()
+  @IsUUID()
+  variantId?: string;
+
   @IsInt()
   @Type(() => Number)
   @Min(1)

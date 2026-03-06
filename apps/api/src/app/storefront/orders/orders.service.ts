@@ -448,6 +448,7 @@ export class OrdersService {
             movementType: MovementType.RECEIPT,
             warehouseCode: warehouse.code,
             items,
+            postingDate: new Date().toISOString().split('T')[0],
             reference: `Cancellation of Order ${order.orderNumber}`,
             remarks: `Stock returned due to order cancellation`,
           },
@@ -519,6 +520,11 @@ export class OrdersService {
    */
   private async reverseGiftCardForOrder(tenantId: string, orderId: string) {
     try {
+      const existingRefund = await this.prisma.giftCardTransaction.findFirst({
+        where: { orderId, tenantId, type: 'refund' }
+      });
+      if (existingRefund) return; // Already reversed
+
       const gcTransaction = await this.prisma.giftCardTransaction.findFirst({
         where: { orderId, tenantId, type: 'redemption' },
         include: { giftCard: true },

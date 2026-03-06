@@ -120,6 +120,7 @@ export class CheckoutResponseDto {
     quantity: number;
     unitPrice: number;
     totalPrice: number;
+    imageUrl: string | null;
   }>;
   subtotal: number;
   shippingTotal: number;

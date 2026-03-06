@@ -41,8 +41,12 @@ async function handleResponse<T>(response: Response): Promise<T> {
     const errorData = await response.json().catch(() => ({}));
     throw new Error(errorData.message || errorData.error || `API error: ${response.statusText}`);
   }
-
-  return response.json();
+  const json = await response.json();
+  // Unwrap standardized { data, meta } envelope
+  if (json && typeof json === 'object' && 'data' in json && 'meta' in json) {
+    return json.data as T;
+  }
+  return json as T;
 }
 
 /**

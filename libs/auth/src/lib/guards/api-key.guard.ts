@@ -1,5 +1,6 @@
 import { Injectable, CanActivate, ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { timingSafeEqual } from 'crypto';
 
 export const API_KEY_HEADER = 'x-api-key';
 export const REQUIRE_API_KEY = 'requireApiKey';
@@ -54,7 +55,10 @@ export class ApiKeyGuard implements CanActivate {
       throw new UnauthorizedException('API key required');
     }
 
-    if (apiKey !== expectedApiKey) {
+    // Use timing-safe comparison to prevent timing attacks
+    const apiKeyBuf = Buffer.from(String(apiKey));
+    const expectedBuf = Buffer.from(expectedApiKey);
+    if (apiKeyBuf.length !== expectedBuf.length || !timingSafeEqual(apiKeyBuf, expectedBuf)) {
       throw new UnauthorizedException('Invalid API key');
     }
 

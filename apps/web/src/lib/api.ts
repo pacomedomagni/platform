@@ -41,7 +41,7 @@ api.interceptors.request.use((config) => {
     // Attach storefront session token if present
     const cartSession = localStorage.getItem('cart_session');
     if (cartSession) {
-      config.headers['x-session-token'] = cartSession;
+      config.headers['x-cart-session'] = cartSession;
     }
   }
   return config;

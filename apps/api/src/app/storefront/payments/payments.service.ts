@@ -145,6 +145,11 @@ export class PaymentsService {
                 item: true,
               },
             },
+            variant: {
+              include: {
+                item: true,
+              },
+            },
           },
         },
         cart: true,
@@ -372,9 +377,9 @@ export class PaymentsService {
       throw new Error(`No active warehouse found for tenant ${order.tenantId}`);
     }
 
-    // Prepare stock movement items
+    // Prepare stock movement items (use variant's inventory item if available)
     const items = order.items.map((orderItem: any) => ({
-      itemCode: orderItem.product.item.code,
+      itemCode: orderItem.variant?.item?.code || orderItem.product.item.code,
       quantity: orderItem.quantity,
       rate: Number(orderItem.unitPrice),
     }));
@@ -405,24 +410,26 @@ export class PaymentsService {
    * Uses raw SQL to prevent reservedQty from going negative
    */
   private async releaseStockReservations(order: any, warehouseId: string) {
-    for (const orderItem of order.items) {
-      const itemId = orderItem.product.item.id;
-      const tenantId = order.tenantId;
-      const qty = orderItem.quantity;
+    await this.prisma.$transaction(async (tx) => {
+      for (const orderItem of order.items) {
+        const itemId = orderItem.product.item.id;
+        const tenantId = order.tenantId;
+        const qty = orderItem.quantity;
 
-      // Acquire advisory lock to prevent concurrent modification
-      const itemKey = `${tenantId}:${warehouseId}:${itemId}`;
-      await this.prisma.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${itemKey}))`;
+        // Acquire advisory lock to prevent concurrent modification
+        const itemKey = `${tenantId}:${warehouseId}:${itemId}`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${itemKey}))`;
 
-      // Safe decrement: clamp to 0 to prevent negative reservedQty
-      await this.prisma.$executeRaw`
-        UPDATE warehouse_item_balances
-        SET "reservedQty" = GREATEST("reservedQty" - ${qty}, 0)
-        WHERE "tenantId" = ${tenantId}
-          AND "itemId" = ${itemId}
-          AND "warehouseId" = ${warehouseId}
-      `;
-    }
+        // Safe decrement: clamp to 0 to prevent negative reservedQty
+        await tx.$executeRaw`
+          UPDATE warehouse_item_balances
+          SET "reservedQty" = GREATEST("reservedQty" - ${qty}, 0)
+          WHERE "tenantId" = ${tenantId}
+            AND "itemId" = ${itemId}
+            AND "warehouseId" = ${warehouseId}
+        `;
+      }
+    });
   }
 
   /**
@@ -430,11 +437,11 @@ export class PaymentsService {
    */
   private async trackCouponUsage(order: any) {
     // Only track if order has discount and coupon code
-    if (Number(order.discountTotal) <= 0 || !order.cart?.couponCode) {
+    if (Number(order.discountTotal) <= 0 || !order.couponCode) {
       return;
     }
 
-    const couponCode = order.cart.couponCode;
+    const couponCode = order.couponCode;
 
     // Find the coupon
     const coupon = await this.prisma.coupon.findFirst({
@@ -628,6 +635,7 @@ export class PaymentsService {
           items: {
             include: {
               product: { include: { item: true } },
+              variant: { include: { item: true } },
             },
           },
         },
@@ -738,7 +746,79 @@ export class PaymentsService {
       }),
     ]);
 
+    // Return stock to inventory on full refund
+    if (isFullRefund) {
+      try {
+        await this.returnStockForRefund(order);
+      } catch (error) {
+        this.logger.error(`Failed to return stock for refund on order ${order.orderNumber}: ${error}`);
+      }
+    }
+
     this.logger.log(`Refund processed for order: ${order.orderNumber}, amount: ${refundAmount}`);
+  }
+
+  /**
+   * Return stock to inventory when an order is fully refunded
+   * Creates a RECEIPT movement to add items back to the warehouse
+   */
+  private async returnStockForRefund(order: any) {
+    const fullOrder = await this.prisma.order.findUnique({
+      where: { id: order.id },
+      include: {
+        items: {
+          include: {
+            product: {
+              include: {
+                item: true,
+              },
+            },
+            variant: {
+              include: {
+                item: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!fullOrder || !fullOrder.items || fullOrder.items.length === 0) {
+      this.logger.warn(`No items found for refund stock return on order ${order.orderNumber}`);
+      return;
+    }
+
+    const warehouse = await this.prisma.warehouse.findFirst({
+      where: {
+        tenantId: order.tenantId,
+        isActive: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    if (!warehouse) {
+      throw new Error(`No active warehouse found for tenant ${order.tenantId}`);
+    }
+
+    const items = fullOrder.items.map((orderItem: any) => ({
+      itemCode: orderItem.variant?.item?.code || orderItem.product.item.code,
+      quantity: orderItem.quantity,
+      rate: Number(orderItem.unitPrice),
+    }));
+
+    await this.stockMovementService.createMovement(
+      { tenantId: order.tenantId },
+      {
+        movementType: MovementType.RECEIPT,
+        postingDate: new Date().toISOString().split('T')[0],
+        warehouseCode: warehouse.code,
+        items,
+        reference: `Refund for Order ${order.orderNumber}`,
+        remarks: `Stock returned for fully refunded order ${order.orderNumber}`,
+      }
+    );
+
+    this.logger.log(`Stock returned to inventory for refunded order: ${order.orderNumber}`);
   }
 
   /**
@@ -1067,6 +1147,11 @@ export class PaymentsService {
         items: {
           include: {
             product: {
+              include: {
+                item: true,
+              },
+            },
+            variant: {
               include: {
                 item: true,
               },

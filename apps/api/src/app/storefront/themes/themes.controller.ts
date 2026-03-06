@@ -52,6 +52,20 @@ export class ThemesController {
   }
 
   /**
+   * Get a specific preset by type (public)
+   * GET /api/v1/store/themes/presets/:type
+   */
+  @Get('themes/presets/:type')
+  async getPresetByType(@Param('type') type: string) {
+    const presets = await this.themesService.getPresets();
+    const preset = presets.find((p: any) => p.slug === type || p.name?.toLowerCase() === type.toLowerCase());
+    if (!preset) {
+      throw new BadRequestException('Preset not found');
+    }
+    return preset;
+  }
+
+  /**
    * Get a specific theme by ID (public)
    * GET /api/v1/store/themes/:id
    */
@@ -82,6 +96,36 @@ export class ThemesController {
       throw new BadRequestException('Tenant ID required');
     }
     return this.themesService.createTheme(tenantId, dto);
+  }
+
+  /**
+   * Validate theme data (admin)
+   * POST /api/v1/store/admin/themes/validate
+   */
+  @Post('admin/themes/validate')
+  @UseGuards(StoreAdminGuard)
+  async validateTheme(
+    @Headers('x-tenant-id') tenantId: string,
+    @Body() dto: CreateThemeDto
+  ) {
+    if (!tenantId) throw new BadRequestException('Tenant ID required');
+    // Validation is done by the global validation pipe on CreateThemeDto
+    return { valid: true };
+  }
+
+  /**
+   * Create theme from preset (admin)
+   * POST /api/v1/store/admin/themes/from-preset/:presetType
+   */
+  @Post('admin/themes/from-preset/:presetType')
+  @UseGuards(StoreAdminGuard)
+  async createFromPreset(
+    @Headers('x-tenant-id') tenantId: string,
+    @Param('presetType') presetType: string,
+    @Body() body: { name?: string }
+  ) {
+    if (!tenantId) throw new BadRequestException('Tenant ID required');
+    return this.themesService.resetToPreset(tenantId, presetType);
   }
 
   /**
@@ -152,6 +196,24 @@ export class ThemesController {
       throw new BadRequestException('Theme name is required');
     }
     return this.themesService.duplicateTheme(id, tenantId, name);
+  }
+
+  /**
+   * Reset specific theme to preset defaults (admin)
+   * POST /api/v1/store/admin/themes/:id/reset
+   */
+  @Post('admin/themes/:id/reset')
+  @UseGuards(StoreAdminGuard)
+  async resetTheme(
+    @Headers('x-tenant-id') tenantId: string,
+    @Param('id') id: string
+  ) {
+    if (!tenantId) throw new BadRequestException('Tenant ID required');
+    const theme = await this.themesService.getThemeById(id, tenantId);
+    if (!theme) throw new BadRequestException('Theme not found');
+    // Reset by activating the preset version
+    const presetSlug = (theme as any).presetSlug || (theme as any).slug || 'modern';
+    return this.themesService.resetToPreset(tenantId, presetSlug);
   }
 
   /**

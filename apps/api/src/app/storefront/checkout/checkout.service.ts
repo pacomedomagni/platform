@@ -108,6 +108,15 @@ export class CheckoutService {
                   },
                 },
               },
+              variant: {
+                include: {
+                  item: {
+                    include: {
+                      warehouseItemBalances: true,
+                    },
+                  },
+                },
+              },
             },
           },
         },
@@ -132,9 +141,19 @@ export class CheckoutService {
         `;
         const coupon = lockedCoupons?.[0] || null;
         const now = new Date();
-        const invalid = !coupon || !coupon.isActive
+        let invalid = !coupon || !coupon.isActive
           || (coupon.expiresAt && new Date(coupon.expiresAt) < now)
           || (coupon.usageLimit && coupon.timesUsed >= coupon.usageLimit);
+
+        // Fix #14: Per-customer coupon limit re-validation
+        if (!invalid && coupon.usageLimitPerCustomer && customerId) {
+          const customerUsage = await tx.couponUsage.count({
+            where: { couponId: coupon.id, customerId }
+          });
+          if (customerUsage >= coupon.usageLimitPerCustomer) {
+            invalid = true;
+          }
+        }
 
         if (invalid) {
           const removedCoupon = cart.couponCode;
@@ -171,21 +190,53 @@ export class CheckoutService {
         }
       }
 
+      // Fix #12: Refresh cart prices at checkout time
+      let pricesChanged = false;
+      for (const item of cart.items) {
+        const currentPrice = (item as any).variant?.price ?? item.product.price;
+        if (Number(item.price) !== Number(currentPrice)) {
+          await tx.cartItem.update({
+            where: { id: item.id },
+            data: { price: currentPrice },
+          });
+          (item as any).price = currentPrice;
+          pricesChanged = true;
+        }
+      }
+      if (pricesChanged) {
+        const newSubtotal = cart.items.reduce(
+          (sum, i) => sum + Number((i as any).price) * i.quantity, 0
+        );
+        const newGrandTotal = newSubtotal + Number(cart.shippingTotal) + Number(cart.taxTotal) - Number(cart.discountAmount);
+        await tx.cart.update({
+          where: { id: cart.id },
+          data: {
+            subtotal: newSubtotal,
+            grandTotal: newGrandTotal,
+          },
+        });
+        (cart as any).subtotal = new Prisma.Decimal(newSubtotal);
+        (cart as any).grandTotal = new Prisma.Decimal(newGrandTotal);
+      }
+
       // PAY-4: Acquire advisory locks per item to prevent concurrent stock modifications
       for (const item of cart.items) {
-        const itemKey = `${tenantId}:${item.product.item.id}`;
+        const stockItemId = (item as any).variant?.item?.id || item.product.item.id;
+        const itemKey = `${tenantId}:${stockItemId}`;
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${itemKey}))`;
       }
 
       // Re-query fresh balances after acquiring locks
       for (const item of cart.items) {
+        const stockItemId = (item as any).variant?.item?.id || item.product.item.id;
         const freshBalances = await tx.warehouseItemBalance.findMany({
-          where: { tenantId, itemId: item.product.item.id },
+          where: { tenantId, itemId: stockItemId },
         });
+        // Fix #16: Add back cart's own reservation so we don't block ourselves
         const availableQty = freshBalances.reduce(
           (sum, b) => sum + Number(b.actualQty) - Number(b.reservedQty),
           0
-        );
+        ) + item.quantity;
         if (item.quantity > availableQty) {
           throw new BadRequestException(
             `Insufficient stock for ${item.product.displayName}. Available: ${availableQty}`
@@ -254,6 +305,12 @@ export class CheckoutService {
         }
       }
 
+      // Fix #13: Fetch tenant baseCurrency for order
+      const tenant = await tx.tenant.findUnique({
+        where: { id: tenantId },
+        select: { baseCurrency: true },
+      });
+
       // Create order
       const order = await tx.order.create({
         data: {
@@ -263,6 +320,8 @@ export class CheckoutService {
           cartId: cart.id,
           email: dto.email,
           phone: dto.phone,
+          currency: tenant?.baseCurrency || 'USD',
+          couponCode: cart.couponCode,
 
           // Shipping address
           shippingFirstName: dto.shippingAddress.firstName,
@@ -945,6 +1004,7 @@ export class CheckoutService {
         quantity: item.quantity,
         unitPrice: Number(item.unitPrice),
         totalPrice: Number(item.totalPrice),
+        imageUrl: item.imageUrl || null,
       })),
       subtotal: Number(order.subtotal),
       shippingTotal: Number(order.shippingTotal),

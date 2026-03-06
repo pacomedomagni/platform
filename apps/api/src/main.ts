@@ -77,12 +77,9 @@ async function bootstrap() {
         // Invalid origin URL
       }
 
-      // Allow any HTTPS origin for storefront routes (custom domains)
-      // Custom domains are verified at the Traefik + DNS level before traffic arrives
-      if (origin.startsWith('https://')) {
-        return callback(null, true);
-      }
-
+      // Reject all other origins — custom domains are verified via Host header,
+      // not via CORS origin. This prevents arbitrary HTTPS sites from making
+      // authenticated cross-origin requests to admin endpoints.
       callback(null, false);
     },
     credentials: true,

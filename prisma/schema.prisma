@@ -1454,6 +1454,9 @@ model Order {
   status        OrderStatus   @default(PENDING)
   paymentStatus PaymentStatus @default(PENDING)
 
+  // Coupon applied to this order (snapshot from cart at checkout)
+  couponCode String?
+
   // Payment info
   paymentMethod String? // "gift_card" | "card" | "square" etc.
 

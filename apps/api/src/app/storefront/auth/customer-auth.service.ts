@@ -24,17 +24,18 @@ import {
 } from './dto';
 import { WebhookService } from '../../operations/webhook.service';
 
-// Fail fast if JWT_SECRET is not set outside dev/test
-const JWT_SECRET = process.env['JWT_SECRET'];
+// Use a separate secret for customer tokens to prevent cross-auth confusion.
+// Falls back to JWT_SECRET for backward compatibility.
+const CUSTOMER_SECRET = process.env['CUSTOMER_JWT_SECRET'] || process.env['JWT_SECRET'];
 const NODE_ENV = process.env['NODE_ENV'];
 const ALLOW_FALLBACK_SECRET = NODE_ENV === 'development' || NODE_ENV === 'test';
 
-if (!JWT_SECRET && !ALLOW_FALLBACK_SECRET) {
+if (!CUSTOMER_SECRET && !ALLOW_FALLBACK_SECRET) {
   throw new Error(
-    'JWT_SECRET environment variable is required in all environments except development and test'
+    'CUSTOMER_JWT_SECRET or JWT_SECRET environment variable is required in all environments except development and test'
   );
 }
-const EFFECTIVE_JWT_SECRET = JWT_SECRET || 'dev-only-secret-change-in-production';
+const EFFECTIVE_JWT_SECRET = CUSTOMER_SECRET || 'dev-only-secret-change-in-production';
 
 const JWT_EXPIRES_IN = '15m';
 const REFRESH_TOKEN_EXPIRY_DAYS = 30;
@@ -53,7 +54,7 @@ export class CustomerAuthService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
-    if (!JWT_SECRET && ALLOW_FALLBACK_SECRET) {
+    if (!CUSTOMER_SECRET && ALLOW_FALLBACK_SECRET) {
       this.logger.warn('JWT_SECRET not set - using development default. DO NOT USE IN PRODUCTION!');
     }
   }

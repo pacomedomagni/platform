@@ -170,17 +170,6 @@ export class CurrencyShippingController {
     return this.currencyService.setVariantPriceOverride(tenantId, variantId, dto);
   }
 
-  // ============ SHIPPING CALCULATION - PUBLIC ============
-
-  @Post('shipping/calculate')
-  async calculateShipping(
-    @Headers('x-tenant-id') tenantId: string,
-    @Body() dto: CalculateShippingDto
-  ) {
-    if (!tenantId) throw new BadRequestException('Tenant ID required');
-    return this.shippingService.calculateShipping(tenantId, dto);
-  }
-
   // ============ SHIPPING CARRIERS - ADMIN ============
 
   @Get('admin/shipping/carriers')
