@@ -214,4 +214,44 @@ export class MarketplaceAuditService {
       },
     });
   }
+
+  async logReturnProcessed(returnId: string, action: string, details?: Record<string, any>) {
+    const ctx = this.getContext();
+    await this.auditLog.log(ctx, {
+      action,
+      docType: 'MarketplaceReturn',
+      docName: returnId,
+      meta: { returnId, ...details },
+    });
+  }
+
+  async logMessageSent(threadId: string, recipient: string) {
+    const ctx = this.getContext();
+    await this.auditLog.log(ctx, {
+      action: 'REPLY',
+      docType: 'MarketplaceMessage',
+      docName: threadId,
+      meta: { threadId, recipient },
+    });
+  }
+
+  async logCampaignAction(campaignId: string, campaignName: string, action: string) {
+    const ctx = this.getContext();
+    await this.auditLog.log(ctx, {
+      action,
+      docType: 'MarketplaceCampaign',
+      docName: campaignName,
+      meta: { campaignId },
+    });
+  }
+
+  async logWebhookProcessed(type: string, details: Record<string, any>) {
+    const ctx = this.getContext();
+    await this.auditLog.log(ctx, {
+      action: 'WEBHOOK_PROCESSED',
+      docType: 'EbayWebhook',
+      docName: type,
+      meta: details,
+    });
+  }
 }

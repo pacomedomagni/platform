@@ -97,6 +97,33 @@ export class ConnectionsController {
   }
 
   /**
+   * Get vacation mode status
+   * GET /api/marketplace/connections/:id/vacation
+   */
+  @Get(':id/vacation')
+  @Roles('admin', 'System Manager')
+  async getVacationMode(
+    @Tenant() tenantId: string,
+    @Param('id') id: string
+  ) {
+    return this.ebayStore.getVacationMode(id);
+  }
+
+  /**
+   * Set vacation mode
+   * POST /api/marketplace/connections/:id/vacation
+   */
+  @Post(':id/vacation')
+  @Roles('admin', 'System Manager')
+  async setVacationMode(
+    @Tenant() tenantId: string,
+    @Param('id') id: string,
+    @Body() body: { enabled: boolean; returnMessage?: string }
+  ) {
+    return this.ebayStore.setVacationMode(id, body.enabled, body.returnMessage);
+  }
+
+  /**
    * Delete connection
    * DELETE /api/marketplace/connections/:id
    */

@@ -54,6 +54,7 @@ export default function MarketplaceListingsPage() {
   const [loading, setLoading] = useState(true);
   const [selectedConnection, setSelectedConnection] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState('');
   const [syncing, setSyncing] = useState<string | null>(null);
   const [publishConfirm, setPublishConfirm] = useState<string | null>(null);
   const [endConfirm, setEndConfirm] = useState<string | null>(null);
@@ -204,6 +205,14 @@ export default function MarketplaceListingsPage() {
     }
   };
 
+  const filteredListings = searchQuery.trim()
+    ? listings.filter(
+        (l) =>
+          l.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          l.sku.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : listings;
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -265,6 +274,17 @@ export default function MarketplaceListingsPage() {
             </select>
           </div>
 
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Search</label>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by title or SKU..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
           <div className="flex items-end">
             <button
               onClick={loadData}
@@ -278,7 +298,7 @@ export default function MarketplaceListingsPage() {
       </div>
 
       {/* Listings Table */}
-      {listings.length === 0 ? (
+      {filteredListings.length === 0 ? (
         <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
           <div className="text-gray-400 mb-4">
             <svg
@@ -336,7 +356,7 @@ export default function MarketplaceListingsPage() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {listings.map((listing) => (
+                {filteredListings.map((listing) => (
                   <ListingRow
                     key={listing.id}
                     listing={listing}
@@ -406,7 +426,12 @@ function ListingRow({
         <div className="flex items-start gap-3">
           <div>
             <div className="flex items-center gap-2">
-              <p className="text-sm font-medium text-gray-900">{listing.title}</p>
+              <Link
+                href={`/app/marketplace/listings/${listing.id}`}
+                className="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline"
+              >
+                {listing.title}
+              </Link>
               {listing.externalListingId && (
                 <a
                   href={`https://www.ebay.com/itm/${listing.externalListingId}`}

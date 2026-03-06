@@ -43,6 +43,52 @@ export enum SyncLogStatus {
   FAILED = 'failed',
 }
 
+export enum ReturnStatus {
+  RETURN_REQUESTED = 'RETURN_REQUESTED',
+  RETURN_ACCEPTED = 'RETURN_ACCEPTED',
+  RETURN_DECLINED = 'RETURN_DECLINED',
+  ITEM_SHIPPED = 'ITEM_SHIPPED',
+  ITEM_RECEIVED = 'ITEM_RECEIVED',
+  REFUND_ISSUED = 'REFUND_ISSUED',
+  CLOSED = 'CLOSED',
+}
+
+export enum MessageThreadStatus {
+  OPEN = 'OPEN',
+  RESPONDED = 'RESPONDED',
+  CLOSED = 'CLOSED',
+}
+
+export enum MessageSender {
+  BUYER = 'BUYER',
+  SELLER = 'SELLER',
+}
+
+export enum ListingFormat {
+  FIXED_PRICE = 'FIXED_PRICE',
+  AUCTION = 'AUCTION',
+}
+
+export enum CampaignStatus {
+  PENDING = 'PENDING',
+  RUNNING = 'RUNNING',
+  PAUSED = 'PAUSED',
+  ENDED = 'ENDED',
+}
+
+export enum MarketplacePermission {
+  MARKETPLACE_VIEW = 'marketplace.view',
+  CONNECTIONS_MANAGE = 'marketplace.connections.manage',
+  LISTINGS_CREATE = 'marketplace.listings.create',
+  LISTINGS_APPROVE = 'marketplace.listings.approve',
+  LISTINGS_PUBLISH = 'marketplace.listings.publish',
+  RETURNS_MANAGE = 'marketplace.returns.manage',
+  MESSAGES_MANAGE = 'marketplace.messages.manage',
+  CAMPAIGNS_MANAGE = 'marketplace.campaigns.manage',
+  FINANCES_VIEW = 'marketplace.finances.view',
+  SETTINGS_MANAGE = 'marketplace.settings.manage',
+}
+
 /** @deprecated Use the Prisma MarketplaceConnection model directly. Kept for reference. */
 export interface MarketplaceConnectionConfig {
   appId: string;

@@ -15,6 +15,7 @@ const Decimal = Prisma.Decimal;
 @Injectable()
 export class EbayListingsService {
   private readonly logger = new Logger(EbayListingsService.name);
+  private readonly mockMode = process.env.MOCK_EXTERNAL_SERVICES === 'true';
 
   /**
    * Map marketplace site ID to the appropriate currency code.
@@ -149,14 +150,50 @@ export class EbayListingsService {
     productListingId: string;
     warehouseId?: string;
     title: string;
+    subtitle?: string;
     description: string;
     price: number;
     quantity: number;
     condition: string;
+    conditionDescription?: string;
     categoryId: string;
+    secondaryCategoryId?: string;
     photos?: string[];
     itemSpecifics?: Record<string, string[]>;
     platformData?: Record<string, any>;
+    // Listing format
+    format?: string;
+    listingDuration?: string;
+    // Auction fields
+    startPrice?: number;
+    reservePrice?: number;
+    buyItNowPrice?: number;
+    // Best Offer
+    bestOfferEnabled?: boolean;
+    autoAcceptPrice?: number;
+    autoDeclinePrice?: number;
+    // Additional fields
+    privateListing?: boolean;
+    lotSize?: number;
+    epid?: string;
+    // Item location
+    itemLocationCity?: string;
+    itemLocationState?: string;
+    itemLocationPostalCode?: string;
+    itemLocationCountry?: string;
+    // Package
+    packageType?: string;
+    weightValue?: number;
+    weightUnit?: string;
+    dimensionLength?: number;
+    dimensionWidth?: number;
+    dimensionHeight?: number;
+    dimensionUnit?: string;
+    // Policies
+    fulfillmentPolicyId?: string;
+    paymentPolicyId?: string;
+    returnPolicyId?: string;
+    merchantLocationKey?: string;
   }) {
     const tenantId = this.cls.get('tenantId');
 
@@ -178,6 +215,8 @@ export class EbayListingsService {
       throw new BadRequestException('Listing already exists for this product on this store');
     }
 
+    const format = data.format || 'FIXED_PRICE';
+
     // Create marketplace listing
     const listing = await this.prisma.marketplaceListing.create({
       data: {
@@ -187,19 +226,52 @@ export class EbayListingsService {
         warehouseId: data.warehouseId,
         sku,
         title: data.title,
+        subtitle: data.subtitle,
         description: data.description,
         price: new Decimal(data.price),
         quantity: data.quantity,
         condition: data.condition,
+        conditionDescription: data.conditionDescription,
         categoryId: data.categoryId,
+        secondaryCategoryId: data.secondaryCategoryId,
         photos: JSON.stringify(data.photos || []),
         itemSpecifics: data.itemSpecifics ? JSON.stringify(data.itemSpecifics) : null,
+        // Format & auction
+        format,
+        listingDuration: data.listingDuration || (format === 'AUCTION' ? 'DAYS_7' : 'GTC'),
+        startPrice: data.startPrice ? new Decimal(data.startPrice) : null,
+        reservePrice: data.reservePrice ? new Decimal(data.reservePrice) : null,
+        buyItNowPrice: data.buyItNowPrice ? new Decimal(data.buyItNowPrice) : null,
+        // Best Offer
+        bestOfferEnabled: data.bestOfferEnabled || false,
+        autoAcceptPrice: data.autoAcceptPrice ? new Decimal(data.autoAcceptPrice) : null,
+        autoDeclinePrice: data.autoDeclinePrice ? new Decimal(data.autoDeclinePrice) : null,
+        // Additional
+        privateListing: data.privateListing || false,
+        lotSize: data.lotSize,
+        epid: data.epid,
+        // Item location
+        itemLocationCity: data.itemLocationCity,
+        itemLocationState: data.itemLocationState,
+        itemLocationPostalCode: data.itemLocationPostalCode,
+        itemLocationCountry: data.itemLocationCountry,
+        // Package
+        packageType: data.packageType,
+        weightValue: data.weightValue ? new Decimal(data.weightValue) : null,
+        weightUnit: data.weightUnit,
+        dimensionLength: data.dimensionLength ? new Decimal(data.dimensionLength) : null,
+        dimensionWidth: data.dimensionWidth ? new Decimal(data.dimensionWidth) : null,
+        dimensionHeight: data.dimensionHeight ? new Decimal(data.dimensionHeight) : null,
+        dimensionUnit: data.dimensionUnit,
+        // Policies
+        fulfillmentPolicyId: data.fulfillmentPolicyId,
+        paymentPolicyId: data.paymentPolicyId,
+        returnPolicyId: data.returnPolicyId,
         platformData: JSON.stringify({
-          format: 'FIXED_PRICE',
-          listingDuration: 'GTC',
           ...(data.platformData || {}),
+          merchantLocationKey: data.merchantLocationKey,
         }),
-        status: ListingStatus.DRAFT, // Direct listings start as draft, require approval
+        status: ListingStatus.DRAFT,
         syncStatus: SyncStatus.PENDING,
       },
     });
@@ -270,14 +342,48 @@ export class EbayListingsService {
    */
   async updateListing(listingId: string, data: {
     title?: string;
+    subtitle?: string;
     description?: string;
     price?: number;
     quantity?: number;
     condition?: string;
+    conditionDescription?: string;
     categoryId?: string;
+    secondaryCategoryId?: string;
     photos?: string[];
     itemSpecifics?: Record<string, string[]>;
     platformData?: any;
+    // Format & auction
+    format?: string;
+    listingDuration?: string;
+    startPrice?: number;
+    reservePrice?: number;
+    buyItNowPrice?: number;
+    // Best Offer
+    bestOfferEnabled?: boolean;
+    autoAcceptPrice?: number;
+    autoDeclinePrice?: number;
+    // Additional
+    privateListing?: boolean;
+    lotSize?: number;
+    epid?: string;
+    // Item location
+    itemLocationCity?: string;
+    itemLocationState?: string;
+    itemLocationPostalCode?: string;
+    itemLocationCountry?: string;
+    // Package
+    packageType?: string;
+    weightValue?: number;
+    weightUnit?: string;
+    dimensionLength?: number;
+    dimensionWidth?: number;
+    dimensionHeight?: number;
+    dimensionUnit?: string;
+    // Policies
+    fulfillmentPolicyId?: string;
+    paymentPolicyId?: string;
+    returnPolicyId?: string;
   }) {
     const listing = await this.getListing(listingId);
 
@@ -289,13 +395,47 @@ export class EbayListingsService {
       where: { id: listingId },
       data: {
         ...(data.title && { title: data.title }),
+        ...(data.subtitle !== undefined && { subtitle: data.subtitle || null }),
         ...(data.description && { description: data.description }),
         ...(data.price && { price: new Decimal(data.price) }),
         ...(data.quantity !== undefined && { quantity: data.quantity }),
         ...(data.condition && { condition: data.condition }),
+        ...(data.conditionDescription !== undefined && { conditionDescription: data.conditionDescription || null }),
         ...(data.categoryId && { categoryId: data.categoryId }),
+        ...(data.secondaryCategoryId !== undefined && { secondaryCategoryId: data.secondaryCategoryId || null }),
         ...(data.photos && { photos: JSON.stringify(data.photos) }),
         ...(data.itemSpecifics && { itemSpecifics: data.itemSpecifics as any }),
+        // Format & auction
+        ...(data.format && { format: data.format }),
+        ...(data.listingDuration && { listingDuration: data.listingDuration }),
+        ...(data.startPrice !== undefined && { startPrice: data.startPrice ? new Decimal(data.startPrice) : null }),
+        ...(data.reservePrice !== undefined && { reservePrice: data.reservePrice ? new Decimal(data.reservePrice) : null }),
+        ...(data.buyItNowPrice !== undefined && { buyItNowPrice: data.buyItNowPrice ? new Decimal(data.buyItNowPrice) : null }),
+        // Best Offer
+        ...(data.bestOfferEnabled !== undefined && { bestOfferEnabled: data.bestOfferEnabled }),
+        ...(data.autoAcceptPrice !== undefined && { autoAcceptPrice: data.autoAcceptPrice ? new Decimal(data.autoAcceptPrice) : null }),
+        ...(data.autoDeclinePrice !== undefined && { autoDeclinePrice: data.autoDeclinePrice ? new Decimal(data.autoDeclinePrice) : null }),
+        // Additional
+        ...(data.privateListing !== undefined && { privateListing: data.privateListing }),
+        ...(data.lotSize !== undefined && { lotSize: data.lotSize || null }),
+        ...(data.epid !== undefined && { epid: data.epid || null }),
+        // Item location
+        ...(data.itemLocationCity !== undefined && { itemLocationCity: data.itemLocationCity || null }),
+        ...(data.itemLocationState !== undefined && { itemLocationState: data.itemLocationState || null }),
+        ...(data.itemLocationPostalCode !== undefined && { itemLocationPostalCode: data.itemLocationPostalCode || null }),
+        ...(data.itemLocationCountry !== undefined && { itemLocationCountry: data.itemLocationCountry || null }),
+        // Package
+        ...(data.packageType !== undefined && { packageType: data.packageType || null }),
+        ...(data.weightValue !== undefined && { weightValue: data.weightValue ? new Decimal(data.weightValue) : null }),
+        ...(data.weightUnit !== undefined && { weightUnit: data.weightUnit || null }),
+        ...(data.dimensionLength !== undefined && { dimensionLength: data.dimensionLength ? new Decimal(data.dimensionLength) : null }),
+        ...(data.dimensionWidth !== undefined && { dimensionWidth: data.dimensionWidth ? new Decimal(data.dimensionWidth) : null }),
+        ...(data.dimensionHeight !== undefined && { dimensionHeight: data.dimensionHeight ? new Decimal(data.dimensionHeight) : null }),
+        ...(data.dimensionUnit !== undefined && { dimensionUnit: data.dimensionUnit || null }),
+        // Policies
+        ...(data.fulfillmentPolicyId !== undefined && { fulfillmentPolicyId: data.fulfillmentPolicyId || null }),
+        ...(data.paymentPolicyId !== undefined && { paymentPolicyId: data.paymentPolicyId || null }),
+        ...(data.returnPolicyId !== undefined && { returnPolicyId: data.returnPolicyId || null }),
         ...(data.platformData && {
           platformData: JSON.stringify({
             ...JSON.parse(listing.platformData as string),
@@ -401,26 +541,46 @@ export class EbayListingsService {
       client = await this.ebayStore.getClient(listing.connectionId);
       const photos = JSON.parse(listing.photos as string) as string[];
 
+      // Parse platformData for product identifiers and other stored fields
+      const platformData = listing.platformData
+        ? JSON.parse(listing.platformData as string)
+        : {};
+
       // Step 1: Create inventory item
+      const productPayload: any = {
+        title: listing.title,
+        description: listing.description,
+        imageUrls: photos.slice(0, 24), // eBay limit: 24 images for standard listings
+        aspects: listing.itemSpecifics ? (listing.itemSpecifics as any) : undefined,
+      };
+
+      // Wire product identifiers from platformData
+      if (platformData.brand) productPayload.brand = platformData.brand;
+      if (platformData.mpn) productPayload.mpn = platformData.mpn;
+      if (platformData.upc) productPayload.upc = Array.isArray(platformData.upc) ? platformData.upc : [platformData.upc];
+      if (platformData.ean) productPayload.ean = Array.isArray(platformData.ean) ? platformData.ean : [platformData.ean];
+      if (platformData.isbn) productPayload.isbn = Array.isArray(platformData.isbn) ? platformData.isbn : [platformData.isbn];
+      if (listing.epid) productPayload.epid = listing.epid;
+      if (listing.subtitle) productPayload.subtitle = listing.subtitle;
+
       const inventoryItem = await this.ebayClient.createOrReplaceInventoryItem(client, listing.sku, {
-        product: {
-          title: listing.title,
-          description: listing.description,
-          imageUrls: photos.slice(0, 12), // eBay limit: 12 images
-          aspects: listing.itemSpecifics ? (listing.itemSpecifics as any) : undefined,
-        },
+        product: productPayload,
         condition: listing.condition,
+        conditionDescription: listing.conditionDescription || undefined,
         availability: {
           shipToLocationAvailability: {
             quantity: listing.quantity,
           },
         },
-        ...(listing.weightValue && {
+        ...(listing.weightValue || listing.packageType ? {
           packageWeightAndSize: {
-            weight: {
-              value: listing.weightValue.toNumber(),
-              unit: listing.weightUnit || 'POUND',
-            },
+            ...(listing.packageType && { packageType: listing.packageType }),
+            ...(listing.weightValue && {
+              weight: {
+                value: listing.weightValue.toNumber(),
+                unit: listing.weightUnit || 'POUND',
+              },
+            }),
             ...(listing.dimensionLength && {
               dimensions: {
                 length: listing.dimensionLength.toNumber(),
@@ -430,7 +590,7 @@ export class EbayListingsService {
               },
             }),
           },
-        }),
+        } : {}),
       });
       inventoryItemCreated = true;
 
@@ -438,25 +598,61 @@ export class EbayListingsService {
       const connection = listing.connection;
       const marketplaceId = connection.marketplaceId || 'EBAY_US';
       const currency = this.getMarketplaceCurrency(marketplaceId);
+      const format = listing.format || 'FIXED_PRICE';
+
+      // Build pricing summary
+      const pricingSummary: any = {};
+      if (format === 'AUCTION') {
+        // For auctions: auctionStartPrice = starting bid (required),
+        // price = Buy It Now price (optional), auctionReservePrice = reserve (optional)
+        if (listing.startPrice) {
+          pricingSummary.auctionStartPrice = { value: listing.startPrice.toString(), currency };
+        }
+        if (listing.reservePrice) {
+          pricingSummary.auctionReservePrice = { value: listing.reservePrice.toString(), currency };
+        }
+        if (listing.buyItNowPrice) {
+          pricingSummary.price = { value: listing.buyItNowPrice.toString(), currency };
+        }
+      } else {
+        // Fixed price: price is required
+        pricingSummary.price = { value: listing.price.toString(), currency };
+      }
+
+      // Build listing policies with best offer
+      const listingPolicies: any = {
+        fulfillmentPolicyId: listing.fulfillmentPolicyId || connection.fulfillmentPolicyId!,
+        paymentPolicyId: listing.paymentPolicyId || connection.paymentPolicyId!,
+        returnPolicyId: listing.returnPolicyId || connection.returnPolicyId!,
+      };
+      if (listing.bestOfferEnabled) {
+        listingPolicies.bestOfferTerms = {
+          bestOfferEnabled: true,
+          ...(listing.autoAcceptPrice && {
+            autoAcceptPrice: { value: listing.autoAcceptPrice.toString(), currency },
+          }),
+          ...(listing.autoDeclinePrice && {
+            autoDeclinePrice: { value: listing.autoDeclinePrice.toString(), currency },
+          }),
+        };
+      }
+
       const offer = await this.ebayClient.createOffer(client, {
         sku: listing.sku,
         marketplaceId,
-        format: 'FIXED_PRICE',
+        format,
         availableQuantity: listing.quantity,
         categoryId: listing.categoryId,
+        secondaryCategoryId: listing.secondaryCategoryId || undefined,
         listingDescription: listing.description,
-        pricingSummary: {
-          price: {
-            value: listing.price.toString(),
-            currency,
-          },
-        },
-        listingPolicies: {
-          fulfillmentPolicyId: listing.fulfillmentPolicyId || connection.fulfillmentPolicyId!,
-          paymentPolicyId: listing.paymentPolicyId || connection.paymentPolicyId!,
-          returnPolicyId: listing.returnPolicyId || connection.returnPolicyId!,
-        },
+        listingDuration: listing.listingDuration || (format === 'AUCTION' ? 'DAYS_7' : 'GTC'),
+        pricingSummary,
+        listingPolicies,
         merchantLocationKey: connection.locationKey,
+        hideBuyerDetails: listing.privateListing || undefined,
+        includeCatalogProductDetails: listing.epid ? true : undefined,
+        lotSize: listing.lotSize || undefined,
+        listingStartDate: platformData.scheduledPublishDate || undefined,
       });
 
       offerId = offer.offerId;
@@ -632,5 +828,289 @@ export class EbayListingsService {
 
     await this.prisma.marketplaceListing.delete({ where: { id: listingId } });
     this.logger.log(`Deleted listing ${listingId}`);
+  }
+
+  /**
+   * Schedule a listing to be published at a future date.
+   * The scheduled date must be in the future and within 3 weeks.
+   * When publishListing runs, it will include scheduledStartTime in the offer payload
+   * if a scheduledDate is set in platformData.
+   */
+  async scheduleListingPublish(listingId: string, scheduledDate: Date): Promise<any> {
+    const listing = await this.getListing(listingId);
+
+    const now = new Date();
+    if (scheduledDate <= now) {
+      throw new BadRequestException('Scheduled date must be in the future');
+    }
+
+    const threeWeeksFromNow = new Date(now.getTime() + 21 * 24 * 60 * 60 * 1000);
+    if (scheduledDate > threeWeeksFromNow) {
+      throw new BadRequestException('Scheduled date must be within 3 weeks from now');
+    }
+
+    if (![ListingStatus.DRAFT, ListingStatus.APPROVED].includes(listing.status as any)) {
+      throw new BadRequestException('Only draft or approved listings can be scheduled');
+    }
+
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Scheduled listing ${listingId} for ${scheduledDate.toISOString()}`);
+      return { listingId, scheduledDate, status: 'SCHEDULED' };
+    }
+
+    const existingPlatformData = listing.platformData
+      ? JSON.parse(listing.platformData as string)
+      : {};
+
+    await this.prisma.marketplaceListing.update({
+      where: { id: listingId },
+      data: {
+        platformData: JSON.stringify({
+          ...existingPlatformData,
+          scheduledPublishDate: scheduledDate.toISOString(),
+        }),
+      },
+    });
+
+    this.logger.log(`Scheduled listing ${listingId} for ${scheduledDate.toISOString()}`);
+    return { listingId, scheduledDate, status: 'SCHEDULED' };
+  }
+
+  /**
+   * Set the Out-of-Stock Control preference for an eBay account.
+   * When enabled, listings with 0 quantity remain active (hidden from search)
+   * instead of ending automatically.
+   * Uses Trading API SetUserPreferences.
+   */
+  async setOutOfStockControl(connectionId: string, enabled: boolean): Promise<any> {
+    if (this.mockMode) {
+      this.logger.log(
+        `[MOCK] Set OutOfStockControl to ${enabled} for connection ${connectionId}`
+      );
+      return { outOfStockControl: enabled };
+    }
+
+    const client = await this.ebayStore.getClient(connectionId);
+
+    try {
+      await (client as any).trading.SetUserPreferences({
+        OutOfStockControlPreference: enabled,
+      });
+
+      this.logger.log(`Set OutOfStockControl to ${enabled} for connection ${connectionId}`);
+      return { outOfStockControl: enabled };
+    } catch (error) {
+      this.logger.error(
+        `Failed to set OutOfStockControl for connection ${connectionId}`,
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Get the current Out-of-Stock Control preference for an eBay account.
+   * Uses Trading API GetUserPreferences.
+   */
+  async getOutOfStockControl(connectionId: string): Promise<any> {
+    if (this.mockMode) {
+      this.logger.log(
+        `[MOCK] Fetched OutOfStockControl for connection ${connectionId}`
+      );
+      return { outOfStockControl: false };
+    }
+
+    const client = await this.ebayStore.getClient(connectionId);
+
+    try {
+      const response = await (client as any).trading.GetUserPreferences({
+        ShowOutOfStockControlPreference: true,
+      });
+
+      const outOfStockControl =
+        response?.OutOfStockControlPreference === true ||
+        response?.OutOfStockControlPreference === 'true';
+
+      this.logger.log(
+        `Fetched OutOfStockControl for connection ${connectionId}: ${outOfStockControl}`
+      );
+      return { outOfStockControl };
+    } catch (error) {
+      this.logger.error(
+        `Failed to get OutOfStockControl for connection ${connectionId}`,
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Update a published listing's offer (price, quantity, description)
+   * Uses eBay Inventory API updateOffer for live listing modifications.
+   */
+  async updatePublishedListing(
+    listingId: string,
+    data: {
+      price?: { value: string; currency: string };
+      quantity?: number;
+      description?: string;
+    }
+  ) {
+    const listing = await this.getListing(listingId);
+
+    if (listing.status !== ListingStatus.PUBLISHED || !listing.externalOfferId) {
+      throw new BadRequestException('Only published listings with an active offer can be updated');
+    }
+
+    const client = await this.ebayStore.getClient(listing.connectionId);
+
+    const updatePayload: any = {};
+    if (data.price) {
+      updatePayload.pricingSummary = { price: data.price };
+    }
+    if (data.quantity !== undefined) {
+      updatePayload.availableQuantity = data.quantity;
+    }
+    if (data.description) {
+      updatePayload.listingDescription = data.description;
+    }
+
+    await this.ebayClient.updateOffer(client, listing.externalOfferId, updatePayload);
+
+    // Update local record
+    const localUpdate: any = {};
+    if (data.price) {
+      localUpdate.price = new Decimal(data.price.value);
+    }
+    if (data.quantity !== undefined) {
+      localUpdate.quantity = data.quantity;
+    }
+
+    if (Object.keys(localUpdate).length > 0) {
+      await this.prisma.marketplaceListing.update({
+        where: { id: listingId },
+        data: localUpdate,
+      });
+    }
+
+    this.logger.log(`Updated published listing ${listingId} offer`);
+    return { success: true, listingId };
+  }
+
+  /**
+   * Create a multi-variation listing.
+   * Creates individual inventory items for each variant, groups them,
+   * and publishes the group.
+   */
+  async createVariationListing(data: {
+    connectionId: string;
+    groupKey: string;
+    title: string;
+    description: string;
+    categoryId: string;
+    imageUrls: string[];
+    aspects: Record<string, string[]>;
+    variants: Array<{
+      sku: string;
+      productListingId: string;
+      title: string;
+      description: string;
+      price: number;
+      quantity: number;
+      condition: string;
+      imageUrls: string[];
+      variantAspects: Record<string, string[]>;
+    }>;
+    fulfillmentPolicyId: string;
+    paymentPolicyId: string;
+    returnPolicyId: string;
+    merchantLocationKey?: string;
+  }) {
+    const tenantId = this.cls.get('tenantId');
+    const connection = await this.ebayStore.getConnection(data.connectionId);
+    const client = await this.ebayStore.getClient(data.connectionId);
+    const currency = this.getMarketplaceCurrency(connection.marketplaceId);
+
+    // Step 1: Create inventory items for each variant
+    for (const variant of data.variants) {
+      await this.ebayClient.createOrReplaceInventoryItem(client, variant.sku, {
+        product: {
+          title: variant.title,
+          description: variant.description,
+          imageUrls: variant.imageUrls,
+          aspects: variant.variantAspects,
+        },
+        condition: variant.condition,
+        availability: {
+          shipToLocationAvailability: { quantity: variant.quantity },
+        },
+      });
+    }
+
+    // Step 2: Create inventory item group
+    const variesByAspects = Object.keys(data.variants[0]?.variantAspects || {});
+    await this.ebayClient.createOrReplaceInventoryItemGroup(client, data.groupKey, {
+      title: data.title,
+      description: data.description,
+      imageUrls: data.imageUrls,
+      aspects: data.aspects,
+      variantSKUs: data.variants.map((v) => v.sku),
+      variesBy: {
+        aspectsImageVariesBy: variesByAspects,
+        specifications: variesByAspects.map((aspect) => ({
+          name: aspect,
+          values: [...new Set(data.variants.flatMap((v) => v.variantAspects[aspect] || []))],
+        })),
+      },
+    });
+
+    // Step 3: Publish via group
+    const publishResult = await this.ebayClient.publishOfferByInventoryItemGroup(client, {
+      inventoryItemGroupKey: data.groupKey,
+      marketplaceId: connection.marketplaceId,
+      offers: data.variants.map((v) => ({
+        sku: v.sku,
+        marketplaceId: connection.marketplaceId,
+        format: 'FIXED_PRICE',
+        availableQuantity: v.quantity,
+        categoryId: data.categoryId,
+        listingPolicies: {
+          fulfillmentPolicyId: data.fulfillmentPolicyId,
+          paymentPolicyId: data.paymentPolicyId,
+          returnPolicyId: data.returnPolicyId,
+        },
+        pricingSummary: {
+          price: { value: String(v.price), currency },
+        },
+        merchantLocationKey: data.merchantLocationKey,
+      })),
+    });
+
+    // Step 4: Create local listing records for each variant
+    const listings = [];
+    for (const variant of data.variants) {
+      const listing = await this.prisma.marketplaceListing.create({
+        data: {
+          tenantId,
+          connectionId: data.connectionId,
+          productListingId: variant.productListingId,
+          sku: variant.sku,
+          title: variant.title,
+          description: variant.description,
+          price: new Decimal(variant.price),
+          quantity: variant.quantity,
+          condition: variant.condition,
+          categoryId: data.categoryId,
+          status: ListingStatus.PUBLISHED,
+          publishedAt: new Date(),
+          inventoryGroupKey: data.groupKey,
+          platformData: JSON.stringify({ variantAspects: variant.variantAspects, currency }),
+        },
+      });
+      listings.push(listing);
+    }
+
+    this.logger.log(`Created multi-variation listing group ${data.groupKey} with ${data.variants.length} variants`);
+    return { groupKey: data.groupKey, listings, publishResult };
   }
 }

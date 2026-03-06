@@ -21,6 +21,7 @@ const Decimal = Prisma.Decimal;
 @Injectable()
 export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EbayOrderSyncService.name);
+  private readonly mockMode = process.env.MOCK_EXTERNAL_SERVICES === 'true';
   private syncInterval: ReturnType<typeof setInterval> | null = null;
   private inventorySyncInterval: ReturnType<typeof setInterval> | null = null;
   private readonly SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
@@ -436,6 +437,132 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
         data: {
           syncStatus: SyncStatus.ERROR,
           errorMessage: `Fulfillment failed: ${error?.message || String(error)}`,
+        },
+      });
+
+      throw error;
+    }
+  }
+
+  /**
+   * Issue a refund for a marketplace order via the eBay Fulfillment API.
+   * Supports full-order refunds, partial amount refunds, and line-item-level refunds.
+   */
+  async issueRefund(
+    tenantId: string,
+    orderId: string,
+    data: { amount?: number; comment?: string; lineItemIds?: string[] }
+  ): Promise<any> {
+    const order = await this.getOrder(tenantId, orderId);
+
+    if (this.mockMode) {
+      this.logger.log(
+        `[MOCK] Issued refund for order ${order.externalOrderId}: amount=${data.amount}, lineItems=${data.lineItemIds?.join(',') || 'all'}`
+      );
+
+      const newPaymentStatus = data.amount && data.amount < (order.total?.toNumber?.() || 0)
+        ? 'PARTIALLY_REFUNDED'
+        : 'REFUNDED';
+
+      await this.prisma.marketplaceOrder.update({
+        where: { id: orderId },
+        data: {
+          paymentStatus: newPaymentStatus,
+          syncStatus: SyncStatus.SYNCED,
+          errorMessage: null,
+        },
+      });
+
+      return {
+        refundId: `mock_refund_${Date.now()}`,
+        orderId: order.externalOrderId,
+        refundStatus: 'PENDING',
+        amount: data.amount || order.total?.toNumber?.() || 0,
+        comment: data.comment || null,
+        createdDate: new Date().toISOString(),
+      };
+    }
+
+    const client = await this.ebayStore.getClient(order.connectionId, tenantId);
+
+    try {
+      const refundPayload: any = {
+        reasonForRefund: 'OTHER',
+        comment: data.comment || 'Refund issued by seller',
+      };
+
+      if (data.lineItemIds && data.lineItemIds.length > 0) {
+        // Line-item-level refund
+        const lineItems = (order.itemsData as any[]) || [];
+        refundPayload.refundItems = data.lineItemIds.map((lineItemId) => {
+          const lineItem = lineItems.find((li: any) => li.lineItemId === lineItemId);
+          return {
+            lineItemId,
+            legacyReference: {
+              legacyItemId: lineItem?.legacyItemId || '',
+              legacyTransactionId: lineItem?.transactionId || '',
+            },
+          };
+        });
+
+        if (data.amount) {
+          refundPayload.orderLevelRefundAmount = {
+            value: data.amount.toFixed(2),
+            currency: order.currency || 'USD',
+          };
+        }
+      } else if (data.amount) {
+        // Order-level partial refund
+        refundPayload.orderLevelRefundAmount = {
+          value: data.amount.toFixed(2),
+          currency: order.currency || 'USD',
+        };
+      }
+
+      const result = await (client.sell.fulfillment as any).issueRefund(
+        order.externalOrderId,
+        refundPayload
+      );
+
+      // Determine new payment status
+      const orderTotal = order.total?.toNumber?.() || 0;
+      const newPaymentStatus =
+        data.amount && data.amount < orderTotal
+          ? 'PARTIALLY_REFUNDED'
+          : 'REFUNDED';
+
+      await this.prisma.marketplaceOrder.update({
+        where: { id: orderId },
+        data: {
+          paymentStatus: newPaymentStatus,
+          syncStatus: SyncStatus.SYNCED,
+          errorMessage: null,
+        },
+      });
+
+      this.logger.log(
+        `Issued refund for eBay order ${order.externalOrderId}: status=${newPaymentStatus}`
+      );
+
+      return {
+        refundId: result?.refundId || null,
+        orderId: order.externalOrderId,
+        refundStatus: result?.refundStatus || 'PENDING',
+        amount: data.amount || orderTotal,
+        comment: data.comment || null,
+        ...result,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to issue refund for eBay order ${order.externalOrderId}`,
+        error
+      );
+
+      await this.prisma.marketplaceOrder.update({
+        where: { id: orderId },
+        data: {
+          syncStatus: SyncStatus.ERROR,
+          errorMessage: `Refund failed: ${error?.message || String(error)}`,
         },
       });
 

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { ConfirmDialog, toast } from '@platform/ui';
-import { PlusIcon, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
+import { PlusIcon, CheckCircle2, XCircle, RefreshCw, Palmtree } from 'lucide-react';
 import { unwrapJson } from '@/lib/admin-fetch';
 
 interface Connection {
@@ -23,6 +23,11 @@ interface ConnectionStatus {
   hasPolicies: boolean;
   canPublishListings: boolean;
   marketplaceId: string;
+}
+
+interface VacationStatus {
+  enabled: boolean;
+  returnMessage?: string;
 }
 
 export default function MarketplaceConnectionsPage() {
@@ -302,6 +307,9 @@ export default function MarketplaceConnectionsPage() {
                   <option value="EBAY_DE">eBay Germany</option>
                   <option value="EBAY_CA">eBay Canada</option>
                   <option value="EBAY_AU">eBay Australia</option>
+                  <option value="EBAY_FR">eBay France</option>
+                  <option value="EBAY_IT">eBay Italy</option>
+                  <option value="EBAY_ES">eBay Spain</option>
                 </select>
               </div>
 
@@ -354,6 +362,11 @@ function ConnectionCard({
   onReconnect: (id: string) => void;
 }) {
   const [status, setStatus] = useState<ConnectionStatus | null>(null);
+  const [vacationStatus, setVacationStatus] = useState<VacationStatus | null>(null);
+  const [vacationLoading, setVacationLoading] = useState(true);
+  const [vacationToggling, setVacationToggling] = useState(false);
+  const [showVacationInput, setShowVacationInput] = useState(false);
+  const [vacationReturnMessage, setVacationReturnMessage] = useState('');
 
   const authHeaders = () => {
     const token = localStorage.getItem('access_token') || '';
@@ -367,6 +380,7 @@ function ConnectionCard({
 
   useEffect(() => {
     loadStatus();
+    loadVacationStatus();
   }, [connection.id]);
 
   const loadStatus = async () => {
@@ -379,6 +393,80 @@ function ConnectionCard({
       }
     } catch (error) {
       console.error('Failed to load status:', error);
+    }
+  };
+
+  const loadVacationStatus = async () => {
+    setVacationLoading(true);
+    try {
+      const res = await fetch(`/api/v1/marketplace/connections/${connection.id}/vacation`, {
+        headers: authHeaders(),
+      });
+      if (res.ok) {
+        const data = unwrapJson(await res.json());
+        setVacationStatus(data);
+      } else {
+        // Endpoint may not exist yet; treat as disabled
+        setVacationStatus({ enabled: false });
+      }
+    } catch (error) {
+      console.error('Failed to load vacation status:', error);
+      setVacationStatus({ enabled: false });
+    } finally {
+      setVacationLoading(false);
+    }
+  };
+
+  const handleVacationToggle = async () => {
+    if (!vacationStatus) return;
+
+    const newEnabled = !vacationStatus.enabled;
+
+    // If enabling, show the return message input first
+    if (newEnabled && !showVacationInput) {
+      setShowVacationInput(true);
+      return;
+    }
+
+    setVacationToggling(true);
+    setShowVacationInput(false);
+    try {
+      const res = await fetch(`/api/v1/marketplace/connections/${connection.id}/vacation`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          enabled: newEnabled,
+          returnMessage: newEnabled ? vacationReturnMessage.trim() : '',
+        }),
+      });
+
+      if (res.ok) {
+        const data = unwrapJson(await res.json());
+        setVacationStatus(data);
+        setVacationReturnMessage('');
+        toast({
+          title: 'Success',
+          description: newEnabled
+            ? 'Vacation mode enabled'
+            : 'Vacation mode disabled',
+        });
+      } else {
+        const error = unwrapJson(await res.json());
+        toast({
+          title: 'Error',
+          description: error.error || 'Failed to update vacation mode',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      console.error('Failed to toggle vacation mode:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to update vacation mode',
+        variant: 'destructive',
+      });
+    } finally {
+      setVacationToggling(false);
     }
   };
 
@@ -421,6 +509,70 @@ function ConnectionCard({
       <div className="text-xs text-gray-500 mb-4">
         Marketplace: {connection.marketplaceId}
       </div>
+
+      {/* Vacation Mode */}
+      {connection.isConnected && (
+        <div className="border-t border-gray-200 pt-4 mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <Palmtree className="w-4 h-4 text-gray-500" />
+              <span className="text-sm font-medium text-gray-700">Vacation Mode</span>
+            </div>
+            {vacationLoading ? (
+              <div className="w-4 h-4 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <button
+                onClick={handleVacationToggle}
+                disabled={vacationToggling}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 ${
+                  vacationStatus?.enabled ? 'bg-orange-500' : 'bg-gray-200'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                    vacationStatus?.enabled ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            )}
+          </div>
+          {vacationStatus?.enabled && vacationStatus.returnMessage && (
+            <p className="text-xs text-orange-600 mt-1">
+              Message: {vacationStatus.returnMessage}
+            </p>
+          )}
+          {showVacationInput && (
+            <div className="mt-2 space-y-2">
+              <input
+                type="text"
+                value={vacationReturnMessage}
+                onChange={(e) => setVacationReturnMessage(e.target.value)}
+                placeholder="Return message (e.g., Back on March 15th)"
+                className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setShowVacationInput(false);
+                    setVacationReturnMessage('');
+                  }}
+                  className="flex-1 px-3 py-1.5 text-xs border border-gray-300 rounded-lg hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleVacationToggle}
+                  disabled={vacationToggling}
+                  className="flex-1 px-3 py-1.5 text-xs bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50 flex items-center justify-center gap-1"
+                >
+                  {vacationToggling && <RefreshCw className="w-3 h-3 animate-spin" />}
+                  Enable
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="flex gap-2">
         {!connection.isConnected ? (

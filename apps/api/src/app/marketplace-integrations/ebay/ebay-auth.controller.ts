@@ -1,7 +1,7 @@
 import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
 import { Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
-import { AuthGuard } from '@platform/auth';
+import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayAuthService } from './ebay-auth.service';
 
@@ -19,7 +19,8 @@ export class EbayAuthController {
    * GET /api/marketplace/ebay/auth/connect?connectionId=xxx
    */
   @Get('connect')
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles('admin', 'System Manager')
   async initiateOAuth(
     @Query('connectionId') connectionId: string,
     @Tenant() tenantId: string,

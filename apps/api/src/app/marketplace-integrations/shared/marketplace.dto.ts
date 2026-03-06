@@ -117,6 +117,11 @@ export class CreateDirectListingDto {
   @MaxLength(80, { message: 'Title must not exceed 80 characters (eBay limit)' })
   title!: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(55, { message: 'Subtitle must not exceed 55 characters (eBay limit)' })
+  subtitle?: string;
+
   @IsString()
   @MinLength(1)
   description!: string;
@@ -137,14 +142,24 @@ export class CreateDirectListingDto {
       'GOOD_REFURBISHED', 'SELLER_REFURBISHED',
       'USED_EXCELLENT', 'USED_VERY_GOOD', 'USED_GOOD', 'USED_ACCEPTABLE',
       'FOR_PARTS_OR_NOT_WORKING',
+      'PRE_OWNED_EXCELLENT', 'PRE_OWNED_FAIR',
     ],
     { message: 'condition must be a valid eBay item condition' }
   )
   condition!: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  conditionDescription?: string;
+
   @IsString()
   @MinLength(1)
   categoryId!: string;
+
+  @IsOptional()
+  @IsString()
+  secondaryCategoryId?: string;
 
   @IsOptional()
   @IsArray()
@@ -158,6 +173,126 @@ export class CreateDirectListingDto {
   @IsOptional()
   @IsObject()
   platformData?: Record<string, any>;
+
+  // Format & Auction
+  @IsOptional()
+  @IsEnum(['FIXED_PRICE', 'AUCTION'], { message: 'format must be FIXED_PRICE or AUCTION' })
+  format?: string;
+
+  @IsOptional()
+  @IsString()
+  listingDuration?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0.01)
+  startPrice?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  reservePrice?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  buyItNowPrice?: number;
+
+  // Best Offer
+  @IsOptional()
+  @IsBoolean()
+  bestOfferEnabled?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  autoAcceptPrice?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  autoDeclinePrice?: number;
+
+  // Additional listing fields
+  @IsOptional()
+  @IsBoolean()
+  privateListing?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  lotSize?: number;
+
+  @IsOptional()
+  @IsString()
+  epid?: string;
+
+  // Item location (buyer-facing)
+  @IsOptional()
+  @IsString()
+  itemLocationCity?: string;
+
+  @IsOptional()
+  @IsString()
+  itemLocationState?: string;
+
+  @IsOptional()
+  @IsString()
+  itemLocationPostalCode?: string;
+
+  @IsOptional()
+  @IsString()
+  itemLocationCountry?: string;
+
+  // Package details
+  @IsOptional()
+  @IsString()
+  packageType?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  weightValue?: number;
+
+  @IsOptional()
+  @IsString()
+  weightUnit?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  dimensionLength?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  dimensionWidth?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  dimensionHeight?: number;
+
+  @IsOptional()
+  @IsString()
+  dimensionUnit?: string;
+
+  // Policies
+  @IsOptional()
+  @IsString()
+  fulfillmentPolicyId?: string;
+
+  @IsOptional()
+  @IsString()
+  paymentPolicyId?: string;
+
+  @IsOptional()
+  @IsString()
+  returnPolicyId?: string;
+
+  @IsOptional()
+  @IsString()
+  merchantLocationKey?: string;
 }
 
 export class UpdateListingDto {
@@ -165,6 +300,11 @@ export class UpdateListingDto {
   @IsString()
   @MaxLength(80)
   title?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(55)
+  subtitle?: string;
 
   @IsOptional()
   @IsString()
@@ -186,7 +326,16 @@ export class UpdateListingDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(1000)
+  conditionDescription?: string;
+
+  @IsOptional()
+  @IsString()
   categoryId?: string;
+
+  @IsOptional()
+  @IsString()
+  secondaryCategoryId?: string;
 
   @IsOptional()
   @IsArray()
@@ -200,6 +349,118 @@ export class UpdateListingDto {
   @IsOptional()
   @IsObject()
   platformData?: Record<string, any>;
+
+  // Format & Auction
+  @IsOptional()
+  @IsString()
+  listingDuration?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  startPrice?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  reservePrice?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  buyItNowPrice?: number;
+
+  // Best Offer
+  @IsOptional()
+  @IsBoolean()
+  bestOfferEnabled?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  autoAcceptPrice?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  autoDeclinePrice?: number;
+
+  // Additional
+  @IsOptional()
+  @IsBoolean()
+  privateListing?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  lotSize?: number;
+
+  @IsOptional()
+  @IsString()
+  epid?: string;
+
+  // Item location
+  @IsOptional()
+  @IsString()
+  itemLocationCity?: string;
+
+  @IsOptional()
+  @IsString()
+  itemLocationState?: string;
+
+  @IsOptional()
+  @IsString()
+  itemLocationPostalCode?: string;
+
+  @IsOptional()
+  @IsString()
+  itemLocationCountry?: string;
+
+  // Package
+  @IsOptional()
+  @IsString()
+  packageType?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  weightValue?: number;
+
+  @IsOptional()
+  @IsString()
+  weightUnit?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  dimensionLength?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  dimensionWidth?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  dimensionHeight?: number;
+
+  @IsOptional()
+  @IsString()
+  dimensionUnit?: string;
+
+  // Policies
+  @IsOptional()
+  @IsString()
+  fulfillmentPolicyId?: string;
+
+  @IsOptional()
+  @IsString()
+  paymentPolicyId?: string;
+
+  @IsOptional()
+  @IsString()
+  returnPolicyId?: string;
 }
 
 export class RejectListingDto {
@@ -290,4 +551,178 @@ export class FulfillOrderDto {
   @MinLength(1)
   @MaxLength(50)
   carrier!: string;
+}
+
+// ============================================
+// Return DTOs
+// ============================================
+
+export class SyncReturnsDto {
+  @IsUUID()
+  connectionId!: string;
+}
+
+export class DeclineReturnDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(500)
+  reason!: string;
+}
+
+export class RefundReturnDto {
+  @IsNumber()
+  @Min(0.01)
+  amount!: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  comment?: string;
+}
+
+export class SendReturnMessageDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(2000)
+  message!: string;
+}
+
+export class GetReturnsQueryDto {
+  @IsOptional()
+  @IsUUID()
+  connectionId?: string;
+
+  @IsOptional()
+  @IsEnum(
+    ['RETURN_REQUESTED', 'RETURN_ACCEPTED', 'RETURN_DECLINED', 'ITEM_SHIPPED', 'ITEM_RECEIVED', 'REFUND_ISSUED', 'CLOSED'],
+    { message: 'status must be a valid return status' }
+  )
+  status?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(100)
+  @Type(() => Number)
+  limit?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  offset?: number;
+}
+
+// ============================================
+// Messaging DTOs
+// ============================================
+
+export class SyncMessagesDto {
+  @IsUUID()
+  connectionId!: string;
+}
+
+export class ReplyMessageDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(2000)
+  body!: string;
+}
+
+export class GetMessagesQueryDto {
+  @IsOptional()
+  @IsUUID()
+  connectionId?: string;
+
+  @IsOptional()
+  @IsEnum(['OPEN', 'RESPONDED', 'CLOSED'], {
+    message: 'status must be OPEN, RESPONDED, or CLOSED',
+  })
+  status?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  unreadOnly?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(100)
+  @Type(() => Number)
+  limit?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  offset?: number;
+}
+
+// ============================================
+// Variation Listing DTOs
+// ============================================
+
+export class VariantDto {
+  @IsString()
+  @MinLength(1)
+  sku!: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(80)
+  title!: string;
+
+  @IsNumber()
+  @Min(0.01)
+  price!: number;
+
+  @IsNumber()
+  @Min(0)
+  quantity!: number;
+
+  @IsString()
+  condition!: string;
+
+  @IsObject()
+  aspects!: Record<string, string[]>;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  photos?: string[];
+}
+
+export class CreateVariationListingDto {
+  @IsUUID()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  productListingId!: string;
+
+  @IsOptional()
+  @IsUUID()
+  warehouseId?: string;
+
+  @IsString()
+  @MaxLength(80)
+  groupTitle!: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  variantAspects!: string[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => VariantDto)
+  variants!: VariantDto[];
+
+  @IsString()
+  @MinLength(1)
+  categoryId!: string;
+
+  @IsString()
+  @MinLength(1)
+  description!: string;
 }

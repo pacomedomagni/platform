@@ -66,14 +66,23 @@ export class EbayClientService {
         description: string;
         imageUrls: string[];
         aspects?: Record<string, string[]>;
+        brand?: string;
+        mpn?: string;
+        upc?: string[];
+        ean?: string[];
+        isbn?: string[];
+        epid?: string;
+        subtitle?: string;
       };
       condition: string;
+      conditionDescription?: string;
       availability: {
         shipToLocationAvailability: {
           quantity: number;
         };
       };
       packageWeightAndSize?: {
+        packageType?: string;
         dimensions?: {
           height?: number;
           length?: number;
@@ -133,21 +142,32 @@ export class EbayClientService {
       format: string;
       availableQuantity: number;
       categoryId: string;
+      secondaryCategoryId?: string;
       listingDescription?: string;
+      listingDuration?: string; // DAYS_1, DAYS_3, DAYS_5, DAYS_7, DAYS_10, DAYS_21, DAYS_30, GTC
       listingPolicies: {
         fulfillmentPolicyId: string;
         paymentPolicyId: string;
         returnPolicyId: string;
+        bestOfferTerms?: {
+          bestOfferEnabled: boolean;
+          autoAcceptPrice?: { value: string; currency: string };
+          autoDeclinePrice?: { value: string; currency: string };
+        };
       };
       pricingSummary: {
         price: {
           value: string;
           currency: string;
         };
+        auctionStartPrice?: { value: string; currency: string };
+        auctionReservePrice?: { value: string; currency: string };
       };
       merchantLocationKey?: string;
       includeCatalogProductDetails?: boolean;
       hideBuyerDetails?: boolean;
+      lotSize?: number;
+      listingStartDate?: string; // ISO 8601 for scheduled listings
     }
   ) {
     if (this.mockMode) {
@@ -427,6 +447,333 @@ export class EbayClientService {
         return response.locations || [];
       } catch (error) {
         this.logger.error('Failed to fetch inventory locations', error);
+        throw error;
+      }
+    });
+  }
+
+  /**
+   * Update an existing offer (price, quantity, etc. on a published listing)
+   */
+  async updateOffer(
+    client: eBayApi,
+    offerId: string,
+    data: {
+      availableQuantity?: number;
+      categoryId?: string;
+      listingDescription?: string;
+      pricingSummary?: {
+        price: { value: string; currency: string };
+      };
+      listingPolicies?: {
+        fulfillmentPolicyId: string;
+        paymentPolicyId: string;
+        returnPolicyId: string;
+      };
+    }
+  ) {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Updated offer: ${offerId}`);
+      return { offerId };
+    }
+    return this.withRateLimitRetry(async () => {
+      try {
+        const response = await (client.sell.inventory as any).updateOffer(offerId, data);
+        this.logger.log(`Updated offer: ${offerId}`);
+        return response;
+      } catch (error) {
+        this.logger.error(`Failed to update offer ${offerId}`, error);
+        throw error;
+      }
+    });
+  }
+
+  /**
+   * Get offers for a SKU
+   */
+  async getOffers(client: eBayApi, params: { sku?: string; format?: string; limit?: number; offset?: number }) {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Fetched offers`);
+      return { offers: [], total: 0 };
+    }
+    return this.withRateLimitRetry(async () => {
+      try {
+        const response = await (client.sell.inventory as any).getOffers(params);
+        this.logger.log(`Fetched ${response.offers?.length || 0} offers`);
+        return response;
+      } catch (error) {
+        this.logger.error('Failed to fetch offers', error);
+        throw error;
+      }
+    });
+  }
+
+  // ============================================
+  // Multi-Variation Listing Methods
+  // ============================================
+
+  /**
+   * Create or replace inventory item group (for multi-variation listings)
+   */
+  async createOrReplaceInventoryItemGroup(
+    client: eBayApi,
+    inventoryItemGroupKey: string,
+    data: {
+      title: string;
+      description: string;
+      imageUrls: string[];
+      aspects: Record<string, string[]>;
+      variantSKUs: string[];
+      variesBy: {
+        aspectsImageVariesBy: string[];
+        specifications: Array<{ name: string; values: string[] }>;
+      };
+    }
+  ) {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Created/updated inventory item group: ${inventoryItemGroupKey}`);
+      return { inventoryItemGroupKey, statusCode: 204 };
+    }
+    return this.withRateLimitRetry(async () => {
+      try {
+        const response = await client.sell.inventory.createOrReplaceInventoryItemGroup(
+          inventoryItemGroupKey,
+          data as any
+        );
+        this.logger.log(`Created/updated inventory item group: ${inventoryItemGroupKey}`);
+        return response;
+      } catch (error) {
+        this.logger.error(`Failed to create/update inventory item group ${inventoryItemGroupKey}`, error);
+        throw error;
+      }
+    });
+  }
+
+  /**
+   * Get inventory item group
+   */
+  async getInventoryItemGroup(client: eBayApi, inventoryItemGroupKey: string) {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Fetched inventory item group: ${inventoryItemGroupKey}`);
+      return { inventoryItemGroupKey, title: 'Mock Group', variantSKUs: [] };
+    }
+    return this.withRateLimitRetry(async () => {
+      try {
+        const response = await client.sell.inventory.getInventoryItemGroup(inventoryItemGroupKey);
+        this.logger.log(`Fetched inventory item group: ${inventoryItemGroupKey}`);
+        return response;
+      } catch (error) {
+        this.logger.error(`Failed to fetch inventory item group ${inventoryItemGroupKey}`, error);
+        throw error;
+      }
+    });
+  }
+
+  /**
+   * Delete inventory item group
+   */
+  async deleteInventoryItemGroup(client: eBayApi, inventoryItemGroupKey: string) {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Deleted inventory item group: ${inventoryItemGroupKey}`);
+      return;
+    }
+    return this.withRateLimitRetry(async () => {
+      try {
+        await client.sell.inventory.deleteInventoryItemGroup(inventoryItemGroupKey);
+        this.logger.log(`Deleted inventory item group: ${inventoryItemGroupKey}`);
+      } catch (error) {
+        this.logger.error(`Failed to delete inventory item group ${inventoryItemGroupKey}`, error);
+        throw error;
+      }
+    });
+  }
+
+  /**
+   * Publish offer by inventory item group (for multi-variation listings)
+   */
+  async publishOfferByInventoryItemGroup(
+    client: eBayApi,
+    data: {
+      inventoryItemGroupKey: string;
+      marketplaceId: string;
+      offers: Array<{
+        sku: string;
+        marketplaceId: string;
+        format: string;
+        availableQuantity: number;
+        categoryId: string;
+        listingPolicies: {
+          fulfillmentPolicyId: string;
+          paymentPolicyId: string;
+          returnPolicyId: string;
+        };
+        pricingSummary: {
+          price: { value: string; currency: string };
+        };
+        merchantLocationKey?: string;
+      }>;
+    }
+  ) {
+    if (this.mockMode) {
+      const listingId = `mock_group_listing_${Date.now()}`;
+      this.logger.log(`[MOCK] Published offers by group: ${data.inventoryItemGroupKey} → ${listingId}`);
+      return { listingId, offers: data.offers.map((o, i) => ({ offerId: `mock_offer_${i}`, sku: o.sku })) };
+    }
+    return this.withRateLimitRetry(async () => {
+      try {
+        const response = await (client.sell.inventory as any).publishOfferByInventoryItemGroup(data);
+        this.logger.log(`Published offers by group: ${data.inventoryItemGroupKey}`);
+        return response;
+      } catch (error) {
+        this.logger.error(`Failed to publish offers by group ${data.inventoryItemGroupKey}`, error);
+        throw error;
+      }
+    });
+  }
+
+  // ============================================
+  // Trading API Methods
+  // ============================================
+
+  /**
+   * Get messages from eBay (Trading API)
+   */
+  async getMyMessages(
+    client: eBayApi,
+    params: { folder?: string; startTime?: string; endTime?: string; detailLevel?: string }
+  ) {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Fetched 0 messages from eBay`);
+      return { Messages: { Message: [] } };
+    }
+    return this.withRateLimitRetry(async () => {
+      try {
+        const response = await (client as any).trading.GetMyMessages({
+          Folder: params.folder || 'Inbox',
+          StartTime: params.startTime,
+          EndTime: params.endTime,
+          DetailLevel: params.detailLevel || 'ReturnMessages',
+        });
+        this.logger.log(`Fetched messages from eBay`);
+        return response;
+      } catch (error) {
+        this.logger.error('Failed to fetch messages from eBay', error);
+        throw error;
+      }
+    });
+  }
+
+  /**
+   * Send message to buyer (Trading API)
+   */
+  async addMemberMessageAAQToPartner(
+    client: eBayApi,
+    data: { itemId: string; recipientId: string; subject: string; body: string }
+  ) {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Sent message to ${data.recipientId}`);
+      return { Ack: 'Success' };
+    }
+    return this.withRateLimitRetry(async () => {
+      try {
+        const response = await (client as any).trading.AddMemberMessageAAQToPartner({
+          ItemID: data.itemId,
+          MemberMessage: {
+            Body: data.body,
+            RecipientID: [data.recipientId],
+            Subject: data.subject,
+            QuestionType: 'General',
+          },
+        });
+        this.logger.log(`Sent message to ${data.recipientId}`);
+        return response;
+      } catch (error) {
+        this.logger.error(`Failed to send message to ${data.recipientId}`, error);
+        throw error;
+      }
+    });
+  }
+
+  /**
+   * Get best offers for a listing (Trading API)
+   */
+  async getBestOffers(client: eBayApi, itemId: string, status?: string) {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Fetched best offers for item ${itemId}`);
+      return { BestOfferArray: { BestOffer: [] } };
+    }
+    return this.withRateLimitRetry(async () => {
+      try {
+        const params: any = { ItemID: itemId };
+        if (status) params.BestOfferStatus = status;
+        const response = await (client as any).trading.GetBestOffers(params);
+        this.logger.log(`Fetched best offers for item ${itemId}`);
+        return response;
+      } catch (error) {
+        this.logger.error(`Failed to fetch best offers for item ${itemId}`, error);
+        throw error;
+      }
+    });
+  }
+
+  /**
+   * Respond to best offer (Trading API)
+   */
+  async respondToBestOffer(
+    client: eBayApi,
+    itemId: string,
+    bestOfferId: string,
+    action: 'Accept' | 'Decline' | 'Counter',
+    counterAmount?: number,
+    sellerMessage?: string
+  ) {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Responded to best offer ${bestOfferId} with ${action}`);
+      return { Ack: 'Success' };
+    }
+    return this.withRateLimitRetry(async () => {
+      try {
+        const params: any = {
+          ItemID: itemId,
+          BestOfferID: bestOfferId,
+          Action: action,
+        };
+        if (action === 'Counter' && counterAmount !== undefined) {
+          params.CounterOfferPrice = { _value: counterAmount, _attrs: { currencyID: 'USD' } };
+        }
+        if (sellerMessage) params.SellerResponse = sellerMessage;
+        const response = await (client as any).trading.RespondToBestOffer(params);
+        this.logger.log(`Responded to best offer ${bestOfferId} with ${action}`);
+        return response;
+      } catch (error) {
+        this.logger.error(`Failed to respond to best offer ${bestOfferId}`, error);
+        throw error;
+      }
+    });
+  }
+
+  /**
+   * Get feedback (Trading API)
+   */
+  async getFeedback(client: eBayApi, params?: { userId?: string; entriesPerPage?: number; pageNumber?: number }) {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Fetched feedback`);
+      return { FeedbackDetailArray: { FeedbackDetail: [] }, FeedbackScore: 0 };
+    }
+    return this.withRateLimitRetry(async () => {
+      try {
+        const response = await (client as any).trading.GetFeedback({
+          DetailLevel: 'ReturnAll',
+          Pagination: {
+            EntriesPerPage: params?.entriesPerPage || 25,
+            PageNumber: params?.pageNumber || 1,
+          },
+          ...(params?.userId ? { UserID: params.userId } : {}),
+        });
+        this.logger.log(`Fetched feedback`);
+        return response;
+      } catch (error) {
+        this.logger.error('Failed to fetch feedback', error);
         throw error;
       }
     });

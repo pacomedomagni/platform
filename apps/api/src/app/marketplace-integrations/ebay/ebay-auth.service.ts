@@ -58,6 +58,7 @@ export class EbayAuthService implements OnModuleDestroy {
     const ruName = process.env['EBAY_RU_NAME'];
     const scopes = [
       'https://api.ebay.com/oauth/api_scope',
+      // Sell APIs
       'https://api.ebay.com/oauth/api_scope/sell.marketing.readonly',
       'https://api.ebay.com/oauth/api_scope/sell.marketing',
       'https://api.ebay.com/oauth/api_scope/sell.inventory.readonly',
@@ -69,7 +70,17 @@ export class EbayAuthService implements OnModuleDestroy {
       'https://api.ebay.com/oauth/api_scope/sell.analytics.readonly',
       'https://api.ebay.com/oauth/api_scope/sell.finances',
       'https://api.ebay.com/oauth/api_scope/sell.payment.dispute',
+      'https://api.ebay.com/oauth/api_scope/sell.logistics',
+      'https://api.ebay.com/oauth/api_scope/sell.compliance',
+      'https://api.ebay.com/oauth/api_scope/sell.negotiation',
+      'https://api.ebay.com/oauth/api_scope/sell.feed',
+      'https://api.ebay.com/oauth/api_scope/sell.metadata',
+      // Commerce APIs
       'https://api.ebay.com/oauth/api_scope/commerce.identity.readonly',
+      'https://api.ebay.com/oauth/api_scope/commerce.catalog.readonly',
+      'https://api.ebay.com/oauth/api_scope/commerce.media.upload',
+      'https://api.ebay.com/oauth/api_scope/commerce.taxonomy.readonly',
+      'https://api.ebay.com/oauth/api_scope/commerce.notification.subscription',
     ];
 
     const params = new URLSearchParams({

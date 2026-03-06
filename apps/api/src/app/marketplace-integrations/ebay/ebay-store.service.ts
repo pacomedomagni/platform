@@ -440,4 +440,102 @@ export class EbayStoreService {
     this.clientCache.delete(connectionId);
     this.logger.log(`Deleted connection ${connectionId}`);
   }
+
+  /**
+   * Set vacation mode on the eBay store via Trading API SetStore.
+   * When enabled=true, sets OnVacation=true and an optional return message.
+   * When enabled=false, disables vacation mode.
+   */
+  async setVacationMode(
+    connectionId: string,
+    enabled: boolean,
+    returnMessage?: string
+  ): Promise<{ success: boolean; onVacation: boolean; returnMessage?: string }> {
+    if (this.mockMode) {
+      this.logger.log(
+        `[MOCK] Set vacation mode to ${enabled ? 'ON' : 'OFF'} for connection ${connectionId}`
+      );
+      return {
+        success: true,
+        onVacation: enabled,
+        returnMessage: enabled ? returnMessage : undefined,
+      };
+    }
+
+    const client = await this.getClient(connectionId);
+
+    try {
+      const storePayload: any = {
+        Store: {
+          Vacation: {
+            OnVacation: enabled,
+          },
+        },
+      };
+
+      if (enabled) {
+        storePayload.Store.Vacation.MessageItem = returnMessage || '';
+        storePayload.Store.Vacation.ReturnDate = null;
+      }
+
+      await (client as any).trading.SetStore(storePayload);
+
+      this.logger.log(
+        `Set vacation mode to ${enabled ? 'ON' : 'OFF'} for connection ${connectionId}`
+      );
+
+      return {
+        success: true,
+        onVacation: enabled,
+        returnMessage: enabled ? returnMessage : undefined,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to set vacation mode for connection ${connectionId}`,
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Get current vacation mode status from eBay store via Trading API GetStore.
+   * Returns whether the store is on vacation and any configured return message.
+   */
+  async getVacationMode(
+    connectionId: string
+  ): Promise<{ onVacation: boolean; returnMessage?: string }> {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Fetched vacation mode for connection ${connectionId}`);
+      return {
+        onVacation: false,
+        returnMessage: undefined,
+      };
+    }
+
+    const client = await this.getClient(connectionId);
+
+    try {
+      const response = await (client as any).trading.GetStore({});
+
+      const vacation = response?.Store?.Vacation;
+      const onVacation = vacation?.OnVacation === true || vacation?.OnVacation === 'true';
+      const returnMessage = vacation?.MessageItem || undefined;
+
+      this.logger.log(
+        `Fetched vacation mode for connection ${connectionId}: ${onVacation ? 'ON' : 'OFF'}`
+      );
+
+      return {
+        onVacation,
+        returnMessage: onVacation ? returnMessage : undefined,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to get vacation mode for connection ${connectionId}`,
+        error
+      );
+      throw error;
+    }
+  }
 }

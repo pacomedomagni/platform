@@ -94,4 +94,18 @@ export class EbayOrdersController {
       dto.carrier
     );
   }
+
+  /**
+   * Issue a refund for a marketplace order
+   * POST /api/marketplace/orders/:id/refund
+   */
+  @Post(':id/refund')
+  @Roles('admin', 'System Manager')
+  async issueRefund(
+    @Tenant() tenantId: string,
+    @Param('id') id: string,
+    @Body() body: { amount?: number; comment?: string; lineItemIds?: string[] }
+  ) {
+    return this.orderSyncService.issueRefund(tenantId, id, body);
+  }
 }

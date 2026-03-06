@@ -63,6 +63,139 @@ export class EbayListingsController {
   }
 
   /**
+   * Create listing directly (without product reference)
+   * POST /api/marketplace/ebay/listings/direct
+   */
+  @Post('direct')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
+  async createDirectListing(
+    @Tenant() tenantId: string,
+    @Body() dto: {
+      connectionId: string;
+      productListingId: string;
+      warehouseId?: string;
+      title: string;
+      subtitle?: string;
+      description: string;
+      price: number;
+      quantity: number;
+      condition: string;
+      conditionDescription?: string;
+      categoryId: string;
+      secondaryCategoryId?: string;
+      photos?: string[];
+      itemSpecifics?: Record<string, string[]>;
+      platformData?: Record<string, any>;
+      format?: string;
+      listingDuration?: string;
+      startPrice?: number;
+      reservePrice?: number;
+      buyItNowPrice?: number;
+      bestOfferEnabled?: boolean;
+      autoAcceptPrice?: number;
+      autoDeclinePrice?: number;
+      privateListing?: boolean;
+      lotSize?: number;
+      epid?: string;
+      itemLocationCity?: string;
+      itemLocationState?: string;
+      itemLocationPostalCode?: string;
+      itemLocationCountry?: string;
+      packageType?: string;
+      weightValue?: number;
+      weightUnit?: string;
+      dimensionLength?: number;
+      dimensionWidth?: number;
+      dimensionHeight?: number;
+      dimensionUnit?: string;
+      fulfillmentPolicyId?: string;
+      paymentPolicyId?: string;
+      returnPolicyId?: string;
+      merchantLocationKey?: string;
+    }
+  ) {
+    return this.listingsService.createDirectListing(dto);
+  }
+
+  /**
+   * Create multi-variation listing
+   * POST /api/marketplace/ebay/listings/variations
+   */
+  @Post('variations')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
+  async createVariationListing(
+    @Tenant() tenantId: string,
+    @Body() dto: {
+      connectionId: string;
+      groupKey: string;
+      title: string;
+      description: string;
+      categoryId: string;
+      imageUrls: string[];
+      aspects: Record<string, string[]>;
+      variants: Array<{
+        sku: string;
+        productListingId: string;
+        title: string;
+        description: string;
+        price: number;
+        quantity: number;
+        condition: string;
+        imageUrls: string[];
+        variantAspects: Record<string, string[]>;
+      }>;
+      fulfillmentPolicyId: string;
+      paymentPolicyId: string;
+      returnPolicyId: string;
+      merchantLocationKey?: string;
+    }
+  ) {
+    return this.listingsService.createVariationListing(dto);
+  }
+
+  /**
+   * Update published listing (price, quantity, description)
+   * PATCH /api/marketplace/ebay/listings/:id/offer
+   */
+  @Patch(':id/offer')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
+  async updatePublishedListing(
+    @Param('id') id: string,
+    @Body() dto: {
+      price?: { value: string; currency: string };
+      quantity?: number;
+      description?: string;
+    }
+  ) {
+    return this.listingsService.updatePublishedListing(id, dto);
+  }
+
+  /**
+   * Get Out-of-Stock Control preference
+   * GET /api/marketplace/ebay/listings/out-of-stock-control?connectionId=...
+   */
+  @Get('out-of-stock-control')
+  async getOutOfStockControl(
+    @Tenant() tenantId: string,
+    @Query('connectionId') connectionId: string
+  ) {
+    return this.listingsService.getOutOfStockControl(connectionId);
+  }
+
+  /**
+   * Set Out-of-Stock Control preference
+   * POST /api/marketplace/ebay/listings/out-of-stock-control
+   */
+  @Post('out-of-stock-control')
+  @Roles('admin', 'System Manager')
+  async setOutOfStockControl(
+    @Tenant() tenantId: string,
+    @Body() body: { connectionId: string; enabled: boolean }
+  ) {
+    return this.listingsService.setOutOfStockControl(body.connectionId, body.enabled);
+  }
+
+  /**
    * Get single listing
    * GET /api/marketplace/ebay/listings/:id
    */
@@ -132,6 +265,19 @@ export class EbayListingsController {
   async syncInventory(@Param('id') id: string) {
     await this.listingsService.syncListingInventory(id);
     return { success: true, message: 'Inventory synced' };
+  }
+
+  /**
+   * Schedule listing publish
+   * POST /api/marketplace/ebay/listings/:id/schedule
+   */
+  @Post(':id/schedule')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
+  async scheduleListingPublish(
+    @Param('id') id: string,
+    @Body() body: { scheduledDate: string }
+  ) {
+    return this.listingsService.scheduleListingPublish(id, new Date(body.scheduledDate));
   }
 
   /**
