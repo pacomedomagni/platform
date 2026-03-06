@@ -6,27 +6,35 @@ import {
   Body,
   Param,
   Query,
+  Inject,
   UseGuards,
   ValidationPipe,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
-import { EbayStoreService } from '../ebay/ebay-store.service';
+import {
+  IMarketplaceConnectionsService,
+  MARKETPLACE_CONNECTIONS_SERVICE,
+} from '../shared/marketplace-service.interface';
 import { CreateConnectionDto } from '../shared/marketplace.dto';
 
 /**
  * Marketplace Connections Controller
- * Manages eBay/Amazon/etc connections for tenants
+ * Manages eBay/Amazon/etc connections for tenants.
+ * Uses injected service token so the controller is platform-agnostic.
  */
 @Controller('marketplace/connections')
 @UseGuards(AuthGuard, RolesGuard)
 @Throttle({ short: { limit: 10, ttl: 1000 }, medium: { limit: 30, ttl: 60000 } })
 export class ConnectionsController {
-  constructor(private ebayStore: EbayStoreService) {}
+  constructor(
+    @Inject(MARKETPLACE_CONNECTIONS_SERVICE)
+    private connectionsService: IMarketplaceConnectionsService
+  ) {}
 
   /**
-   * Create new eBay connection
+   * Create new marketplace connection
    * POST /api/marketplace/connections
    */
   @Post()
@@ -35,7 +43,7 @@ export class ConnectionsController {
     @Tenant() tenantId: string,
     @Body(ValidationPipe) dto: CreateConnectionDto
   ) {
-    return this.ebayStore.createConnection({
+    return this.connectionsService.createConnection({
       name: dto.name,
       description: dto.description,
       marketplaceId: dto.marketplaceId,
@@ -52,8 +60,7 @@ export class ConnectionsController {
     @Tenant() tenantId: string,
     @Query('platform') platform?: string
   ) {
-    // Currently only eBay supported
-    return this.ebayStore.getConnections();
+    return this.connectionsService.getConnections();
   }
 
   /**
@@ -65,9 +72,7 @@ export class ConnectionsController {
     @Tenant() tenantId: string,
     @Param('id') id: string
   ) {
-    // tenantId is resolved from CLS by the service, but the @Tenant() decorator
-    // ensures the middleware has populated the CLS context for this request.
-    return this.ebayStore.getConnection(id);
+    return this.connectionsService.getConnection(id);
   }
 
   /**
@@ -79,7 +84,7 @@ export class ConnectionsController {
     @Tenant() tenantId: string,
     @Param('id') id: string
   ) {
-    return this.ebayStore.getConnectionStatus(id);
+    return this.connectionsService.getConnectionStatus(id);
   }
 
   /**
@@ -92,7 +97,7 @@ export class ConnectionsController {
     @Tenant() tenantId: string,
     @Param('id') id: string
   ) {
-    await this.ebayStore.disconnectConnection(id);
+    await this.connectionsService.disconnectConnection(id);
     return { success: true, message: 'Connection disconnected' };
   }
 
@@ -106,7 +111,7 @@ export class ConnectionsController {
     @Tenant() tenantId: string,
     @Param('id') id: string
   ) {
-    return this.ebayStore.getVacationMode(id);
+    return this.connectionsService.getVacationMode(id);
   }
 
   /**
@@ -120,7 +125,7 @@ export class ConnectionsController {
     @Param('id') id: string,
     @Body() body: { enabled: boolean; returnMessage?: string }
   ) {
-    return this.ebayStore.setVacationMode(id, body.enabled, body.returnMessage);
+    return this.connectionsService.setVacationMode(id, body.enabled, body.returnMessage);
   }
 
   /**
@@ -133,7 +138,7 @@ export class ConnectionsController {
     @Tenant() tenantId: string,
     @Param('id') id: string
   ) {
-    await this.ebayStore.deleteConnection(id);
+    await this.connectionsService.deleteConnection(id);
     return { success: true, message: 'Connection deleted' };
   }
 }

@@ -7,6 +7,7 @@ import {
   Body,
   Param,
   Query,
+  Inject,
   UseGuards,
   Request,
   ValidationPipe,
@@ -14,7 +15,10 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
-import { EbayListingsService } from '../ebay/ebay-listings.service';
+import {
+  IMarketplaceListingsService,
+  MARKETPLACE_LISTINGS_SERVICE,
+} from '../shared/marketplace-service.interface';
 import {
   CreateDirectListingDto,
   UpdateListingDto,
@@ -25,13 +29,16 @@ import {
 /**
  * Unified Marketplace Listings Controller
  * Handles listings across all marketplace platforms (eBay, Amazon, etc.)
- * This controller provides a unified API that the frontend uses
+ * Uses injected service token so the controller is platform-agnostic.
  */
 @Controller('marketplace/listings')
 @UseGuards(AuthGuard, RolesGuard)
 @Throttle({ short: { limit: 10, ttl: 1000 }, medium: { limit: 60, ttl: 60000 } })
 export class MarketplaceListingsController {
-  constructor(private ebayListings: EbayListingsService) {}
+  constructor(
+    @Inject(MARKETPLACE_LISTINGS_SERVICE)
+    private listingsService: IMarketplaceListingsService
+  ) {}
 
   /**
    * Create listing
@@ -44,9 +51,7 @@ export class MarketplaceListingsController {
     @Body(ValidationPipe) dto: CreateDirectListingDto,
     @Request() req: any
   ) {
-    // For now, only eBay is supported
-    // In the future, we'll route to different services based on platform
-    return this.ebayListings.createDirectListing(dto);
+    return this.listingsService.createDirectListing(dto);
   }
 
   /**
@@ -58,7 +63,7 @@ export class MarketplaceListingsController {
     @Tenant() tenantId: string,
     @Query(ValidationPipe) query: GetListingsQueryDto
   ) {
-    return this.ebayListings.getListings({
+    return this.listingsService.getListings({
       connectionId: query.connectionId,
       status: query.status,
       limit: query.limit,
@@ -75,7 +80,7 @@ export class MarketplaceListingsController {
     @Tenant() tenantId: string,
     @Param('id') id: string
   ) {
-    return this.ebayListings.getListing(id);
+    return this.listingsService.getListing(id);
   }
 
   /**
@@ -88,7 +93,7 @@ export class MarketplaceListingsController {
     @Param('id') id: string,
     @Body(ValidationPipe) dto: UpdateListingDto
   ) {
-    return this.ebayListings.updateListing(id, dto);
+    return this.listingsService.updateListing(id, dto);
   }
 
   /**
@@ -99,7 +104,7 @@ export class MarketplaceListingsController {
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async approveListing(@Param('id') id: string, @Request() req: any) {
     const userId = req.user?.id;
-    return this.ebayListings.approveListing(id, userId);
+    return this.listingsService.approveListing(id, userId);
   }
 
   /**
@@ -114,7 +119,7 @@ export class MarketplaceListingsController {
     @Request() req: any
   ) {
     const userId = req.user?.id;
-    return this.ebayListings.rejectListing(id, userId, dto.reason);
+    return this.listingsService.rejectListing(id, userId, dto.reason);
   }
 
   /**
@@ -124,7 +129,7 @@ export class MarketplaceListingsController {
   @Post(':id/publish')
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async publishListing(@Param('id') id: string) {
-    return this.ebayListings.publishListing(id);
+    return this.listingsService.publishListing(id);
   }
 
   /**
@@ -134,7 +139,7 @@ export class MarketplaceListingsController {
   @Post(':id/sync-inventory')
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async syncInventory(@Param('id') id: string) {
-    await this.ebayListings.syncListingInventory(id);
+    await this.listingsService.syncListingInventory(id);
     return { success: true, message: 'Inventory synced' };
   }
 
@@ -145,7 +150,7 @@ export class MarketplaceListingsController {
   @Post(':id/end')
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async endListing(@Param('id') id: string) {
-    await this.ebayListings.endListing(id);
+    await this.listingsService.endListing(id);
     return { success: true, message: 'Listing ended' };
   }
 
@@ -156,7 +161,7 @@ export class MarketplaceListingsController {
   @Delete(':id')
   @Roles('admin', 'System Manager')
   async deleteListing(@Param('id') id: string) {
-    await this.ebayListings.deleteListing(id);
+    await this.listingsService.deleteListing(id);
     return { success: true, message: 'Listing deleted' };
   }
 }

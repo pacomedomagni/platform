@@ -12,7 +12,10 @@ import {
   BarChart3,
   DollarSign,
   Mail,
-  Globe,
+  Percent,
+  ShieldAlert,
+  Star,
+  Settings,
 } from 'lucide-react';
 
 const MARKETPLACE_NAV = [
@@ -22,9 +25,13 @@ const MARKETPLACE_NAV = [
   { label: 'Returns', href: '/app/marketplace/returns', icon: RotateCcw },
   { label: 'Messages', href: '/app/marketplace/messages', icon: MessageSquare },
   { label: 'Campaigns', href: '/app/marketplace/campaigns', icon: Megaphone },
+  { label: 'Promotions', href: '/app/marketplace/promotions', icon: Percent },
   { label: 'Analytics', href: '/app/marketplace/analytics', icon: BarChart3 },
   { label: 'Finances', href: '/app/marketplace/finances', icon: DollarSign },
+  { label: 'Compliance', href: '/app/marketplace/compliance', icon: ShieldAlert },
+  { label: 'Feedback', href: '/app/marketplace/feedback', icon: Star },
   { label: 'Email', href: '/app/marketplace/email-campaigns', icon: Mail },
+  { label: 'Settings', href: '/app/marketplace/settings', icon: Settings },
 ];
 
 export default function MarketplaceLayout({

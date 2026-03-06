@@ -17,6 +17,8 @@ import { Tenant } from '../../tenant.middleware';
 import { EbayListingsService } from './ebay-listings.service';
 import {
   CreateListingDto,
+  CreateDirectListingDto,
+  CreateVariationListingDto,
   UpdateListingDto,
   RejectListingDto,
   GetListingsQueryDto,
@@ -70,49 +72,7 @@ export class EbayListingsController {
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async createDirectListing(
     @Tenant() tenantId: string,
-    @Body() dto: {
-      connectionId: string;
-      productListingId: string;
-      warehouseId?: string;
-      title: string;
-      subtitle?: string;
-      description: string;
-      price: number;
-      quantity: number;
-      condition: string;
-      conditionDescription?: string;
-      categoryId: string;
-      secondaryCategoryId?: string;
-      photos?: string[];
-      itemSpecifics?: Record<string, string[]>;
-      platformData?: Record<string, any>;
-      format?: string;
-      listingDuration?: string;
-      startPrice?: number;
-      reservePrice?: number;
-      buyItNowPrice?: number;
-      bestOfferEnabled?: boolean;
-      autoAcceptPrice?: number;
-      autoDeclinePrice?: number;
-      privateListing?: boolean;
-      lotSize?: number;
-      epid?: string;
-      itemLocationCity?: string;
-      itemLocationState?: string;
-      itemLocationPostalCode?: string;
-      itemLocationCountry?: string;
-      packageType?: string;
-      weightValue?: number;
-      weightUnit?: string;
-      dimensionLength?: number;
-      dimensionWidth?: number;
-      dimensionHeight?: number;
-      dimensionUnit?: string;
-      fulfillmentPolicyId?: string;
-      paymentPolicyId?: string;
-      returnPolicyId?: string;
-      merchantLocationKey?: string;
-    }
+    @Body(ValidationPipe) dto: CreateDirectListingDto
   ) {
     return this.listingsService.createDirectListing(dto);
   }
@@ -125,32 +85,31 @@ export class EbayListingsController {
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async createVariationListing(
     @Tenant() tenantId: string,
-    @Body() dto: {
-      connectionId: string;
-      groupKey: string;
-      title: string;
-      description: string;
-      categoryId: string;
-      imageUrls: string[];
-      aspects: Record<string, string[]>;
-      variants: Array<{
-        sku: string;
-        productListingId: string;
-        title: string;
-        description: string;
-        price: number;
-        quantity: number;
-        condition: string;
-        imageUrls: string[];
-        variantAspects: Record<string, string[]>;
-      }>;
-      fulfillmentPolicyId: string;
-      paymentPolicyId: string;
-      returnPolicyId: string;
-      merchantLocationKey?: string;
-    }
+    @Body(ValidationPipe) dto: CreateVariationListingDto
   ) {
-    return this.listingsService.createVariationListing(dto);
+    return this.listingsService.createVariationListing({
+      connectionId: dto.connectionId,
+      groupKey: dto.groupTitle,
+      title: dto.groupTitle,
+      description: dto.description,
+      categoryId: dto.categoryId,
+      imageUrls: [],
+      aspects: {},
+      variants: dto.variants.map((v) => ({
+        sku: v.sku,
+        productListingId: dto.productListingId,
+        title: v.title,
+        description: dto.description,
+        price: v.price,
+        quantity: v.quantity,
+        condition: v.condition,
+        imageUrls: v.photos || [],
+        variantAspects: v.aspects,
+      })),
+      fulfillmentPolicyId: '',
+      paymentPolicyId: '',
+      returnPolicyId: '',
+    });
   }
 
   /**

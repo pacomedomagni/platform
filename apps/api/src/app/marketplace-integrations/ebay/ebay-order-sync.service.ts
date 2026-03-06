@@ -27,6 +27,9 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
   private readonly SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
   private readonly INVENTORY_SYNC_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 
+  // In-memory lock to prevent concurrent inventory updates for the same SKU
+  private readonly inventoryLocks = new Map<string, Promise<void>>();
+
   constructor(
     private prisma: PrismaService,
     private ebayStore: EbayStoreService,
@@ -216,7 +219,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
               : null;
 
           // Upsert into MarketplaceOrder
-          await this.prisma.marketplaceOrder.upsert({
+          const upsertedOrder = await this.prisma.marketplaceOrder.upsert({
             where: { externalOrderId },
             create: {
               tenantId,
@@ -244,6 +247,18 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
               errorMessage: null,
             },
           });
+
+          // Auto-create NoSlag Order for paid orders that aren't yet linked
+          if (paymentStatus === 'PAID' && !upsertedOrder.orderId) {
+            try {
+              await this.createNoSlagOrder(tenantId, upsertedOrder.id);
+            } catch (orderCreateError) {
+              this.logger.warn(
+                `Failed to create NoSlag order for marketplace order ${upsertedOrder.id}: ${orderCreateError?.message}`,
+              );
+              // Non-fatal: the marketplace order is still synced, NoSlag order can be created later
+            }
+          }
 
           itemsSuccess++;
         } catch (orderError) {
@@ -571,6 +586,131 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Create a NoSlag Order record from a synced MarketplaceOrder.
+   * Links the marketplace order to the core Order system so it appears in the
+   * unified orders view, triggers inventory reservations, and can use existing
+   * fulfillment workflows (pick, pack, ship).
+   */
+  async createNoSlagOrder(tenantId: string, marketplaceOrderId: string): Promise<any> {
+    const mpOrder = await this.prisma.marketplaceOrder.findFirst({
+      where: { id: marketplaceOrderId, tenantId },
+      include: {
+        connection: { select: { id: true, name: true, platform: true } },
+      },
+    });
+
+    if (!mpOrder) {
+      throw new NotFoundException(`Marketplace order ${marketplaceOrderId} not found`);
+    }
+
+    if (mpOrder.orderId) {
+      // Already linked to a NoSlag order
+      return this.prisma.order.findUnique({ where: { id: mpOrder.orderId } });
+    }
+
+    // Generate order number and create the order atomically
+    const order = await this.prisma.$transaction(async (tx) => {
+      // Atomic order number generation (same pattern as checkout service)
+      const date = new Date();
+      const prefix = `MKT-${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}`;
+      const result = await tx.$queryRaw<any[]>`
+        UPDATE tenants
+        SET "nextOrderNumber" = "nextOrderNumber" + 1
+        WHERE id = ${tenantId}
+        RETURNING "nextOrderNumber"
+      `;
+      const seq = result[0]?.nextOrderNumber || 1;
+      const orderNumber = `${prefix}-${String(seq).padStart(5, '0')}`;
+
+      // Parse name parts from shippingName
+      const nameParts = (mpOrder.shippingName || 'Unknown').split(' ');
+      const firstName = nameParts[0] || 'Unknown';
+      const lastName = nameParts.slice(1).join(' ') || '';
+
+      // Map eBay payment/fulfillment status to NoSlag enums
+      const orderStatus =
+        mpOrder.fulfillmentStatus === 'FULFILLED' ? 'SHIPPED' :
+        mpOrder.paymentStatus === 'PAID' ? 'CONFIRMED' : 'PENDING';
+      const paymentStatus =
+        mpOrder.paymentStatus === 'PAID' ? 'CAPTURED' :
+        mpOrder.paymentStatus === 'REFUNDED' ? 'REFUNDED' : 'PENDING';
+
+      // Create the NoSlag Order
+      const newOrder = await tx.order.create({
+        data: {
+          tenantId,
+          orderNumber,
+          email: mpOrder.buyerEmail || `${mpOrder.buyerUsername}@ebay.buyer`,
+          shippingFirstName: firstName,
+          shippingLastName: lastName,
+          shippingAddressLine1: mpOrder.shippingStreet1,
+          shippingAddressLine2: mpOrder.shippingStreet2,
+          shippingCity: mpOrder.shippingCity,
+          shippingState: mpOrder.shippingState,
+          shippingPostalCode: mpOrder.shippingPostalCode,
+          shippingCountry: mpOrder.shippingCountry,
+          subtotal: mpOrder.subtotal,
+          shippingTotal: mpOrder.shippingCost,
+          taxTotal: mpOrder.taxAmount,
+          grandTotal: mpOrder.total,
+          currency: mpOrder.currency,
+          status: orderStatus,
+          paymentStatus,
+          paymentMethod: 'marketplace',
+          internalNotes: `Imported from ${mpOrder.connection.platform} (${mpOrder.connection.name}). External order: ${mpOrder.externalOrderId}`,
+          confirmedAt: mpOrder.paymentStatus === 'PAID' ? mpOrder.paymentDate || mpOrder.orderDate : null,
+        },
+      });
+
+      // Create OrderItem records from itemsData
+      const lineItems = (mpOrder.itemsData as any[]) || [];
+      for (const item of lineItems) {
+        // Try to find the matching ProductListing by SKU (stored as Item.code)
+        let productId: string | null = null;
+        if (item.sku) {
+          const productListing = await tx.productListing.findFirst({
+            where: { tenantId, item: { code: item.sku } },
+          });
+          if (productListing) {
+            productId = productListing.id;
+          }
+        }
+
+        await tx.orderItem.create({
+          data: {
+            tenantId,
+            orderId: newOrder.id,
+            productId,
+            sku: item.sku || null,
+            name: item.title || 'Unknown item',
+            quantity: item.quantity || 1,
+            unitPrice: new Decimal(item.unitPrice || '0'),
+            totalPrice: new Decimal(item.unitPrice || '0').mul(item.quantity || 1),
+          },
+        });
+      }
+
+      // Link the MarketplaceOrder to the new Order
+      await tx.marketplaceOrder.update({
+        where: { id: marketplaceOrderId },
+        data: {
+          orderId: newOrder.id,
+          syncedToOrderAt: new Date(),
+          syncStatus: SyncStatus.SYNCED,
+        },
+      });
+
+      return newOrder;
+    });
+
+    this.logger.log(
+      `Created NoSlag order ${order.orderNumber} from marketplace order ${mpOrder.externalOrderId}`
+    );
+
+    return order;
+  }
+
+  /**
    * Scheduled sync: sync orders for all active connections with autoSyncOrders=true.
    * Runs outside of CLS context, so tenantId is read from each connection record.
    */
@@ -602,6 +742,74 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
       }
     } catch (error) {
       this.logger.error('Scheduled order sync global error', error);
+    }
+  }
+
+  /**
+   * Acquire a per-SKU lock to prevent concurrent read-modify-write on the same inventory item.
+   * Returns a release function.
+   */
+  private async acquireSkuLock(sku: string): Promise<() => void> {
+    // Wait for any existing lock on this SKU
+    while (this.inventoryLocks.has(sku)) {
+      await this.inventoryLocks.get(sku);
+    }
+    let release: () => void;
+    const lockPromise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.inventoryLocks.set(sku, lockPromise);
+    return () => {
+      this.inventoryLocks.delete(sku);
+      release!();
+    };
+  }
+
+  /**
+   * Update inventory for a single listing with SKU-level locking.
+   * Prevents concurrent read-modify-write race conditions.
+   */
+  private async syncListingInventoryWithLock(
+    connection: { id: string; tenantId: string },
+    listing: any
+  ): Promise<void> {
+    if (!listing.warehouseId || !listing.productListing) return;
+
+    const release = await this.acquireSkuLock(listing.sku);
+    try {
+      const balance = await this.prisma.warehouseItemBalance.findUnique({
+        where: {
+          tenantId_itemId_warehouseId: {
+            tenantId: connection.tenantId,
+            itemId: listing.productListing.itemId,
+            warehouseId: listing.warehouseId,
+          },
+        },
+      });
+
+      const availableQty = balance
+        ? Math.max(0, balance.actualQty.toNumber() - balance.reservedQty.toNumber())
+        : 0;
+
+      // Update eBay
+      const client = await this.ebayStore.getClient(connection.id, connection.tenantId);
+      await this.ebayClient.updateInventoryQuantity(client, listing.sku, availableQty);
+
+      // Update local listing
+      await this.prisma.marketplaceListing.update({
+        where: { id: listing.id },
+        data: {
+          quantity: availableQty,
+          syncStatus: SyncStatus.SYNCED,
+          errorMessage: null,
+        },
+      });
+
+      this.logger.log(
+        `Inventory sync: updated listing ${listing.id} (SKU ${listing.sku}) to qty ${availableQty}`
+      );
+    } finally {
+      release();
     }
   }
 
@@ -642,39 +850,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
 
           for (const listing of listings) {
             try {
-              if (!listing.warehouseId || !listing.productListing) continue;
-
-              const balance = await this.prisma.warehouseItemBalance.findUnique({
-                where: {
-                  tenantId_itemId_warehouseId: {
-                    tenantId: connection.tenantId,
-                    itemId: listing.productListing.itemId,
-                    warehouseId: listing.warehouseId,
-                  },
-                },
-              });
-
-              const availableQty = balance
-                ? Math.max(0, balance.actualQty.toNumber() - balance.reservedQty.toNumber())
-                : 0;
-
-              // Update eBay
-              const client = await this.ebayStore.getClient(connection.id, connection.tenantId);
-              await this.ebayClient.updateInventoryQuantity(client, listing.sku, availableQty);
-
-              // Update local listing
-              await this.prisma.marketplaceListing.update({
-                where: { id: listing.id },
-                data: {
-                  quantity: availableQty,
-                  syncStatus: SyncStatus.SYNCED,
-                  errorMessage: null,
-                },
-              });
-
-              this.logger.log(
-                `Scheduled inventory sync: updated listing ${listing.id} to qty ${availableQty}`
-              );
+              await this.syncListingInventoryWithLock(connection, listing);
             } catch (listingError) {
               this.logger.error(
                 `Scheduled inventory sync failed for listing ${listing.id}`,

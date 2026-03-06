@@ -10,7 +10,10 @@ import {
   Truck,
   X,
   CloudDownload,
+  FileInput,
+  ExternalLink,
 } from 'lucide-react';
+import Link from 'next/link';
 import { unwrapJson } from '@/lib/admin-fetch';
 
 interface Connection {
@@ -49,6 +52,7 @@ interface Order {
   paymentStatus: string;
   fulfillmentStatus: string;
   syncStatus: string;
+  orderId?: string | null;
   shippingAddress?: ShippingAddress;
   itemsData?: string;
   subtotal?: string;
@@ -200,6 +204,27 @@ export default function MarketplaceOrdersPage() {
     setFulfillModal(null);
     setTrackingNumber('');
     setCarrier('');
+  };
+
+  const handleCreateOrder = async (order: Order) => {
+    try {
+      const res = await fetch(`/api/v1/marketplace/orders/${order.id}/create-order`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+
+      if (res.ok) {
+        const data = unwrapJson(await res.json());
+        toast({ title: 'Success', description: `Created NoSlag order ${data.orderNumber}` });
+        loadData();
+      } else {
+        const error = unwrapJson(await res.json());
+        toast({ title: 'Error', description: error.error || 'Failed to create order', variant: 'destructive' });
+      }
+    } catch (error) {
+      console.error('Failed to create NoSlag order:', error);
+      toast({ title: 'Error', description: 'Failed to create order', variant: 'destructive' });
+    }
   };
 
   const toggleOrderExpand = (orderId: string) => {
@@ -399,6 +424,7 @@ export default function MarketplaceOrdersPage() {
                     expanded={expandedOrder === order.id}
                     onToggle={() => toggleOrderExpand(order.id)}
                     onFulfill={() => openFulfillModal(order)}
+                    onCreateOrder={() => handleCreateOrder(order)}
                     parseLineItems={parseLineItems}
                   />
                 ))}
@@ -512,12 +538,14 @@ function OrderRow({
   expanded,
   onToggle,
   onFulfill,
+  onCreateOrder,
   parseLineItems,
 }: {
   order: Order;
   expanded: boolean;
   onToggle: () => void;
   onFulfill: () => void;
+  onCreateOrder: () => void;
   parseLineItems: (itemsData?: string) => LineItem[];
 }) {
   const lineItems = parseLineItems(order.itemsData);
@@ -573,15 +601,34 @@ function OrderRow({
           </span>
         </td>
         <td className="px-6 py-4">
-          {canFulfill && (
-            <button
-              onClick={onFulfill}
-              className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100"
-            >
-              <Truck className="w-4 h-4" />
-              Fulfill
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {canFulfill && (
+              <button
+                onClick={onFulfill}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100"
+              >
+                <Truck className="w-4 h-4" />
+                Fulfill
+              </button>
+            )}
+            {order.orderId ? (
+              <Link
+                href={`/app/orders/${order.orderId}`}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-green-50 text-green-700 rounded-lg hover:bg-green-100"
+              >
+                <ExternalLink className="w-4 h-4" />
+                View Order
+              </Link>
+            ) : order.paymentStatus === 'PAID' ? (
+              <button
+                onClick={onCreateOrder}
+                className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100"
+              >
+                <FileInput className="w-4 h-4" />
+                Create Order
+              </button>
+            ) : null}
+          </div>
         </td>
       </tr>
 

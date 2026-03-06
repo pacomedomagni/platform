@@ -108,4 +108,25 @@ export class EbayOrdersController {
   ) {
     return this.orderSyncService.issueRefund(tenantId, id, body);
   }
+
+  /**
+   * Create a NoSlag Order from a synced marketplace order.
+   * This links the marketplace order into the core order system for unified
+   * fulfillment, inventory reservations, and reporting.
+   * POST /api/marketplace/orders/:id/create-order
+   */
+  @Post(':id/create-order')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
+  async createNoSlagOrder(
+    @Tenant() tenantId: string,
+    @Param('id') id: string
+  ) {
+    const order = await this.orderSyncService.createNoSlagOrder(tenantId, id);
+    return {
+      success: true,
+      message: `Created NoSlag order ${order.orderNumber}`,
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+    };
+  }
 }
