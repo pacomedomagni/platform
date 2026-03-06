@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { ClsService } from 'nestjs-cls';
+import { EbayClientService } from './ebay-client.service';
 import { EbayStoreService } from './ebay-store.service';
 
 /**
@@ -15,7 +16,8 @@ export class EbayInquiriesService {
   constructor(
     private prisma: PrismaService,
     private cls: ClsService,
-    private ebayStore: EbayStoreService
+    private ebayStore: EbayStoreService,
+    private ebayClient: EbayClientService
   ) {}
 
   /**
@@ -35,43 +37,16 @@ export class EbayInquiriesService {
     const client = await this.ebayStore.getClient(connectionId);
 
     try {
-      const accessToken = (client as any).authToken || (client as any).auth?.oAuth2?.accessToken;
-      const response = await fetch('https://api.ebay.com/post-order/v2/inquiry/search', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'X-EBAY-C-MARKETPLACE-ID': connection.marketplaceId || 'EBAY_US',
+      const data = await this.ebayClient.callPostOrderApi(client, 'POST', '/inquiry/search', connection.marketplaceId || 'EBAY_US', {
+        inquiryStatusFilter: params?.status ? [params.status] : undefined,
+        paginationInput: {
+          entriesPerPage: params?.limit || 50,
+          pageNumber: params?.offset ? Math.floor(params.offset / (params?.limit || 50)) + 1 : 1,
         },
-        body: JSON.stringify({
-          inquiryStatusFilter: params?.status ? [params.status] : undefined,
-          paginationInput: {
-            entriesPerPage: params?.limit || 50,
-            pageNumber: params?.offset ? Math.floor(params.offset / (params?.limit || 50)) + 1 : 1,
-          },
-        }),
       });
-
-      if (!response.ok) {
-        throw new Error(`eBay Post-Order API returned ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
       this.logger.log(`Fetched inquiries for connection ${connectionId}`);
       return data;
     } catch (error: any) {
-      // Fall back to client SDK if available
-      try {
-        const sdkResponse = await (client as any).postOrder?.inquiry?.search({
-          inquiryStatusFilter: params?.status ? [params.status] : undefined,
-          limit: params?.limit || 50,
-          offset: params?.offset || 0,
-        });
-        if (sdkResponse) return sdkResponse;
-      } catch {
-        // SDK not available, rethrow original error
-      }
-
       this.logger.error(
         `Failed to fetch inquiries for connection ${connectionId}: ${error?.message || String(error)}`,
         error
@@ -93,30 +68,10 @@ export class EbayInquiriesService {
     const client = await this.ebayStore.getClient(connectionId);
 
     try {
-      const accessToken = (client as any).authToken || (client as any).auth?.oAuth2?.accessToken;
-      const response = await fetch(`https://api.ebay.com/post-order/v2/inquiry/${inquiryId}`, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'X-EBAY-C-MARKETPLACE-ID': connection.marketplaceId || 'EBAY_US',
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`eBay Post-Order API returned ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
+      const data = await this.ebayClient.callPostOrderApi(client, 'GET', `/inquiry/${inquiryId}`, connection.marketplaceId || 'EBAY_US');
       this.logger.log(`Fetched inquiry ${inquiryId} for connection ${connectionId}`);
       return data;
     } catch (error: any) {
-      try {
-        const sdkResponse = await (client as any).postOrder?.inquiry?.getInquiry(inquiryId);
-        if (sdkResponse) return sdkResponse;
-      } catch {
-        // SDK not available
-      }
-
       this.logger.error(
         `Failed to fetch inquiry ${inquiryId} for connection ${connectionId}: ${error?.message || String(error)}`,
         error
@@ -145,42 +100,15 @@ export class EbayInquiriesService {
     const client = await this.ebayStore.getClient(connectionId);
 
     try {
-      const accessToken = (client as any).authToken || (client as any).auth?.oAuth2?.accessToken;
-      const response = await fetch(
-        `https://api.ebay.com/post-order/v2/inquiry/${inquiryId}/provide_shipment_info`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-            'X-EBAY-C-MARKETPLACE-ID': connection.marketplaceId || 'EBAY_US',
-          },
-          body: JSON.stringify({
-            shipmentTracking: {
-              trackingNumber,
-              shippingCarrierCode: carrier,
-            },
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`eBay Post-Order API returned ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json().catch(() => ({}));
+      const data = await this.ebayClient.callPostOrderApi(client, 'POST', `/inquiry/${inquiryId}/provide_shipment_info`, connection.marketplaceId || 'EBAY_US', {
+        shipmentTracking: {
+          trackingNumber,
+          shippingCarrierCode: carrier,
+        },
+      });
       this.logger.log(`Provided shipment info for inquiry ${inquiryId} on connection ${connectionId}`);
       return data;
     } catch (error: any) {
-      try {
-        const sdkResponse = await (client as any).postOrder?.inquiry?.provideShipmentInfo(inquiryId, {
-          shipmentTracking: { trackingNumber, shippingCarrierCode: carrier },
-        });
-        if (sdkResponse) return sdkResponse;
-      } catch {
-        // SDK not available
-      }
-
       this.logger.error(
         `Failed to provide shipment info for inquiry ${inquiryId}: ${error?.message || String(error)}`,
         error
@@ -209,8 +137,7 @@ export class EbayInquiriesService {
     const client = await this.ebayStore.getClient(connectionId);
 
     try {
-      const accessToken = (client as any).authToken || (client as any).auth?.oAuth2?.accessToken;
-      const body: any = {};
+      const body: Record<string, unknown> = {};
       if (amount !== undefined) {
         body.refundAmount = { value: amount.toFixed(2), currency: 'USD' };
       }
@@ -218,37 +145,10 @@ export class EbayInquiriesService {
         body.comments = { content: [{ text: comment }] };
       }
 
-      const response = await fetch(
-        `https://api.ebay.com/post-order/v2/inquiry/${inquiryId}/issue_refund`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-            'X-EBAY-C-MARKETPLACE-ID': connection.marketplaceId || 'EBAY_US',
-          },
-          body: JSON.stringify(body),
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`eBay Post-Order API returned ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json().catch(() => ({}));
+      const data = await this.ebayClient.callPostOrderApi(client, 'POST', `/inquiry/${inquiryId}/issue_refund`, connection.marketplaceId || 'EBAY_US', body);
       this.logger.log(`Issued refund on inquiry ${inquiryId} for connection ${connectionId}`);
       return data;
     } catch (error: any) {
-      try {
-        const sdkResponse = await (client as any).postOrder?.inquiry?.issueRefund(inquiryId, {
-          ...(amount !== undefined && { refundAmount: { value: amount.toFixed(2), currency: 'USD' } }),
-          ...(comment && { comments: { content: [{ text: comment }] } }),
-        });
-        if (sdkResponse) return sdkResponse;
-      } catch {
-        // SDK not available
-      }
-
       this.logger.error(
         `Failed to issue refund on inquiry ${inquiryId}: ${error?.message || String(error)}`,
         error
@@ -270,39 +170,12 @@ export class EbayInquiriesService {
     const client = await this.ebayStore.getClient(connectionId);
 
     try {
-      const accessToken = (client as any).authToken || (client as any).auth?.oAuth2?.accessToken;
-      const response = await fetch(
-        `https://api.ebay.com/post-order/v2/inquiry/${inquiryId}/escalate`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-            'X-EBAY-C-MARKETPLACE-ID': connection.marketplaceId || 'EBAY_US',
-          },
-          body: JSON.stringify({
-            escalateInquiryReason: 'SELLER_NO_RESPONSE',
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`eBay Post-Order API returned ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json().catch(() => ({}));
+      const data = await this.ebayClient.callPostOrderApi(client, 'POST', `/inquiry/${inquiryId}/escalate`, connection.marketplaceId || 'EBAY_US', {
+        escalateInquiryReason: 'SELLER_NO_RESPONSE',
+      });
       this.logger.log(`Escalated inquiry ${inquiryId} to case for connection ${connectionId}`);
       return data;
     } catch (error: any) {
-      try {
-        const sdkResponse = await (client as any).postOrder?.inquiry?.escalate(inquiryId, {
-          escalateInquiryReason: 'SELLER_NO_RESPONSE',
-        });
-        if (sdkResponse) return sdkResponse;
-      } catch {
-        // SDK not available
-      }
-
       this.logger.error(
         `Failed to escalate inquiry ${inquiryId}: ${error?.message || String(error)}`,
         error
@@ -328,39 +201,12 @@ export class EbayInquiriesService {
     const client = await this.ebayStore.getClient(connectionId);
 
     try {
-      const accessToken = (client as any).authToken || (client as any).auth?.oAuth2?.accessToken;
-      const response = await fetch(
-        `https://api.ebay.com/post-order/v2/inquiry/${inquiryId}/send_message`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-            'X-EBAY-C-MARKETPLACE-ID': connection.marketplaceId || 'EBAY_US',
-          },
-          body: JSON.stringify({
-            message: { content: [{ text: message }] },
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`eBay Post-Order API returned ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json().catch(() => ({}));
+      const data = await this.ebayClient.callPostOrderApi(client, 'POST', `/inquiry/${inquiryId}/send_message`, connection.marketplaceId || 'EBAY_US', {
+        message: { content: [{ text: message }] },
+      });
       this.logger.log(`Sent message on inquiry ${inquiryId} for connection ${connectionId}`);
       return data;
     } catch (error: any) {
-      try {
-        const sdkResponse = await (client as any).postOrder?.inquiry?.sendMessage(inquiryId, {
-          message: { content: [{ text: message }] },
-        });
-        if (sdkResponse) return sdkResponse;
-      } catch {
-        // SDK not available
-      }
-
       this.logger.error(
         `Failed to send message on inquiry ${inquiryId}: ${error?.message || String(error)}`,
         error
@@ -386,42 +232,16 @@ export class EbayInquiriesService {
     const client = await this.ebayStore.getClient(connectionId);
 
     try {
-      const accessToken = (client as any).authToken || (client as any).auth?.oAuth2?.accessToken;
-      const response = await fetch('https://api.ebay.com/post-order/v2/casemanagement/search', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'X-EBAY-C-MARKETPLACE-ID': connection.marketplaceId || 'EBAY_US',
+      const data = await this.ebayClient.callPostOrderApi(client, 'POST', '/casemanagement/search', connection.marketplaceId || 'EBAY_US', {
+        caseStatusFilter: params?.status || undefined,
+        paginationInput: {
+          entriesPerPage: params?.limit || 50,
+          pageNumber: params?.offset ? Math.floor(params.offset / (params?.limit || 50)) + 1 : 1,
         },
-        body: JSON.stringify({
-          caseStatusFilter: params?.status || undefined,
-          paginationInput: {
-            entriesPerPage: params?.limit || 50,
-            pageNumber: params?.offset ? Math.floor(params.offset / (params?.limit || 50)) + 1 : 1,
-          },
-        }),
       });
-
-      if (!response.ok) {
-        throw new Error(`eBay Post-Order API returned ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
       this.logger.log(`Fetched cases for connection ${connectionId}`);
       return data;
     } catch (error: any) {
-      try {
-        const sdkResponse = await (client as any).postOrder?.casemanagement?.search({
-          caseStatusFilter: params?.status,
-          limit: params?.limit || 50,
-          offset: params?.offset || 0,
-        });
-        if (sdkResponse) return sdkResponse;
-      } catch {
-        // SDK not available
-      }
-
       this.logger.error(
         `Failed to fetch cases for connection ${connectionId}: ${error?.message || String(error)}`,
         error
@@ -443,30 +263,10 @@ export class EbayInquiriesService {
     const client = await this.ebayStore.getClient(connectionId);
 
     try {
-      const accessToken = (client as any).authToken || (client as any).auth?.oAuth2?.accessToken;
-      const response = await fetch(`https://api.ebay.com/post-order/v2/casemanagement/${caseId}`, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'X-EBAY-C-MARKETPLACE-ID': connection.marketplaceId || 'EBAY_US',
-        },
-      });
-
-      if (!response.ok) {
-        throw new Error(`eBay Post-Order API returned ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
+      const data = await this.ebayClient.callPostOrderApi(client, 'GET', `/casemanagement/${caseId}`, connection.marketplaceId || 'EBAY_US');
       this.logger.log(`Fetched case ${caseId} for connection ${connectionId}`);
       return data;
     } catch (error: any) {
-      try {
-        const sdkResponse = await (client as any).postOrder?.casemanagement?.getCase(caseId);
-        if (sdkResponse) return sdkResponse;
-      } catch {
-        // SDK not available
-      }
-
       this.logger.error(
         `Failed to fetch case ${caseId} for connection ${connectionId}: ${error?.message || String(error)}`,
         error
@@ -492,39 +292,12 @@ export class EbayInquiriesService {
     const client = await this.ebayStore.getClient(connectionId);
 
     try {
-      const accessToken = (client as any).authToken || (client as any).auth?.oAuth2?.accessToken;
-      const response = await fetch(
-        `https://api.ebay.com/post-order/v2/casemanagement/${caseId}/appeal`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json',
-            'X-EBAY-C-MARKETPLACE-ID': connection.marketplaceId || 'EBAY_US',
-          },
-          body: JSON.stringify({
-            appealComments: { content: [{ text: comments }] },
-          }),
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`eBay Post-Order API returned ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json().catch(() => ({}));
+      const data = await this.ebayClient.callPostOrderApi(client, 'POST', `/casemanagement/${caseId}/appeal`, connection.marketplaceId || 'EBAY_US', {
+        appealComments: { content: [{ text: comments }] },
+      });
       this.logger.log(`Appealed case ${caseId} for connection ${connectionId}`);
       return data;
     } catch (error: any) {
-      try {
-        const sdkResponse = await (client as any).postOrder?.casemanagement?.appeal(caseId, {
-          appealComments: { content: [{ text: comments }] },
-        });
-        if (sdkResponse) return sdkResponse;
-      } catch {
-        // SDK not available
-      }
-
       this.logger.error(
         `Failed to appeal case ${caseId}: ${error?.message || String(error)}`,
         error

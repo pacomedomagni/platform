@@ -24,6 +24,7 @@ import {
   UpdateListingDto,
   RejectListingDto,
   GetListingsQueryDto,
+  ScheduleListingDto,
 } from '../shared/marketplace.dto';
 
 /**
@@ -130,6 +131,19 @@ export class MarketplaceListingsController {
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async publishListing(@Param('id') id: string) {
     return this.listingsService.publishListing(id);
+  }
+
+  /**
+   * Schedule listing for future publish
+   * POST /api/marketplace/listings/:id/schedule
+   */
+  @Post(':id/schedule')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
+  async scheduleListing(
+    @Param('id') id: string,
+    @Body(ValidationPipe) dto: ScheduleListingDto
+  ) {
+    return this.listingsService.scheduleListing(id, dto.scheduledDate);
   }
 
   /**

@@ -3,12 +3,10 @@ import {
   Get,
   Post,
   Patch,
-  Delete,
   Body,
   Param,
   Query,
   UseGuards,
-  Request,
   ValidationPipe,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
@@ -16,53 +14,26 @@ import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayListingsService } from './ebay-listings.service';
 import {
-  CreateListingDto,
   CreateDirectListingDto,
   CreateVariationListingDto,
-  UpdateListingDto,
-  RejectListingDto,
-  GetListingsQueryDto,
+  UpdatePublishedListingDto,
+  SetOutOfStockControlDto,
 } from '../shared/marketplace.dto';
 
 /**
- * eBay Listings API Controller
- * Manages eBay listings for NoSlag products
+ * eBay-Specific Listings Controller
+ * Exposes eBay-only listing operations that are NOT covered by
+ * the unified `marketplace/listings` controller.
+ *
+ * Common CRUD / workflow routes (create, get, update, delete,
+ * approve, reject, publish, schedule, sync-inventory, end)
+ * are served by the unified ListingsController at `marketplace/listings`.
  */
 @Controller('marketplace/ebay/listings')
 @UseGuards(AuthGuard, RolesGuard)
 @Throttle({ short: { limit: 10, ttl: 1000 }, medium: { limit: 60, ttl: 60000 } })
 export class EbayListingsController {
   constructor(private listingsService: EbayListingsService) {}
-
-  /**
-   * Create listing from NoSlag product
-   * POST /api/marketplace/ebay/listings
-   */
-  @Post()
-  @Roles('admin', 'System Manager', 'Inventory Manager')
-  async createListing(
-    @Tenant() tenantId: string,
-    @Body(ValidationPipe) dto: CreateListingDto
-  ) {
-    return this.listingsService.createListingFromProduct(dto);
-  }
-
-  /**
-   * Get all eBay listings for tenant
-   * GET /api/marketplace/ebay/listings
-   */
-  @Get()
-  async getListings(
-    @Tenant() tenantId: string,
-    @Query(ValidationPipe) query: GetListingsQueryDto
-  ) {
-    return this.listingsService.getListings({
-      connectionId: query.connectionId,
-      status: query.status,
-      limit: query.limit,
-      offset: query.offset,
-    });
-  }
 
   /**
    * Create listing directly (without product reference)
@@ -106,25 +77,21 @@ export class EbayListingsController {
         imageUrls: v.photos || [],
         variantAspects: v.aspects,
       })),
-      fulfillmentPolicyId: '',
-      paymentPolicyId: '',
-      returnPolicyId: '',
+      fulfillmentPolicyId: dto.fulfillmentPolicyId,
+      paymentPolicyId: dto.paymentPolicyId,
+      returnPolicyId: dto.returnPolicyId,
     });
   }
 
   /**
-   * Update published listing (price, quantity, description)
+   * Update published listing on eBay (price, quantity, description)
    * PATCH /api/marketplace/ebay/listings/:id/offer
    */
   @Patch(':id/offer')
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async updatePublishedListing(
     @Param('id') id: string,
-    @Body() dto: {
-      price?: { value: string; currency: string };
-      quantity?: number;
-      description?: string;
-    }
+    @Body(ValidationPipe) dto: UpdatePublishedListingDto
   ) {
     return this.listingsService.updatePublishedListing(id, dto);
   }
@@ -134,6 +101,7 @@ export class EbayListingsController {
    * GET /api/marketplace/ebay/listings/out-of-stock-control?connectionId=...
    */
   @Get('out-of-stock-control')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getOutOfStockControl(
     @Tenant() tenantId: string,
     @Query('connectionId') connectionId: string
@@ -149,115 +117,8 @@ export class EbayListingsController {
   @Roles('admin', 'System Manager')
   async setOutOfStockControl(
     @Tenant() tenantId: string,
-    @Body() body: { connectionId: string; enabled: boolean }
+    @Body(ValidationPipe) dto: SetOutOfStockControlDto
   ) {
-    return this.listingsService.setOutOfStockControl(body.connectionId, body.enabled);
-  }
-
-  /**
-   * Get single listing
-   * GET /api/marketplace/ebay/listings/:id
-   */
-  @Get(':id')
-  async getListing(
-    @Tenant() tenantId: string,
-    @Param('id') id: string
-  ) {
-    return this.listingsService.getListing(id);
-  }
-
-  /**
-   * Update listing
-   * PATCH /api/marketplace/ebay/listings/:id
-   */
-  @Patch(':id')
-  @Roles('admin', 'System Manager', 'Inventory Manager')
-  async updateListing(
-    @Param('id') id: string,
-    @Body(ValidationPipe) dto: UpdateListingDto
-  ) {
-    return this.listingsService.updateListing(id, dto);
-  }
-
-  /**
-   * Approve listing
-   * POST /api/marketplace/ebay/listings/:id/approve
-   */
-  @Post(':id/approve')
-  @Roles('admin', 'System Manager', 'Inventory Manager')
-  async approveListing(@Param('id') id: string, @Request() req: any) {
-    const userId = req.user?.id;
-    return this.listingsService.approveListing(id, userId);
-  }
-
-  /**
-   * Reject listing
-   * POST /api/marketplace/ebay/listings/:id/reject
-   */
-  @Post(':id/reject')
-  @Roles('admin', 'System Manager', 'Inventory Manager')
-  async rejectListing(
-    @Param('id') id: string,
-    @Body(ValidationPipe) dto: RejectListingDto,
-    @Request() req: any
-  ) {
-    const userId = req.user?.id;
-    return this.listingsService.rejectListing(id, userId, dto.reason);
-  }
-
-  /**
-   * Publish listing to eBay
-   * POST /api/marketplace/ebay/listings/:id/publish
-   */
-  @Post(':id/publish')
-  @Roles('admin', 'System Manager', 'Inventory Manager')
-  async publishListing(@Param('id') id: string) {
-    return this.listingsService.publishListing(id);
-  }
-
-  /**
-   * Sync inventory for specific listing
-   * POST /api/marketplace/ebay/listings/:id/sync-inventory
-   */
-  @Post(':id/sync-inventory')
-  @Roles('admin', 'System Manager', 'Inventory Manager')
-  async syncInventory(@Param('id') id: string) {
-    await this.listingsService.syncListingInventory(id);
-    return { success: true, message: 'Inventory synced' };
-  }
-
-  /**
-   * Schedule listing publish
-   * POST /api/marketplace/ebay/listings/:id/schedule
-   */
-  @Post(':id/schedule')
-  @Roles('admin', 'System Manager', 'Inventory Manager')
-  async scheduleListingPublish(
-    @Param('id') id: string,
-    @Body() body: { scheduledDate: string }
-  ) {
-    return this.listingsService.scheduleListingPublish(id, new Date(body.scheduledDate));
-  }
-
-  /**
-   * End listing on eBay
-   * POST /api/marketplace/ebay/listings/:id/end
-   */
-  @Post(':id/end')
-  @Roles('admin', 'System Manager', 'Inventory Manager')
-  async endListing(@Param('id') id: string) {
-    await this.listingsService.endListing(id);
-    return { success: true, message: 'Listing ended' };
-  }
-
-  /**
-   * Delete listing (drafts only)
-   * DELETE /api/marketplace/ebay/listings/:id
-   */
-  @Delete(':id')
-  @Roles('admin', 'System Manager')
-  async deleteListing(@Param('id') id: string) {
-    await this.listingsService.deleteListing(id);
-    return { success: true, message: 'Listing deleted' };
+    return this.listingsService.setOutOfStockControl(dto.connectionId, dto.enabled);
   }
 }

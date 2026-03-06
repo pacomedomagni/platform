@@ -9,11 +9,19 @@ import {
   UseGuards,
   HttpException,
   HttpStatus,
+  ValidationPipe,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayPromotionsService } from './ebay-promotions.service';
+import {
+  CreateMarkdownPromotionDto,
+  CreateOrderPromotionDto,
+  CreateCodedCouponDto,
+  CreateVolumePricingDto,
+  ConnectionIdDto,
+} from '../shared/marketplace.dto';
 
 /**
  * eBay Promotions API Controller
@@ -33,24 +41,15 @@ export class EbayPromotionsController {
   @Roles('admin', 'System Manager')
   async createMarkdownPromotion(
     @Tenant() tenantId: string,
-    @Body()
-    body: {
-      connectionId: string;
-      name: string;
-      description: string;
-      startDate: string;
-      endDate: string;
-      marketplaceId: string;
-      selectedItems: Array<{ listingId: string; discount: number }>;
-    }
+    @Body(ValidationPipe) dto: CreateMarkdownPromotionDto
   ) {
-    return this.promotionsService.createMarkdownPromotion(body.connectionId, {
-      name: body.name,
-      description: body.description,
-      startDate: body.startDate,
-      endDate: body.endDate,
-      marketplaceId: body.marketplaceId,
-      selectedItems: body.selectedItems,
+    return this.promotionsService.createMarkdownPromotion(dto.connectionId, {
+      name: dto.name,
+      description: dto.description,
+      startDate: dto.startDate,
+      endDate: dto.endDate,
+      marketplaceId: dto.marketplaceId,
+      selectedItems: dto.selectedItems,
     });
   }
 
@@ -62,24 +61,15 @@ export class EbayPromotionsController {
   @Roles('admin', 'System Manager')
   async createOrderPromotion(
     @Tenant() tenantId: string,
-    @Body()
-    body: {
-      connectionId: string;
-      name: string;
-      description: string;
-      startDate: string;
-      endDate: string;
-      marketplaceId: string;
-      discountRules: any;
-    }
+    @Body(ValidationPipe) dto: CreateOrderPromotionDto
   ) {
-    return this.promotionsService.createOrderPromotion(body.connectionId, {
-      name: body.name,
-      description: body.description,
-      startDate: body.startDate,
-      endDate: body.endDate,
-      marketplaceId: body.marketplaceId,
-      discountRules: body.discountRules,
+    return this.promotionsService.createOrderPromotion(dto.connectionId, {
+      name: dto.name,
+      description: dto.description,
+      startDate: dto.startDate,
+      endDate: dto.endDate,
+      marketplaceId: dto.marketplaceId,
+      discountRules: dto.discountRules,
     });
   }
 
@@ -120,30 +110,18 @@ export class EbayPromotionsController {
   @Roles('admin', 'System Manager')
   async createCodedCoupon(
     @Tenant() tenantId: string,
-    @Body()
-    body: {
-      connectionId: string;
-      name: string;
-      couponCode: string;
-      discountType: 'PERCENTAGE' | 'FIXED_AMOUNT';
-      discountValue: number;
-      minOrderAmount?: number;
-      maxUses?: number;
-      startDate?: string;
-      endDate?: string;
-      listingIds?: string[];
-    }
+    @Body(ValidationPipe) dto: CreateCodedCouponDto
   ) {
-    return this.promotionsService.createCodedCoupon(body.connectionId, tenantId, {
-      name: body.name,
-      couponCode: body.couponCode,
-      discountType: body.discountType,
-      discountValue: body.discountValue,
-      minOrderAmount: body.minOrderAmount,
-      maxUses: body.maxUses,
-      startDate: body.startDate,
-      endDate: body.endDate,
-      listingIds: body.listingIds,
+    return this.promotionsService.createCodedCoupon(dto.connectionId, tenantId, {
+      name: dto.name,
+      couponCode: dto.couponCode,
+      discountType: dto.discountType,
+      discountValue: dto.discountValue,
+      minOrderAmount: dto.minOrderAmount,
+      maxUses: dto.maxUses,
+      startDate: dto.startDate,
+      endDate: dto.endDate,
+      listingIds: dto.listingIds,
     });
   }
 
@@ -185,22 +163,14 @@ export class EbayPromotionsController {
   @Roles('admin', 'System Manager')
   async createVolumePricing(
     @Tenant() tenantId: string,
-    @Body()
-    body: {
-      connectionId: string;
-      name: string;
-      listingIds: string[];
-      tiers: Array<{ minQuantity: number; discountPercentage: number }>;
-      startDate?: string;
-      endDate?: string;
-    }
+    @Body(ValidationPipe) dto: CreateVolumePricingDto
   ) {
-    return this.promotionsService.createVolumePricing(body.connectionId, tenantId, {
-      name: body.name,
-      listingIds: body.listingIds,
-      tiers: body.tiers,
-      startDate: body.startDate,
-      endDate: body.endDate,
+    return this.promotionsService.createVolumePricing(dto.connectionId, tenantId, {
+      name: dto.name,
+      listingIds: dto.listingIds,
+      tiers: dto.tiers,
+      startDate: dto.startDate,
+      endDate: dto.endDate,
     });
   }
 
@@ -241,9 +211,9 @@ export class EbayPromotionsController {
   async pausePromotion(
     @Tenant() tenantId: string,
     @Param('id') id: string,
-    @Body() body: { connectionId: string }
+    @Body(ValidationPipe) dto: ConnectionIdDto
   ) {
-    await this.promotionsService.pausePromotion(body.connectionId, id);
+    await this.promotionsService.pausePromotion(dto.connectionId, id);
     return { success: true, message: 'Promotion paused' };
   }
 
@@ -256,9 +226,9 @@ export class EbayPromotionsController {
   async resumePromotion(
     @Tenant() tenantId: string,
     @Param('id') id: string,
-    @Body() body: { connectionId: string }
+    @Body(ValidationPipe) dto: ConnectionIdDto
   ) {
-    await this.promotionsService.resumePromotion(body.connectionId, id);
+    await this.promotionsService.resumePromotion(dto.connectionId, id);
     return { success: true, message: 'Promotion resumed' };
   }
 

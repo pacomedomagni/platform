@@ -11,6 +11,7 @@ import { EbayStoreService } from './ebay-store.service';
 import { EbayClientService } from './ebay-client.service';
 import { MarketplaceAuditService } from '../shared/marketplace-audit.service';
 import { SyncType, SyncDirection, SyncLogStatus, SyncStatus, ListingStatus } from '../shared/marketplace.types';
+import type { EbayOrder, MappedOrderLineItem } from './ebay.types';
 import { Prisma } from '@prisma/client';
 const Decimal = Prisma.Decimal;
 
@@ -26,6 +27,8 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
   private inventorySyncInterval: ReturnType<typeof setInterval> | null = null;
   private readonly SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
   private readonly INVENTORY_SYNC_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
+  private isSyncingOrders = false;
+  private isSyncingInventory = false;
 
   // In-memory lock to prevent concurrent inventory updates for the same SKU
   private readonly inventoryLocks = new Map<string, Promise<void>>();
@@ -38,6 +41,11 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    if (process.env.ENABLE_SCHEDULED_TASKS === 'false') {
+      this.logger.log('Scheduled tasks disabled via ENABLE_SCHEDULED_TASKS=false');
+      return;
+    }
+
     // Start scheduled sync for all active connections with autoSyncOrders enabled
     this.syncInterval = setInterval(() => this.syncAllActiveConnections(), this.SYNC_INTERVAL_MS);
     this.logger.log('eBay order sync scheduler started (every 15 minutes)');
@@ -62,7 +70,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
    * Map eBay order status to local status values.
    * eBay Fulfillment API uses orderFulfillmentStatus and orderPaymentStatus.
    */
-  private mapEbayOrderStatus(ebayOrder: any): {
+  private mapEbayOrderStatus(ebayOrder: EbayOrder): {
     externalStatus: string;
     paymentStatus: string;
     fulfillmentStatus: string;
@@ -80,7 +88,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
   /**
    * Extract buyer information from an eBay order
    */
-  private extractBuyerInfo(ebayOrder: any) {
+  private extractBuyerInfo(ebayOrder: EbayOrder) {
     const buyer = ebayOrder.buyer || {};
     return {
       buyerUsername: buyer.username || 'unknown',
@@ -91,7 +99,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
   /**
    * Extract shipping address from an eBay order
    */
-  private extractShippingAddress(ebayOrder: any) {
+  private extractShippingAddress(ebayOrder: EbayOrder) {
     const fulfillmentStartInstructions = ebayOrder.fulfillmentStartInstructions || [];
     const shippingStep = fulfillmentStartInstructions[0]?.shippingStep;
     const address = shippingStep?.shipTo?.contactAddress || {};
@@ -111,7 +119,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
   /**
    * Extract financial data from an eBay order
    */
-  private extractFinancials(ebayOrder: any) {
+  private extractFinancials(ebayOrder: EbayOrder) {
     const pricingSummary = ebayOrder.pricingSummary || {};
     return {
       subtotal: new Decimal(pricingSummary.priceSubtotal?.value || '0'),
@@ -125,9 +133,9 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
   /**
    * Extract line items from an eBay order as JSON-serializable data
    */
-  private extractLineItems(ebayOrder: any): any[] {
+  private extractLineItems(ebayOrder: EbayOrder): MappedOrderLineItem[] {
     const lineItems = ebayOrder.lineItems || [];
-    return lineItems.map((li: any) => ({
+    return lineItems.map((li) => ({
       lineItemId: li.lineItemId,
       title: li.title,
       sku: li.sku || null,
@@ -173,7 +181,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
 
       const PAGE_SIZE = 50;
       let offset = 0;
-      let allEbayOrders: any[] = [];
+      let allEbayOrders: EbayOrder[] = [];
 
       // Paginate through all orders
       while (true) {
@@ -220,7 +228,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
 
           // Upsert into MarketplaceOrder
           const upsertedOrder = await this.prisma.marketplaceOrder.upsert({
-            where: { externalOrderId },
+            where: { tenantId_externalOrderId: { tenantId, externalOrderId } },
             create: {
               tenantId,
               connectionId,
@@ -233,7 +241,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
               fulfillmentStatus,
               orderDate,
               paymentDate,
-              itemsData: lineItems,
+              itemsData: lineItems as unknown as Prisma.InputJsonValue,
               syncStatus: SyncStatus.SYNCED,
             },
             update: {
@@ -242,7 +250,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
               fulfillmentStatus,
               ...shippingAddress,
               ...financials,
-              itemsData: lineItems,
+              itemsData: lineItems as unknown as Prisma.InputJsonValue,
               syncStatus: SyncStatus.SYNCED,
               errorMessage: null,
             },
@@ -361,8 +369,25 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
       this.prisma.marketplaceOrder.count({ where }),
     ]);
 
-    return { orders, total };
+    return { orders: orders.map(this.enrichOrder), total };
   }
+
+  /**
+   * Enrich a raw MarketplaceOrder with a nested shippingAddress object
+   * for frontend compatibility (frontend expects nested, Prisma stores flat).
+   */
+  private enrichOrder = (order: any) => ({
+    ...order,
+    shippingAddress: {
+      name: order.shippingName,
+      addressLine1: order.shippingStreet1,
+      addressLine2: order.shippingStreet2,
+      city: order.shippingCity,
+      stateOrProvince: order.shippingState,
+      postalCode: order.shippingPostalCode,
+      countryCode: order.shippingCountry,
+    },
+  });
 
   /**
    * Get a single synced order by ID.
@@ -381,7 +406,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
       throw new NotFoundException(`Marketplace order ${orderId} not found`);
     }
 
-    return order;
+    return this.enrichOrder(order);
   }
 
   /**
@@ -404,7 +429,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
     const client = await this.ebayStore.getClient(order.connectionId, tenantId);
 
     // Build line items for fulfillment (all items in the order)
-    const lineItems = (order.itemsData as any[]).map((item: any) => ({
+    const lineItems = (order.itemsData as MappedOrderLineItem[]).map((item) => ({
       lineItemId: item.lineItemId,
       quantity: item.quantity,
     }));
@@ -467,7 +492,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
     tenantId: string,
     orderId: string,
     data: { amount?: number; comment?: string; lineItemIds?: string[] }
-  ): Promise<any> {
+  ): Promise<Record<string, unknown>> {
     const order = await this.getOrder(tenantId, orderId);
 
     if (this.mockMode) {
@@ -501,16 +526,16 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
     const client = await this.ebayStore.getClient(order.connectionId, tenantId);
 
     try {
-      const refundPayload: any = {
+      const refundPayload: Record<string, unknown> = {
         reasonForRefund: 'OTHER',
         comment: data.comment || 'Refund issued by seller',
       };
 
       if (data.lineItemIds && data.lineItemIds.length > 0) {
         // Line-item-level refund
-        const lineItems = (order.itemsData as any[]) || [];
+        const lineItems = (order.itemsData as MappedOrderLineItem[]) || [];
         refundPayload.refundItems = data.lineItemIds.map((lineItemId) => {
-          const lineItem = lineItems.find((li: any) => li.lineItemId === lineItemId);
+          const lineItem = lineItems.find((li) => li.lineItemId === lineItemId);
           return {
             lineItemId,
             legacyReference: {
@@ -534,6 +559,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
         };
       }
 
+      // TODO: remove when ebay-api types are fixed
       const result = await (client.sell.fulfillment as any).issueRefund(
         order.externalOrderId,
         refundPayload
@@ -591,6 +617,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
    * unified orders view, triggers inventory reservations, and can use existing
    * fulfillment workflows (pick, pack, ship).
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Prisma Order type varies by include/select
   async createNoSlagOrder(tenantId: string, marketplaceOrderId: string): Promise<any> {
     const mpOrder = await this.prisma.marketplaceOrder.findFirst({
       where: { id: marketplaceOrderId, tenantId },
@@ -663,7 +690,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
       });
 
       // Create OrderItem records from itemsData
-      const lineItems = (mpOrder.itemsData as any[]) || [];
+      const lineItems = (mpOrder.itemsData as MappedOrderLineItem[]) || [];
       for (const item of lineItems) {
         // Try to find the matching ProductListing by SKU (stored as Item.code)
         let productId: string | null = null;
@@ -715,6 +742,11 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
    * Runs outside of CLS context, so tenantId is read from each connection record.
    */
   private async syncAllActiveConnections() {
+    if (this.isSyncingOrders) {
+      this.logger.warn('Order sync already in progress, skipping this tick');
+      return;
+    }
+    this.isSyncingOrders = true;
     try {
       const connections = await this.prisma.marketplaceConnection.findMany({
         where: {
@@ -742,6 +774,8 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
       }
     } catch (error) {
       this.logger.error('Scheduled order sync global error', error);
+    } finally {
+      this.isSyncingOrders = false;
     }
   }
 
@@ -771,7 +805,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
    */
   private async syncListingInventoryWithLock(
     connection: { id: string; tenantId: string },
-    listing: any
+    listing: { id: string; sku: string; warehouseId: string | null; productListing: { itemId: string } | null }
   ): Promise<void> {
     if (!listing.warehouseId || !listing.productListing) return;
 
@@ -818,6 +852,11 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
    * Runs outside of CLS context, so tenantId is read from each connection record.
    */
   private async syncAllActiveInventory() {
+    if (this.isSyncingInventory) {
+      this.logger.warn('Inventory sync already in progress, skipping this tick');
+      return;
+    }
+    this.isSyncingInventory = true;
     try {
       const connections = await this.prisma.marketplaceConnection.findMany({
         where: {
@@ -868,6 +907,8 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
       }
     } catch (error) {
       this.logger.error('Scheduled inventory sync global error', error);
+    } finally {
+      this.isSyncingInventory = false;
     }
   }
 }

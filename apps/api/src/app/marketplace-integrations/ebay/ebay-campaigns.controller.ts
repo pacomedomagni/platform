@@ -7,11 +7,13 @@ import {
   Param,
   Query,
   UseGuards,
+  ValidationPipe,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayCampaignsService } from './ebay-campaigns.service';
+import { CreateCampaignDto, AddAdToCampaignDto } from '../shared/marketplace.dto';
 
 /**
  * eBay Campaigns API Controller
@@ -31,18 +33,9 @@ export class EbayCampaignsController {
   @Roles('admin', 'System Manager')
   async createCampaign(
     @Tenant() tenantId: string,
-    @Body()
-    body: {
-      connectionId: string;
-      name: string;
-      marketplaceId: string;
-      bidPercentage: number;
-      budgetAmount?: number;
-      startDate?: string;
-      endDate?: string;
-    }
+    @Body(ValidationPipe) dto: CreateCampaignDto
   ) {
-    return this.campaignsService.createCampaign(tenantId, body);
+    return this.campaignsService.createCampaign(tenantId, dto);
   }
 
   /**
@@ -78,13 +71,13 @@ export class EbayCampaignsController {
   async addListingToCampaign(
     @Tenant() tenantId: string,
     @Param('id') id: string,
-    @Body() body: { listingId: string; bidPercentage: number }
+    @Body(ValidationPipe) dto: AddAdToCampaignDto
   ) {
     await this.campaignsService.addListingToCampaign(
       tenantId,
       id,
-      body.listingId,
-      body.bidPercentage
+      dto.listingId,
+      dto.bidPercentage
     );
     return { success: true, message: 'Listing added to campaign' };
   }

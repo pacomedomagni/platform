@@ -106,8 +106,10 @@ export default function MarketplacePromotionsPage() {
   const loadPromotions = async () => {
     setLoading(true);
     try {
+      const conn = connections.find((c) => c.id === selectedConnection);
+      const marketplaceId = conn?.marketplaceId || 'EBAY_US';
       const res = await fetch(
-        `/api/v1/marketplace/promotions?connectionId=${selectedConnection}`,
+        `/api/v1/marketplace/promotions?connectionId=${selectedConnection}&marketplaceId=${marketplaceId}`,
         { credentials: 'include' }
       );
       if (res.ok) {

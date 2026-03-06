@@ -54,7 +54,7 @@ interface Order {
   connectionId: string;
   externalOrderId: string;
   buyerUsername: string;
-  totalAmount: string;
+  total: string;
   currency: string;
   paymentStatus: string;
   fulfillmentStatus: string;
@@ -155,38 +155,15 @@ export default function MarketplaceOrderDetailPage() {
   const loadOrder = async () => {
     setLoading(true);
     try {
-      // First fetch all connections
-      const connectionsRes = await fetch('/api/v1/marketplace/connections', {
+      const res = await fetch(`/api/v1/marketplace/orders/${orderId}`, {
         credentials: 'include',
       });
-      if (!connectionsRes.ok) {
-        toast({ title: 'Error', description: 'Failed to load connections', variant: 'destructive' });
-        setLoading(false);
-        return;
+      if (res.ok) {
+        const data = unwrapJson<Order>(await res.json());
+        setOrder(data);
+      } else {
+        setOrder(null);
       }
-      const connections: Connection[] = unwrapJson(await connectionsRes.json());
-
-      // Iterate through connections to find the order
-      let foundOrder: Order | null = null;
-
-      for (const connection of connections) {
-        const ordersRes = await fetch(
-          `/api/v1/marketplace/orders?connectionId=${connection.id}`,
-          { credentials: 'include' }
-        );
-        if (ordersRes.ok) {
-          const orders: Order[] = unwrapJson(await ordersRes.json());
-          const match = orders.find(
-            (o) => o.id === orderId || o.externalOrderId === orderId
-          );
-          if (match) {
-            foundOrder = match;
-            break;
-          }
-        }
-      }
-
-      setOrder(foundOrder);
     } catch (error) {
       console.error('Failed to load order:', error);
       toast({ title: 'Error', description: 'Failed to load order details', variant: 'destructive' });
@@ -410,7 +387,7 @@ export default function MarketplaceOrderDetailPage() {
             )}
             <button
               onClick={() => {
-                setRefundAmount(order.totalAmount || '');
+                setRefundAmount(order.total || '');
                 setRefundReason('');
                 setRefundModal(true);
               }}
@@ -667,7 +644,7 @@ export default function MarketplaceOrderDetailPage() {
               </div>
               <div className="flex justify-between font-semibold text-gray-900 border-t border-gray-200 pt-2 mt-2">
                 <span>Total</span>
-                <span>{formatCurrency(order.totalAmount, order.currency)}</span>
+                <span>{formatCurrency(order.total, order.currency)}</span>
               </div>
               <div className="flex justify-between text-xs text-gray-400 pt-1">
                 <span>Currency</span>
@@ -775,7 +752,7 @@ export default function MarketplaceOrderDetailPage() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Order total: {formatCurrency(order.totalAmount, order.currency)}
+                  Order total: {formatCurrency(order.total, order.currency)}
                 </p>
               </div>
               <div>

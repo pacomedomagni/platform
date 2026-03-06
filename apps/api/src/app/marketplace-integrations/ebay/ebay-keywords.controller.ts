@@ -7,11 +7,17 @@ import {
   Param,
   Query,
   UseGuards,
+  ValidationPipe,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayKeywordsService } from './ebay-keywords.service';
+import {
+  CreateKeywordDto,
+  BulkCreateKeywordsDto,
+  CreateNegativeKeywordDto,
+} from '../shared/marketplace.dto';
 
 /**
  * eBay Keywords API Controller
@@ -28,6 +34,7 @@ export class EbayKeywordsController {
    * GET /api/marketplace/campaigns/:campaignId/keywords?connectionId=...&adGroupId=...
    */
   @Get()
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getKeywords(
     @Tenant() tenantId: string,
     @Param('campaignId') campaignId: string,
@@ -46,20 +53,13 @@ export class EbayKeywordsController {
   async createKeyword(
     @Tenant() tenantId: string,
     @Param('campaignId') campaignId: string,
-    @Body()
-    body: {
-      connectionId: string;
-      adGroupId: string;
-      keyword: string;
-      matchType: 'BROAD' | 'EXACT' | 'PHRASE';
-      bid?: { value: string; currency: string };
-    }
+    @Body(ValidationPipe) dto: CreateKeywordDto
   ) {
-    return this.keywordsService.createKeyword(body.connectionId, campaignId, {
-      adGroupId: body.adGroupId,
-      keyword: body.keyword,
-      matchType: body.matchType,
-      bid: body.bid,
+    return this.keywordsService.createKeyword(dto.connectionId, campaignId, {
+      adGroupId: dto.adGroupId,
+      keyword: dto.keyword,
+      matchType: dto.matchType,
+      bid: dto.bid,
     });
   }
 
@@ -72,21 +72,12 @@ export class EbayKeywordsController {
   async bulkCreateKeywords(
     @Tenant() tenantId: string,
     @Param('campaignId') campaignId: string,
-    @Body()
-    body: {
-      connectionId: string;
-      keywords: Array<{
-        adGroupId: string;
-        keyword: string;
-        matchType: string;
-        bid?: any;
-      }>;
-    }
+    @Body(ValidationPipe) dto: BulkCreateKeywordsDto
   ) {
     return this.keywordsService.bulkCreateKeywords(
-      body.connectionId,
+      dto.connectionId,
       campaignId,
-      body.keywords
+      dto.keywords
     );
   }
 
@@ -115,18 +106,12 @@ export class EbayKeywordsController {
   async createNegativeKeyword(
     @Tenant() tenantId: string,
     @Param('campaignId') campaignId: string,
-    @Body()
-    body: {
-      connectionId: string;
-      adGroupId?: string;
-      keyword: string;
-      matchType: string;
-    }
+    @Body(ValidationPipe) dto: CreateNegativeKeywordDto
   ) {
-    return this.keywordsService.createNegativeKeyword(body.connectionId, campaignId, {
-      adGroupId: body.adGroupId,
-      keyword: body.keyword,
-      matchType: body.matchType,
+    return this.keywordsService.createNegativeKeyword(dto.connectionId, campaignId, {
+      adGroupId: dto.adGroupId,
+      keyword: dto.keyword,
+      matchType: dto.matchType,
     });
   }
 
@@ -135,6 +120,7 @@ export class EbayKeywordsController {
    * GET /api/marketplace/campaigns/:campaignId/keywords/suggestions?connectionId=...&adGroupId=...&listingIds=...
    */
   @Get('suggestions')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async suggestKeywords(
     @Tenant() tenantId: string,
     @Param('campaignId') campaignId: string,
@@ -156,6 +142,7 @@ export class EbayKeywordsController {
    * GET /api/marketplace/campaigns/:campaignId/keywords/bid-suggestions?connectionId=...&adGroupId=...&keywords=...
    */
   @Get('bid-suggestions')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async suggestBids(
     @Tenant() tenantId: string,
     @Param('campaignId') campaignId: string,

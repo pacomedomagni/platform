@@ -121,8 +121,7 @@ export class EbayShippingService {
       );
 
       try {
-        await this.audit.logWebhookProcessed('CREATE_SHIPMENT', {
-          shipmentId,
+        await this.audit.logShipmentAction(shipmentId, 'CREATE_SHIPMENT', {
           connectionId,
           shippingQuoteId: params.shippingQuoteId,
           rateId: params.rateId,
@@ -273,8 +272,7 @@ export class EbayShippingService {
       );
 
       try {
-        await this.audit.logWebhookProcessed('CANCEL_SHIPMENT', {
-          shipmentId,
+        await this.audit.logShipmentAction(shipmentId, 'CANCEL_SHIPMENT', {
           connectionId,
         });
       } catch {

@@ -8,11 +8,13 @@ import {
   UseGuards,
   HttpException,
   HttpStatus,
+  ValidationPipe,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayComplianceService } from './ebay-compliance.service';
+import { SyncComplianceDto, SuppressViolationDto } from '../shared/marketplace.dto';
 
 /**
  * eBay Compliance API Controller
@@ -109,13 +111,9 @@ export class EbayComplianceController {
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async syncViolations(
     @Tenant() tenantId: string,
-    @Body('connectionId') connectionId: string
+    @Body(ValidationPipe) dto: SyncComplianceDto
   ) {
-    if (!connectionId) {
-      throw new HttpException('connectionId is required', HttpStatus.BAD_REQUEST);
-    }
-
-    const result = await this.complianceService.syncViolations(tenantId, connectionId);
+    const result = await this.complianceService.syncViolations(tenantId, dto.connectionId);
 
     return {
       success: true,
@@ -133,14 +131,9 @@ export class EbayComplianceController {
   async suppressViolation(
     @Tenant() tenantId: string,
     @Param('listingId') listingId: string,
-    @Body('connectionId') connectionId: string,
-    @Body('complianceType') complianceType?: string
+    @Body(ValidationPipe) dto: SuppressViolationDto
   ) {
-    if (!connectionId) {
-      throw new HttpException('connectionId is required', HttpStatus.BAD_REQUEST);
-    }
-
-    await this.complianceService.suppressViolation(connectionId, tenantId, listingId, complianceType);
+    await this.complianceService.suppressViolation(dto.connectionId, tenantId, listingId, dto.complianceType);
 
     return {
       success: true,

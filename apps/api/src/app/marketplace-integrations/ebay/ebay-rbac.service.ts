@@ -144,10 +144,20 @@ export class EbayRbacService {
   }
 
   /**
+   * Map NoSlag system roles to marketplace role template names.
+   */
+  private readonly ROLE_MAPPING: Record<string, string> = {
+    admin: 'Owner',
+    'System Manager': 'Store Manager',
+    'Inventory Manager': 'Listing Specialist',
+    'Sales Manager': 'Marketing Manager',
+    'Customer Service': 'Customer Service',
+    'Order Processor': 'Order Processor',
+  };
+
+  /**
    * Get effective permissions for a user.
-   * Placeholder: returns Owner permissions for now since fine-grained RBAC
-   * integration with the existing user/roles system would require more
-   * architectural work.
+   * Looks up the user's NoSlag role and maps it to a marketplace role template.
    */
   async getUserEffectivePermissions(
     tenantId: string,
@@ -157,9 +167,26 @@ export class EbayRbacService {
       `Getting effective permissions for user ${userId} in tenant ${tenantId}`
     );
 
-    // TODO: Integrate with existing user/roles system for fine-grained RBAC.
-    // For now, return Owner-level permissions as a placeholder.
-    const ownerTemplate = this.getRoleTemplate('Owner');
-    return ownerTemplate ? ownerTemplate.permissions : [];
+    try {
+      const user = await this.prisma.user.findFirst({
+        where: { id: userId, tenantId },
+        select: { roles: true },
+      });
+
+      if (!user?.roles?.length) {
+        this.logger.warn(`User ${userId} not found or has no roles, defaulting to Viewer`);
+        return this.getPermissionsForRole('Viewer');
+      }
+
+      // Use the highest-privilege role from the user's roles array
+      const matchedRole = user.roles.find((r) => this.ROLE_MAPPING[r]);
+      const templateName = matchedRole ? this.ROLE_MAPPING[matchedRole] : 'Viewer';
+      this.logger.debug(`User ${userId} has roles [${user.roles.join(', ')}] → template "${templateName}"`);
+      return this.getPermissionsForRole(templateName);
+    } catch (error: any) {
+      this.logger.error(`Failed to resolve permissions for user ${userId}: ${error?.message}`);
+      // Fail-safe: return Viewer (read-only) permissions
+      return this.getPermissionsForRole('Viewer');
+    }
   }
 }

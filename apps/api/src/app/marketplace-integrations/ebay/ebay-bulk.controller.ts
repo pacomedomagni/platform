@@ -8,11 +8,18 @@ import {
   UseGuards,
   HttpException,
   HttpStatus,
+  ValidationPipe,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayBulkService } from './ebay-bulk.service';
+import {
+  CreateBulkTaskDto,
+  UploadBulkFileDto,
+  SubmitBulkTaskDto,
+  BulkUpdatePriceQuantityDto,
+} from '../shared/marketplace.dto';
 
 /**
  * eBay Bulk Operations API Controller
@@ -32,18 +39,11 @@ export class EbayBulkController {
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async createTask(
     @Tenant() tenantId: string,
-    @Body() body: { connectionId: string; feedType: string }
+    @Body(ValidationPipe) dto: CreateBulkTaskDto
   ) {
-    if (!body.connectionId || !body.feedType) {
-      throw new HttpException(
-        'connectionId and feedType are required',
-        HttpStatus.BAD_REQUEST
-      );
-    }
-
     const result = await this.bulkService.createInventoryTask(
-      body.connectionId,
-      body.feedType
+      dto.connectionId,
+      dto.feedType
     );
     return { success: true, ...result };
   }
@@ -57,18 +57,11 @@ export class EbayBulkController {
   async uploadFile(
     @Tenant() tenantId: string,
     @Param('taskId') taskId: string,
-    @Body() body: { connectionId: string; fileContent: string }
+    @Body(ValidationPipe) dto: UploadBulkFileDto
   ) {
-    if (!body.connectionId || !body.fileContent) {
-      throw new HttpException(
-        'connectionId and fileContent (base64) are required',
-        HttpStatus.BAD_REQUEST
-      );
-    }
-
-    const fileBuffer = Buffer.from(body.fileContent, 'base64');
+    const fileBuffer = Buffer.from(dto.fileContent, 'base64');
     const result = await this.bulkService.uploadFeedFile(
-      body.connectionId,
+      dto.connectionId,
       taskId,
       fileBuffer
     );
@@ -84,16 +77,9 @@ export class EbayBulkController {
   async submitTask(
     @Tenant() tenantId: string,
     @Param('taskId') taskId: string,
-    @Body() body: { connectionId: string }
+    @Body(ValidationPipe) dto: SubmitBulkTaskDto
   ) {
-    if (!body.connectionId) {
-      throw new HttpException(
-        'connectionId is required',
-        HttpStatus.BAD_REQUEST
-      );
-    }
-
-    const result = await this.bulkService.submitTask(body.connectionId, taskId);
+    const result = await this.bulkService.submitTask(dto.connectionId, taskId);
     return { success: true, ...result };
   }
 
@@ -147,20 +133,9 @@ export class EbayBulkController {
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async bulkUpdatePriceQuantity(
     @Tenant() tenantId: string,
-    @Body()
-    body: {
-      connectionId: string;
-      items: Array<{ sku: string; price?: number; quantity?: number }>;
-    }
+    @Body(ValidationPipe) dto: BulkUpdatePriceQuantityDto
   ) {
-    if (!body.connectionId || !body.items || !Array.isArray(body.items)) {
-      throw new HttpException(
-        'connectionId and items[] are required',
-        HttpStatus.BAD_REQUEST
-      );
-    }
-
-    if (body.items.length === 0) {
+    if (dto.items.length === 0) {
       throw new HttpException(
         'items array must not be empty',
         HttpStatus.BAD_REQUEST
@@ -168,8 +143,8 @@ export class EbayBulkController {
     }
 
     const result = await this.bulkService.bulkUpdatePriceQuantity(
-      body.connectionId,
-      body.items
+      dto.connectionId,
+      dto.items
     );
     return { success: true, ...result };
   }

@@ -299,6 +299,10 @@ export class EbayCrossBorderService {
     baseCurrency: string,
     targetCurrencies: string[]
   ): any {
+    this.logger.warn(
+      'Using static exchange rates. These are approximations only — integrate a live FX provider (e.g. Open Exchange Rates) for production use.'
+    );
+
     const rates: Record<string, Record<string, number>> = {
       USD: { GBP: 0.79, EUR: 0.92, AUD: 1.53, CAD: 1.36, USD: 1.0 },
       GBP: { USD: 1.27, EUR: 1.17, AUD: 1.94, CAD: 1.72, GBP: 1.0 },

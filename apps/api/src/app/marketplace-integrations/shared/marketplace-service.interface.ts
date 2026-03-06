@@ -18,6 +18,7 @@ export interface IMarketplaceListingsService {
   approveListing(id: string, userId?: string): Promise<any>;
   rejectListing(id: string, userId?: string, reason?: string): Promise<any>;
   publishListing(id: string): Promise<any>;
+  scheduleListing(id: string, scheduledDate: string): Promise<any>;
   syncListingInventory(id: string): Promise<void>;
   endListing(id: string): Promise<void>;
   deleteListing(id: string): Promise<void>;

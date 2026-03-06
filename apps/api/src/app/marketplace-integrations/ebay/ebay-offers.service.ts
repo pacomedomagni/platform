@@ -36,7 +36,7 @@ export class EbayOffersService {
 
     const response = await this.ebayClient.getBestOffers(
       client,
-      listing.externalListingId!,
+      listing.externalListingId,
       status
     );
 
@@ -73,7 +73,7 @@ export class EbayOffersService {
 
     await this.ebayClient.respondToBestOffer(
       client,
-      listing.externalListingId!,
+      listing.externalListingId,
       bestOfferId,
       'Accept'
     );
@@ -97,7 +97,7 @@ export class EbayOffersService {
 
     await this.ebayClient.respondToBestOffer(
       client,
-      listing.externalListingId!,
+      listing.externalListingId,
       bestOfferId,
       'Decline',
       undefined,
@@ -124,7 +124,7 @@ export class EbayOffersService {
 
     await this.ebayClient.respondToBestOffer(
       client,
-      listing.externalListingId!,
+      listing.externalListingId,
       bestOfferId,
       'Counter',
       counterPrice,
@@ -160,6 +160,6 @@ export class EbayOffersService {
       );
     }
 
-    return listing;
+    return listing as typeof listing & { externalListingId: string };
   }
 }

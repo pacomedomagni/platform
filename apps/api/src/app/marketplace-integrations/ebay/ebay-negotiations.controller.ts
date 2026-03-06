@@ -7,11 +7,13 @@ import {
   UseGuards,
   HttpException,
   HttpStatus,
+  ValidationPipe,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayNegotiationsService } from './ebay-negotiations.service';
+import { SendNegotiationOfferDto } from '../shared/marketplace.dto';
 
 /**
  * eBay Negotiations API Controller
@@ -53,27 +55,13 @@ export class EbayNegotiationsController {
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async sendOffer(
     @Tenant() tenantId: string,
-    @Body()
-    body: {
-      connectionId: string;
-      listingId: string;
-      offeredPrice: { value: string; currency: string };
-      message?: string;
-      allowCounterOffer?: boolean;
-    }
+    @Body(ValidationPipe) dto: SendNegotiationOfferDto
   ) {
-    if (!body.connectionId || !body.listingId || !body.offeredPrice) {
-      throw new HttpException(
-        'connectionId, listingId, and offeredPrice are required',
-        HttpStatus.BAD_REQUEST
-      );
-    }
-
-    const result = await this.negotiationsService.sendOfferToInterested(body.connectionId, {
-      listingId: body.listingId,
-      offeredPrice: body.offeredPrice,
-      message: body.message,
-      allowCounterOffer: body.allowCounterOffer,
+    const result = await this.negotiationsService.sendOfferToInterested(dto.connectionId, {
+      listingId: dto.listingId,
+      offeredPrice: dto.offeredPrice,
+      message: dto.message,
+      allowCounterOffer: dto.allowCounterOffer,
     });
 
     return { success: true, message: 'Offer sent to interested buyers', ...result };

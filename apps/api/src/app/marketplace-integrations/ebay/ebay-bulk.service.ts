@@ -312,8 +312,7 @@ export class EbayBulkService {
       );
 
       try {
-        await this.audit.logWebhookProcessed('BULK_UPDATE_PRICE_QUANTITY', {
-          taskId: task.taskId,
+        await this.audit.logBulkOperation(task.taskId, 'BULK_UPDATE_PRICE_QUANTITY', {
           connectionId,
           itemCount: items.length,
         });

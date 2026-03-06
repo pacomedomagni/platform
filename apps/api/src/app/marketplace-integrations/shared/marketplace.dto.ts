@@ -553,6 +553,12 @@ export class FulfillOrderDto {
   carrier!: string;
 }
 
+export class ScheduleListingDto {
+  @IsString()
+  @IsNotEmpty()
+  scheduledDate!: string;
+}
+
 // ============================================
 // Return DTOs
 // ============================================
@@ -725,4 +731,923 @@ export class CreateVariationListingDto {
   @IsString()
   @MinLength(1)
   description!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  fulfillmentPolicyId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  paymentPolicyId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  returnPolicyId!: string;
+}
+
+// ============================================
+// Campaign DTOs
+// ============================================
+
+export class CreateCampaignDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  marketplaceId!: string;
+
+  @IsNumber()
+  @Min(0)
+  bidPercentage!: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  budgetAmount?: number;
+
+  @IsOptional()
+  @IsString()
+  startDate?: string;
+
+  @IsOptional()
+  @IsString()
+  endDate?: string;
+}
+
+export class AddAdToCampaignDto {
+  @IsString()
+  @IsNotEmpty()
+  listingId!: string;
+
+  @IsNumber()
+  @Min(0)
+  bidPercentage!: number;
+}
+
+// ============================================
+// Offer DTOs
+// ============================================
+
+export class DeclineOfferDto {
+  @IsOptional()
+  @IsString()
+  reason?: string;
+}
+
+export class CounterOfferDto {
+  @IsNumber()
+  @Min(0.01)
+  counterPrice!: number;
+
+  @IsOptional()
+  @IsString()
+  message?: string;
+}
+
+// ============================================
+// Bulk Operations DTOs
+// ============================================
+
+export class CreateBulkTaskDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  feedType!: string;
+}
+
+export class UploadBulkFileDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  fileContent!: string;
+}
+
+export class SubmitBulkTaskDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+}
+
+export class BulkPriceQuantityItemDto {
+  @IsString()
+  @IsNotEmpty()
+  sku!: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  price?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  quantity?: number;
+}
+
+export class BulkUpdatePriceQuantityDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => BulkPriceQuantityItemDto)
+  items!: BulkPriceQuantityItemDto[];
+}
+
+// ============================================
+// Shipping DTOs
+// ============================================
+
+export class GetShippingQuoteDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  orderId!: string;
+
+  @IsOptional()
+  @IsString()
+  shippingOption?: string;
+}
+
+export class CreateShipmentDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  shippingQuoteId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  rateId!: string;
+}
+
+// ============================================
+// Feedback DTOs
+// ============================================
+
+export class RespondToFeedbackDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  feedbackId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  responseText!: string;
+}
+
+export class LeaveFeedbackDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  orderId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  buyerUsername!: string;
+
+  @IsEnum(['Positive', 'Neutral', 'Negative'], {
+    message: 'rating must be Positive, Neutral, or Negative',
+  })
+  rating!: 'Positive' | 'Neutral' | 'Negative';
+
+  @IsString()
+  @IsNotEmpty()
+  comment!: string;
+}
+
+// ============================================
+// Keyword DTOs
+// ============================================
+
+export class KeywordBidDto {
+  @IsString()
+  @IsNotEmpty()
+  value!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  currency!: string;
+}
+
+export class CreateKeywordDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  adGroupId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  keyword!: string;
+
+  @IsEnum(['BROAD', 'EXACT', 'PHRASE'], {
+    message: 'matchType must be BROAD, EXACT, or PHRASE',
+  })
+  matchType!: 'BROAD' | 'EXACT' | 'PHRASE';
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => KeywordBidDto)
+  bid?: KeywordBidDto;
+}
+
+export class BulkKeywordItemDto {
+  @IsString()
+  @IsNotEmpty()
+  adGroupId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  keyword!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  matchType!: string;
+
+  @IsOptional()
+  @IsObject()
+  bid?: any;
+}
+
+export class BulkCreateKeywordsDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => BulkKeywordItemDto)
+  keywords!: BulkKeywordItemDto[];
+}
+
+export class CreateNegativeKeywordDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsOptional()
+  @IsString()
+  adGroupId?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  keyword!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  matchType!: string;
+}
+
+// ============================================
+// Inventory Location DTOs
+// ============================================
+
+export class LocationAddressDto {
+  @IsString()
+  @IsNotEmpty()
+  addressLine1!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  city!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  stateOrProvince!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  postalCode!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  country!: string;
+}
+
+export class CreateInventoryLocationDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  merchantLocationKey!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @ValidateNested()
+  @Type(() => LocationAddressDto)
+  address!: LocationAddressDto;
+
+  @IsEnum(['WAREHOUSE', 'STORE'], {
+    message: 'locationType must be WAREHOUSE or STORE',
+  })
+  locationType!: 'WAREHOUSE' | 'STORE';
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
+}
+
+export class UpdateInventoryLocationDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
+}
+
+export class ConnectionIdDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+}
+
+// ============================================
+// Published Listing DTOs
+// ============================================
+
+export class OfferPriceDto {
+  @IsString()
+  @IsNotEmpty()
+  value!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  currency!: string;
+}
+
+export class UpdatePublishedListingDto {
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => OfferPriceDto)
+  price?: OfferPriceDto;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  quantity?: number;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+}
+
+export class SetOutOfStockControlDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsBoolean()
+  enabled!: boolean;
+}
+
+// ============================================
+// Promotion DTOs
+// ============================================
+
+export class MarkdownPromotionItemDto {
+  @IsString()
+  @IsNotEmpty()
+  listingId!: string;
+
+  @IsNumber()
+  @Min(0)
+  discount!: number;
+}
+
+export class CreateMarkdownPromotionDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  description!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  startDate!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  endDate!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  marketplaceId!: string;
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => MarkdownPromotionItemDto)
+  selectedItems!: MarkdownPromotionItemDto[];
+}
+
+export class CreateOrderPromotionDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  description!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  startDate!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  endDate!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  marketplaceId!: string;
+
+  @IsObject()
+  discountRules!: any;
+}
+
+export class CreateCodedCouponDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  couponCode!: string;
+
+  @IsEnum(['PERCENTAGE', 'FIXED_AMOUNT'], {
+    message: 'discountType must be PERCENTAGE or FIXED_AMOUNT',
+  })
+  discountType!: 'PERCENTAGE' | 'FIXED_AMOUNT';
+
+  @IsNumber()
+  @Min(0)
+  discountValue!: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  minOrderAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  maxUses?: number;
+
+  @IsOptional()
+  @IsString()
+  startDate?: string;
+
+  @IsOptional()
+  @IsString()
+  endDate?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  listingIds?: string[];
+}
+
+export class VolumePricingTierDto {
+  @IsNumber()
+  @Min(1)
+  minQuantity!: number;
+
+  @IsNumber()
+  @Min(0)
+  discountPercentage!: number;
+}
+
+export class CreateVolumePricingDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  listingIds!: string[];
+
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => VolumePricingTierDto)
+  tiers!: VolumePricingTierDto[];
+
+  @IsOptional()
+  @IsString()
+  startDate?: string;
+
+  @IsOptional()
+  @IsString()
+  endDate?: string;
+}
+
+// ============================================
+// Cross-Border Trade DTOs
+// ============================================
+
+export class CrossBorderPriceDto {
+  @IsString()
+  @IsNotEmpty()
+  value!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  currency!: string;
+}
+
+export class ListItemCrossBorderDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  sku!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  targetMarketplace!: string;
+
+  @ValidateNested()
+  @Type(() => CrossBorderPriceDto)
+  price!: CrossBorderPriceDto;
+
+  @IsString()
+  @IsNotEmpty()
+  fulfillmentPolicyId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  returnPolicyId!: string;
+
+  @IsOptional()
+  @IsString()
+  paymentPolicyId?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  categoryId!: string;
+}
+
+// ============================================
+// Negotiation DTOs
+// ============================================
+
+export class NegotiationPriceDto {
+  @IsString()
+  @IsNotEmpty()
+  value!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  currency!: string;
+}
+
+export class SendNegotiationOfferDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  listingId!: string;
+
+  @ValidateNested()
+  @Type(() => NegotiationPriceDto)
+  offeredPrice!: NegotiationPriceDto;
+
+  @IsOptional()
+  @IsString()
+  message?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  allowCounterOffer?: boolean;
+}
+
+// ============================================
+// Inquiry DTOs
+// ============================================
+
+export class AppealCaseDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  comments!: string;
+}
+
+export class ProvideShipmentInfoDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  trackingNumber!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  carrier!: string;
+}
+
+export class IssueInquiryRefundDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  amount?: number;
+
+  @IsOptional()
+  @IsString()
+  comment?: string;
+}
+
+export class SendInquiryMessageDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  message!: string;
+}
+
+// ============================================
+// Dispute DTOs
+// ============================================
+
+export class AcceptDisputeDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsOptional()
+  @IsNumber()
+  revision?: number;
+}
+
+export class ContestDisputeDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  reason!: string;
+
+  @IsOptional()
+  @IsNumber()
+  revision?: number;
+}
+
+export class AddDisputeEvidenceDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  evidenceType!: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  lineItems?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  evidenceIds?: string[];
+}
+
+// ============================================
+// Cancellation DTOs
+// ============================================
+
+export class RequestCancellationDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  orderId!: string;
+
+  @IsEnum(['BUYER_ASKED_CANCEL', 'OUT_OF_STOCK', 'ADDRESS_ISSUES'], {
+    message: 'reason must be BUYER_ASKED_CANCEL, OUT_OF_STOCK, or ADDRESS_ISSUES',
+  })
+  reason!: 'BUYER_ASKED_CANCEL' | 'OUT_OF_STOCK' | 'ADDRESS_ISSUES';
+}
+
+// ============================================
+// Media DTOs
+// ============================================
+
+export class UploadImageFromUrlDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  imageUrl!: string;
+}
+
+export class UploadImageFromFileDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  fileContent!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  contentType!: string;
+}
+
+// ============================================
+// Store Category DTOs
+// ============================================
+
+export class CreateCustomPageDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  content!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  leftNav?: boolean;
+}
+
+export class StoreCategoryItemDto {
+  @IsOptional()
+  @IsNumber()
+  categoryId?: number;
+
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @IsOptional()
+  @IsNumber()
+  order?: number;
+
+  @IsOptional()
+  @IsNumber()
+  parentId?: number;
+}
+
+export class SetStoreCategoriesDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => StoreCategoryItemDto)
+  categories!: StoreCategoryItemDto[];
+}
+
+// ============================================
+// Email Campaign DTOs
+// ============================================
+
+export class CreateEmailCampaignDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  subject!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  emailBody!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  audienceType!: string;
+
+  @IsOptional()
+  @IsString()
+  scheduledDate?: string;
+}
+
+// ============================================
+// Order Refund DTOs
+// ============================================
+
+export class IssueOrderRefundDto {
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  amount?: number;
+
+  @IsOptional()
+  @IsString()
+  comment?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  lineItemIds?: string[];
+}
+
+// ============================================
+// Connection Additional DTOs
+// ============================================
+
+export class SetVacationModeDto {
+  @IsBoolean()
+  enabled!: boolean;
+
+  @IsOptional()
+  @IsString()
+  returnMessage?: string;
+}
+
+// ============================================
+// Compliance DTOs
+// ============================================
+
+export class SyncComplianceDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+}
+
+export class SuppressViolationDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsOptional()
+  @IsString()
+  complianceType?: string;
 }

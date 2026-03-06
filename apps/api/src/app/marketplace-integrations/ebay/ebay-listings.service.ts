@@ -877,6 +877,14 @@ export class EbayListingsService {
   }
 
   /**
+   * IMarketplaceListingsService interface method.
+   * Delegates to scheduleListingPublish with the parsed date.
+   */
+  async scheduleListing(id: string, scheduledDate: string): Promise<any> {
+    return this.scheduleListingPublish(id, new Date(scheduledDate));
+  }
+
+  /**
    * Set the Out-of-Stock Control preference for an eBay account.
    * When enabled, listings with 0 quantity remain active (hidden from search)
    * instead of ending automatically.
@@ -1026,6 +1034,12 @@ export class EbayListingsService {
     returnPolicyId: string;
     merchantLocationKey?: string;
   }) {
+    if (!data.fulfillmentPolicyId || !data.paymentPolicyId || !data.returnPolicyId) {
+      throw new Error(
+        'Variation listing requires fulfillmentPolicyId, paymentPolicyId, and returnPolicyId'
+      );
+    }
+
     const tenantId = this.cls.get('tenantId');
     const connection = await this.ebayStore.getConnection(data.connectionId);
     const client = await this.ebayStore.getClient(data.connectionId);

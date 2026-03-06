@@ -8,11 +8,17 @@ import {
   Param,
   Query,
   UseGuards,
+  ValidationPipe,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayInventoryLocationsService } from './ebay-inventory-locations.service';
+import {
+  CreateInventoryLocationDto,
+  UpdateInventoryLocationDto,
+  ConnectionIdDto,
+} from '../shared/marketplace.dto';
 
 /**
  * eBay Inventory Locations API Controller
@@ -29,6 +35,7 @@ export class EbayInventoryLocationsController {
    * GET /api/marketplace/inventory-locations?connectionId=...
    */
   @Get()
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getLocations(
     @Tenant() tenantId: string,
     @Query('connectionId') connectionId: string
@@ -41,6 +48,7 @@ export class EbayInventoryLocationsController {
    * GET /api/marketplace/inventory-locations/:key?connectionId=...
    */
   @Get(':key')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getLocation(
     @Tenant() tenantId: string,
     @Param('key') key: string,
@@ -57,28 +65,14 @@ export class EbayInventoryLocationsController {
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async createLocation(
     @Tenant() tenantId: string,
-    @Body()
-    body: {
-      connectionId: string;
-      merchantLocationKey: string;
-      name: string;
-      address: {
-        addressLine1: string;
-        city: string;
-        stateOrProvince: string;
-        postalCode: string;
-        country: string;
-      };
-      locationType: 'WAREHOUSE' | 'STORE';
-      phone?: string;
-    }
+    @Body(ValidationPipe) dto: CreateInventoryLocationDto
   ) {
-    return this.locationsService.createLocation(body.connectionId, {
-      merchantLocationKey: body.merchantLocationKey,
-      name: body.name,
-      address: body.address,
-      locationType: body.locationType,
-      phone: body.phone,
+    return this.locationsService.createLocation(dto.connectionId, {
+      merchantLocationKey: dto.merchantLocationKey,
+      name: dto.name,
+      address: dto.address,
+      locationType: dto.locationType,
+      phone: dto.phone,
     });
   }
 
@@ -91,16 +85,11 @@ export class EbayInventoryLocationsController {
   async updateLocation(
     @Tenant() tenantId: string,
     @Param('key') key: string,
-    @Body()
-    body: {
-      connectionId: string;
-      name?: string;
-      phone?: string;
-    }
+    @Body(ValidationPipe) dto: UpdateInventoryLocationDto
   ) {
-    await this.locationsService.updateLocation(body.connectionId, key, {
-      name: body.name,
-      phone: body.phone,
+    await this.locationsService.updateLocation(dto.connectionId, key, {
+      name: dto.name,
+      phone: dto.phone,
     });
     return { success: true, message: 'Inventory location updated' };
   }
@@ -129,9 +118,9 @@ export class EbayInventoryLocationsController {
   async enableLocation(
     @Tenant() tenantId: string,
     @Param('key') key: string,
-    @Body() body: { connectionId: string }
+    @Body(ValidationPipe) dto: ConnectionIdDto
   ) {
-    await this.locationsService.enableLocation(body.connectionId, key);
+    await this.locationsService.enableLocation(dto.connectionId, key);
     return { success: true, message: 'Inventory location enabled' };
   }
 
@@ -144,9 +133,9 @@ export class EbayInventoryLocationsController {
   async disableLocation(
     @Tenant() tenantId: string,
     @Param('key') key: string,
-    @Body() body: { connectionId: string }
+    @Body(ValidationPipe) dto: ConnectionIdDto
   ) {
-    await this.locationsService.disableLocation(body.connectionId, key);
+    await this.locationsService.disableLocation(dto.connectionId, key);
     return { success: true, message: 'Inventory location disabled' };
   }
 }

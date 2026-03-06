@@ -47,7 +47,7 @@ interface Order {
   connectionId: string;
   externalOrderId: string;
   buyerUsername: string;
-  totalAmount: string;
+  total: string;
   currency: string;
   paymentStatus: string;
   fulfillmentStatus: string;
@@ -586,7 +586,7 @@ function OrderRow({
         </td>
         <td className="px-6 py-4">
           <span className="text-sm font-medium text-gray-900">
-            {formatCurrency(order.totalAmount, order.currency)}
+            {formatCurrency(order.total, order.currency)}
           </span>
         </td>
         <td className="px-6 py-4">
@@ -679,7 +679,7 @@ function OrderRow({
                   </div>
                   <div className="flex justify-between font-semibold text-gray-900 border-t border-gray-200 pt-1 mt-1">
                     <span>Total</span>
-                    <span>{formatCurrency(order.totalAmount, order.currency)}</span>
+                    <span>{formatCurrency(order.total, order.currency)}</span>
                   </div>
                 </div>
               </div>

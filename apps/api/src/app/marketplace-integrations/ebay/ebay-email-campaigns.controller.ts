@@ -9,11 +9,13 @@ import {
   UseGuards,
   HttpException,
   HttpStatus,
+  ValidationPipe,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayEmailCampaignsService } from './ebay-email-campaigns.service';
+import { CreateEmailCampaignDto } from '../shared/marketplace.dto';
 
 /**
  * eBay Email Campaigns API Controller
@@ -113,33 +115,13 @@ export class EbayEmailCampaignsController {
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async createEmailCampaign(
     @Tenant() tenantId: string,
-    @Body()
-    body: {
-      connectionId: string;
-      subject: string;
-      body: string;
-      audienceType: string;
-      scheduledDate?: string;
-    }
+    @Body(ValidationPipe) dto: CreateEmailCampaignDto
   ) {
-    if (!body.connectionId) {
-      throw new HttpException('connectionId is required', HttpStatus.BAD_REQUEST);
-    }
-    if (!body.subject) {
-      throw new HttpException('subject is required', HttpStatus.BAD_REQUEST);
-    }
-    if (!body.body) {
-      throw new HttpException('body is required', HttpStatus.BAD_REQUEST);
-    }
-    if (!body.audienceType) {
-      throw new HttpException('audienceType is required', HttpStatus.BAD_REQUEST);
-    }
-
-    return this.emailCampaignsService.createEmailCampaign(tenantId, body.connectionId, {
-      subject: body.subject,
-      body: body.body,
-      audienceType: body.audienceType,
-      scheduledDate: body.scheduledDate,
+    return this.emailCampaignsService.createEmailCampaign(tenantId, dto.connectionId, {
+      subject: dto.subject,
+      body: dto.emailBody,
+      audienceType: dto.audienceType,
+      scheduledDate: dto.scheduledDate,
     });
   }
 

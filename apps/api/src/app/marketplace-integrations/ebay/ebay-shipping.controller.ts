@@ -9,11 +9,13 @@ import {
   UseGuards,
   HttpException,
   HttpStatus,
+  ValidationPipe,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayShippingService } from './ebay-shipping.service';
+import { GetShippingQuoteDto, CreateShipmentDto } from '../shared/marketplace.dto';
 
 /**
  * eBay Shipping Labels API Controller
@@ -34,20 +36,13 @@ export class EbayShippingController {
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async getShippingQuote(
     @Tenant() tenantId: string,
-    @Body() body: { connectionId: string; orderId: string; shippingOption?: string }
+    @Body(ValidationPipe) dto: GetShippingQuoteDto
   ) {
-    if (!body.connectionId || !body.orderId) {
-      throw new HttpException(
-        'connectionId and orderId are required',
-        HttpStatus.BAD_REQUEST
-      );
-    }
-
     const result = await this.shippingService.getShippingQuote(
-      body.connectionId,
+      dto.connectionId,
       {
-        orderId: body.orderId,
-        shippingOption: body.shippingOption,
+        orderId: dto.orderId,
+        shippingOption: dto.shippingOption,
       }
     );
     return { success: true, ...result };
@@ -61,20 +56,13 @@ export class EbayShippingController {
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async createShipment(
     @Tenant() tenantId: string,
-    @Body() body: { connectionId: string; shippingQuoteId: string; rateId: string }
+    @Body(ValidationPipe) dto: CreateShipmentDto
   ) {
-    if (!body.connectionId || !body.shippingQuoteId || !body.rateId) {
-      throw new HttpException(
-        'connectionId, shippingQuoteId, and rateId are required',
-        HttpStatus.BAD_REQUEST
-      );
-    }
-
     const result = await this.shippingService.createShipment(
-      body.connectionId,
+      dto.connectionId,
       {
-        shippingQuoteId: body.shippingQuoteId,
-        rateId: body.rateId,
+        shippingQuoteId: dto.shippingQuoteId,
+        rateId: dto.rateId,
       }
     );
     return { success: true, ...result };

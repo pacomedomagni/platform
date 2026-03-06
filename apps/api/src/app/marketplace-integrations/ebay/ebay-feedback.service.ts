@@ -113,9 +113,8 @@ export class EbayFeedbackService {
     }
 
     try {
-      await this.audit.logReturnProcessed(params.feedbackId, 'RESPOND_TO_FEEDBACK', {
+      await this.audit.logFeedbackAction(params.feedbackId, 'RESPOND_TO_FEEDBACK', {
         connectionId,
-        feedbackId: params.feedbackId,
         responsePreview: params.responseText.substring(0, 100),
       });
     } catch {
@@ -166,7 +165,7 @@ export class EbayFeedbackService {
     }
 
     try {
-      await this.audit.logReturnProcessed(params.orderId, 'LEAVE_FEEDBACK', {
+      await this.audit.logFeedbackAction(params.orderId, 'LEAVE_FEEDBACK', {
         connectionId,
         buyerUsername: params.buyerUsername,
         rating: params.rating,

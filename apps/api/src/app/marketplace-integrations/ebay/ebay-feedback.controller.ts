@@ -7,11 +7,13 @@ import {
   UseGuards,
   HttpException,
   HttpStatus,
+  ValidationPipe,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayFeedbackService } from './ebay-feedback.service';
+import { RespondToFeedbackDto, LeaveFeedbackDto } from '../shared/marketplace.dto';
 
 /**
  * eBay Feedback API Controller
@@ -87,23 +89,11 @@ export class EbayFeedbackController {
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async respondToFeedback(
     @Tenant() tenantId: string,
-    @Body('connectionId') connectionId: string,
-    @Body('feedbackId') feedbackId: string,
-    @Body('responseText') responseText: string
+    @Body(ValidationPipe) dto: RespondToFeedbackDto
   ) {
-    if (!connectionId) {
-      throw new HttpException('connectionId is required', HttpStatus.BAD_REQUEST);
-    }
-    if (!feedbackId) {
-      throw new HttpException('feedbackId is required', HttpStatus.BAD_REQUEST);
-    }
-    if (!responseText) {
-      throw new HttpException('responseText is required', HttpStatus.BAD_REQUEST);
-    }
-
-    await this.feedbackService.respondToFeedback(connectionId, tenantId, {
-      feedbackId,
-      responseText,
+    await this.feedbackService.respondToFeedback(dto.connectionId, tenantId, {
+      feedbackId: dto.feedbackId,
+      responseText: dto.responseText,
     });
 
     return {
@@ -120,41 +110,18 @@ export class EbayFeedbackController {
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async leaveFeedback(
     @Tenant() tenantId: string,
-    @Body('connectionId') connectionId: string,
-    @Body('orderId') orderId: string,
-    @Body('buyerUsername') buyerUsername: string,
-    @Body('rating') rating: 'Positive' | 'Neutral' | 'Negative',
-    @Body('comment') comment: string
+    @Body(ValidationPipe) dto: LeaveFeedbackDto
   ) {
-    if (!connectionId) {
-      throw new HttpException('connectionId is required', HttpStatus.BAD_REQUEST);
-    }
-    if (!orderId) {
-      throw new HttpException('orderId is required', HttpStatus.BAD_REQUEST);
-    }
-    if (!buyerUsername) {
-      throw new HttpException('buyerUsername is required', HttpStatus.BAD_REQUEST);
-    }
-    if (!rating || !['Positive', 'Neutral', 'Negative'].includes(rating)) {
-      throw new HttpException(
-        'rating is required and must be Positive, Neutral, or Negative',
-        HttpStatus.BAD_REQUEST
-      );
-    }
-    if (!comment) {
-      throw new HttpException('comment is required', HttpStatus.BAD_REQUEST);
-    }
-
-    await this.feedbackService.leaveFeedback(connectionId, tenantId, {
-      orderId,
-      buyerUsername,
-      rating,
-      comment,
+    await this.feedbackService.leaveFeedback(dto.connectionId, tenantId, {
+      orderId: dto.orderId,
+      buyerUsername: dto.buyerUsername,
+      rating: dto.rating,
+      comment: dto.comment,
     });
 
     return {
       success: true,
-      message: `${rating} feedback left for buyer ${buyerUsername}`,
+      message: `${dto.rating} feedback left for buyer ${dto.buyerUsername}`,
     };
   }
 }

@@ -16,6 +16,7 @@ import {
   SyncOrdersDto,
   GetMarketplaceOrdersQueryDto,
   FulfillOrderDto,
+  IssueOrderRefundDto,
 } from '../shared/marketplace.dto';
 
 /**
@@ -104,9 +105,9 @@ export class EbayOrdersController {
   async issueRefund(
     @Tenant() tenantId: string,
     @Param('id') id: string,
-    @Body() body: { amount?: number; comment?: string; lineItemIds?: string[] }
+    @Body(ValidationPipe) dto: IssueOrderRefundDto
   ) {
-    return this.orderSyncService.issueRefund(tenantId, id, body);
+    return this.orderSyncService.issueRefund(tenantId, id, dto);
   }
 
   /**

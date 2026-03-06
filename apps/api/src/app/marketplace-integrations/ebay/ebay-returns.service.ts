@@ -32,6 +32,7 @@ export class EbayReturnsService implements OnModuleInit, OnModuleDestroy {
   private syncInterval: ReturnType<typeof setInterval> | null = null;
   private readonly SYNC_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
   private readonly mockMode = process.env.MOCK_EXTERNAL_SERVICES === 'true';
+  private isSyncing = false;
 
   constructor(
     private prisma: PrismaService,
@@ -42,6 +43,10 @@ export class EbayReturnsService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    if (process.env.ENABLE_SCHEDULED_TASKS === 'false') {
+      this.logger.log('Scheduled tasks disabled via ENABLE_SCHEDULED_TASKS=false');
+      return;
+    }
     this.syncInterval = setInterval(() => this.syncAllActiveReturns(), this.SYNC_INTERVAL_MS);
     this.logger.log('eBay return sync scheduler started (every 30 minutes)');
   }
@@ -58,6 +63,11 @@ export class EbayReturnsService implements OnModuleInit, OnModuleDestroy {
    * Runs outside of CLS context, so tenantId is read from each connection record.
    */
   private async syncAllActiveReturns() {
+    if (this.isSyncing) {
+      this.logger.warn('Return sync already in progress, skipping this tick');
+      return;
+    }
+    this.isSyncing = true;
     try {
       const connections = await this.prisma.marketplaceConnection.findMany({
         where: {
@@ -85,6 +95,8 @@ export class EbayReturnsService implements OnModuleInit, OnModuleDestroy {
       }
     } catch (error) {
       this.logger.error('Scheduled return sync global error', error);
+    } finally {
+      this.isSyncing = false;
     }
   }
 

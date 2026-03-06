@@ -12,6 +12,7 @@ import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayOffersService } from './ebay-offers.service';
+import { DeclineOfferDto, CounterOfferDto } from '../shared/marketplace.dto';
 
 /**
  * eBay Best Offer API Controller
@@ -61,9 +62,9 @@ export class EbayOffersController {
     @Tenant() tenantId: string,
     @Param('listingId') listingId: string,
     @Param('offerId') offerId: string,
-    @Body(ValidationPipe) body: { reason?: string }
+    @Body(ValidationPipe) dto: DeclineOfferDto
   ) {
-    await this.offersService.declineBestOffer(tenantId, listingId, offerId, body.reason);
+    await this.offersService.declineBestOffer(tenantId, listingId, offerId, dto.reason);
     return { success: true, message: 'Best offer declined' };
   }
 
@@ -77,14 +78,14 @@ export class EbayOffersController {
     @Tenant() tenantId: string,
     @Param('listingId') listingId: string,
     @Param('offerId') offerId: string,
-    @Body(ValidationPipe) body: { counterPrice: number; message?: string }
+    @Body(ValidationPipe) dto: CounterOfferDto
   ) {
     await this.offersService.counterBestOffer(
       tenantId,
       listingId,
       offerId,
-      body.counterPrice,
-      body.message
+      dto.counterPrice,
+      dto.message
     );
     return { success: true, message: 'Counter offer sent' };
   }

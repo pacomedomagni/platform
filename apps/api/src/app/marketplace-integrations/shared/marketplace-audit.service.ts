@@ -254,4 +254,34 @@ export class MarketplaceAuditService {
       meta: details,
     });
   }
+
+  async logFeedbackAction(feedbackId: string, action: string, details?: Record<string, any>) {
+    const ctx = this.getContext();
+    await this.auditLog.log(ctx, {
+      action,
+      docType: 'MarketplaceFeedback',
+      docName: feedbackId,
+      meta: { feedbackId, ...details },
+    });
+  }
+
+  async logShipmentAction(shipmentId: string, action: string, details?: Record<string, any>) {
+    const ctx = this.getContext();
+    await this.auditLog.log(ctx, {
+      action,
+      docType: 'MarketplaceShipment',
+      docName: shipmentId,
+      meta: { shipmentId, ...details },
+    });
+  }
+
+  async logBulkOperation(taskId: string, action: string, details?: Record<string, any>) {
+    const ctx = this.getContext();
+    await this.auditLog.log(ctx, {
+      action,
+      docType: 'MarketplaceBulkTask',
+      docName: taskId,
+      meta: { taskId, ...details },
+    });
+  }
 }

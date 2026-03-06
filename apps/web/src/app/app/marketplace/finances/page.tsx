@@ -157,7 +157,7 @@ export default function MarketplaceFinancesPage() {
     setFundsLoading(true);
     try {
       const res = await fetch(
-        `/api/v1/marketplace/finances/funds?connectionId=${selectedConnection}`,
+        `/api/v1/marketplace/finances/funds-summary?connectionId=${selectedConnection}`,
         { credentials: 'include' }
       );
       if (res.ok) {

@@ -17,7 +17,7 @@ import {
   IMarketplaceConnectionsService,
   MARKETPLACE_CONNECTIONS_SERVICE,
 } from '../shared/marketplace-service.interface';
-import { CreateConnectionDto } from '../shared/marketplace.dto';
+import { CreateConnectionDto, SetVacationModeDto } from '../shared/marketplace.dto';
 
 /**
  * Marketplace Connections Controller
@@ -123,9 +123,9 @@ export class ConnectionsController {
   async setVacationMode(
     @Tenant() tenantId: string,
     @Param('id') id: string,
-    @Body() body: { enabled: boolean; returnMessage?: string }
+    @Body(ValidationPipe) dto: SetVacationModeDto
   ) {
-    return this.connectionsService.setVacationMode(id, body.enabled, body.returnMessage);
+    return this.connectionsService.setVacationMode(id, dto.enabled, dto.returnMessage);
   }
 
   /**

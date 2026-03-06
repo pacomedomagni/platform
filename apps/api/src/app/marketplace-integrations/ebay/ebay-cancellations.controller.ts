@@ -6,11 +6,13 @@ import {
   Param,
   Query,
   UseGuards,
+  ValidationPipe,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayCancellationsService } from './ebay-cancellations.service';
+import { RequestCancellationDto, ConnectionIdDto } from '../shared/marketplace.dto';
 
 /**
  * eBay Cancellations API Controller
@@ -64,17 +66,12 @@ export class EbayCancellationsController {
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async requestCancellation(
     @Tenant() tenantId: string,
-    @Body()
-    body: {
-      connectionId: string;
-      orderId: string;
-      reason: 'BUYER_ASKED_CANCEL' | 'OUT_OF_STOCK' | 'ADDRESS_ISSUES';
-    }
+    @Body(ValidationPipe) dto: RequestCancellationDto
   ) {
     const result = await this.cancellationsService.requestCancellation(
-      body.connectionId,
-      body.orderId,
-      body.reason
+      dto.connectionId,
+      dto.orderId,
+      dto.reason
     );
     return { success: true, ...result };
   }
@@ -88,9 +85,9 @@ export class EbayCancellationsController {
   async approveCancellation(
     @Tenant() tenantId: string,
     @Param('cancelId') cancelId: string,
-    @Body() body: { connectionId: string }
+    @Body(ValidationPipe) dto: ConnectionIdDto
   ) {
-    await this.cancellationsService.approveCancellation(body.connectionId, cancelId);
+    await this.cancellationsService.approveCancellation(dto.connectionId, cancelId);
     return { success: true, message: 'Cancellation approved' };
   }
 
@@ -103,9 +100,9 @@ export class EbayCancellationsController {
   async rejectCancellation(
     @Tenant() tenantId: string,
     @Param('cancelId') cancelId: string,
-    @Body() body: { connectionId: string }
+    @Body(ValidationPipe) dto: ConnectionIdDto
   ) {
-    await this.cancellationsService.rejectCancellation(body.connectionId, cancelId);
+    await this.cancellationsService.rejectCancellation(dto.connectionId, cancelId);
     return { success: true, message: 'Cancellation rejected' };
   }
 }

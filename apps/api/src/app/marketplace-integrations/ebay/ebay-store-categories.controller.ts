@@ -8,11 +8,13 @@ import {
   Query,
   UseGuards,
   ParseIntPipe,
+  ValidationPipe,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayStoreCategoriesService } from './ebay-store-categories.service';
+import { CreateCustomPageDto, SetStoreCategoriesDto } from '../shared/marketplace.dto';
 
 /**
  * eBay Store Categories API Controller
@@ -56,18 +58,12 @@ export class EbayStoreCategoriesController {
   @Roles('admin', 'System Manager')
   async createCustomPage(
     @Tenant() tenantId: string,
-    @Body()
-    body: {
-      connectionId: string;
-      name: string;
-      content: string;
-      leftNav?: boolean;
-    }
+    @Body(ValidationPipe) dto: CreateCustomPageDto
   ) {
-    return this.storeCategoriesService.createCustomPage(body.connectionId, {
-      name: body.name,
-      content: body.content,
-      leftNav: body.leftNav,
+    return this.storeCategoriesService.createCustomPage(dto.connectionId, {
+      name: dto.name,
+      content: dto.content,
+      leftNav: dto.leftNav,
     });
   }
 
@@ -95,19 +91,11 @@ export class EbayStoreCategoriesController {
   async setStoreCategories(
     @Tenant() tenantId: string,
     @Query('connectionId') connectionId: string,
-    @Body()
-    body: {
-      categories: Array<{
-        categoryId?: number;
-        name: string;
-        order?: number;
-        parentId?: number;
-      }>;
-    }
+    @Body(ValidationPipe) dto: SetStoreCategoriesDto
   ) {
     await this.storeCategoriesService.setStoreCategories(
       connectionId,
-      body.categories
+      dto.categories
     );
     return { success: true, message: 'Store categories updated' };
   }

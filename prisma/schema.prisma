@@ -127,7 +127,7 @@ model Tenant {
   marketplaceConnections    MarketplaceConnection[]
   marketplaceListings       MarketplaceListing[]
   marketplaceOrders         MarketplaceOrder[]
-  marketplaceActiveListings MarketplaceActiveListing[]
+
   marketplaceSyncLogs       MarketplaceSyncLog[]
   marketplaceReturns        MarketplaceReturn[]
   marketplaceMessageThreads MarketplaceMessageThread[]
@@ -2499,11 +2499,11 @@ model MarketplaceConnection {
   listings              MarketplaceListing[]
   orders                MarketplaceOrder[]
   syncLogs              MarketplaceSyncLog[]
-  activeListings        MarketplaceActiveListing[]
+
   returns               MarketplaceReturn[]
   messageThreads        MarketplaceMessageThread[]
   campaigns             MarketplaceCampaign[]
-  notificationSubs      EbayNotificationSubscription[]
+
   violations            MarketplaceViolation[]
 
   @@unique([tenantId, platform, name])
@@ -2634,55 +2634,6 @@ model MarketplaceListing {
   @@map("marketplace_listings")
 }
 
-// Active Listings - Synced from marketplace (read-only mirror)
-model MarketplaceActiveListing {
-  id       String @id @default(uuid())
-  tenantId String
-  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  connectionId String
-  connection   MarketplaceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-
-  // Platform IDs
-  externalListingId String  @unique
-  externalItemId    String?
-  sku               String
-
-  // Basic info
-  title        String
-  currentPrice Decimal @db.Decimal(18, 2)
-  currency     String  @default("USD")
-
-  // Inventory
-  quantityAvailable Int
-  quantitySold      Int @default(0)
-
-  // Metrics
-  watchCount Int @default(0)
-  viewCount  Int @default(0)
-
-  // Status
-  status String // ACTIVE, ENDED, OUT_OF_STOCK
-
-  // Dates
-  startTime DateTime
-  endTime   DateTime?
-
-  // Links
-  viewItemUrl String?
-  categoryId  String
-
-  // Sync
-  lastSyncedAt DateTime @default(now())
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  @@index([tenantId, connectionId])
-  @@index([connectionId, status])
-  @@index([sku])
-  @@map("marketplace_active_listings")
-}
-
 // Marketplace Order - Platform orders synced to NoSlag
 model MarketplaceOrder {
   id       String @id @default(uuid())
@@ -2697,7 +2648,7 @@ model MarketplaceOrder {
   order   Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
 
   // Platform identifiers
-  externalOrderId String @unique
+  externalOrderId String
 
   // Buyer info
   buyerUsername String
@@ -2742,6 +2693,7 @@ model MarketplaceOrder {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([tenantId, externalOrderId])
   @@index([tenantId, connectionId])
   @@index([connectionId, syncStatus])
   @@index([externalOrderId])
@@ -2888,25 +2840,6 @@ model MarketplaceMessage {
 
   @@index([threadId, sentDate])
   @@map("marketplace_messages")
-}
-
-// eBay Notification Subscription - Tracks webhook subscriptions per connection
-model EbayNotificationSubscription {
-  id           String @id @default(uuid())
-  connectionId String
-  connection   MarketplaceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
-
-  destinationId  String // eBay destination ID
-  subscriptionId String // eBay subscription ID
-  topicId        String // e.g., MARKETPLACE_ACCOUNT_DELETION, ORDER_CREATED
-
-  status String @default("ENABLED") // ENABLED, DISABLED
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([connectionId, topicId])
-  @@map("ebay_notification_subscriptions")
 }
 
 // Marketplace Campaign - Promoted Listings and ad campaigns

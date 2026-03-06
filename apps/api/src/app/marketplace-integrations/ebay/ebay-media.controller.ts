@@ -6,11 +6,13 @@ import {
   Param,
   Query,
   UseGuards,
+  ValidationPipe,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayMediaService } from './ebay-media.service';
+import { UploadImageFromUrlDto, UploadImageFromFileDto } from '../shared/marketplace.dto';
 
 /**
  * eBay Media API Controller
@@ -30,9 +32,9 @@ export class EbayMediaController {
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async uploadImageFromUrl(
     @Tenant() tenantId: string,
-    @Body() body: { connectionId: string; imageUrl: string }
+    @Body(ValidationPipe) dto: UploadImageFromUrlDto
   ) {
-    return this.mediaService.uploadImageFromUrl(body.connectionId, body.imageUrl);
+    return this.mediaService.uploadImageFromUrl(dto.connectionId, dto.imageUrl);
   }
 
   /**
@@ -43,18 +45,13 @@ export class EbayMediaController {
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async uploadImageFromFile(
     @Tenant() tenantId: string,
-    @Body()
-    body: {
-      connectionId: string;
-      fileContent: string;
-      contentType: string;
-    }
+    @Body(ValidationPipe) dto: UploadImageFromFileDto
   ) {
-    const buffer = Buffer.from(body.fileContent, 'base64');
+    const buffer = Buffer.from(dto.fileContent, 'base64');
     return this.mediaService.uploadImageFromFile(
-      body.connectionId,
+      dto.connectionId,
       buffer,
-      body.contentType
+      dto.contentType
     );
   }
 

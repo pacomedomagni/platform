@@ -7,11 +7,13 @@ import {
   UseGuards,
   HttpException,
   HttpStatus,
+  ValidationPipe,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayCrossBorderService } from './ebay-cross-border.service';
+import { ListItemCrossBorderDto } from '../shared/marketplace.dto';
 
 /**
  * eBay Cross-Border Trade API Controller
@@ -127,50 +129,21 @@ export class EbayCrossBorderController {
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async listItemCrossBorder(
     @Tenant() tenantId: string,
-    @Body()
-    body: {
-      connectionId: string;
-      sku: string;
-      targetMarketplace: string;
-      price: { value: string; currency: string };
-      fulfillmentPolicyId: string;
-      returnPolicyId: string;
-      paymentPolicyId?: string;
-      categoryId: string;
-    }
+    @Body(ValidationPipe) dto: ListItemCrossBorderDto
   ) {
-    if (!body.connectionId || !body.sku || !body.targetMarketplace) {
-      throw new HttpException(
-        'connectionId, sku, and targetMarketplace are required',
-        HttpStatus.BAD_REQUEST
-      );
-    }
-    if (!body.price?.value || !body.price?.currency) {
-      throw new HttpException(
-        'price.value and price.currency are required',
-        HttpStatus.BAD_REQUEST
-      );
-    }
-    if (!body.fulfillmentPolicyId || !body.returnPolicyId || !body.categoryId) {
-      throw new HttpException(
-        'fulfillmentPolicyId, returnPolicyId, and categoryId are required',
-        HttpStatus.BAD_REQUEST
-      );
-    }
-
-    const result = await this.crossBorderService.listItemCrossBorder(body.connectionId, {
-      sku: body.sku,
-      targetMarketplace: body.targetMarketplace,
-      price: body.price,
-      fulfillmentPolicyId: body.fulfillmentPolicyId,
-      returnPolicyId: body.returnPolicyId,
-      paymentPolicyId: body.paymentPolicyId,
-      categoryId: body.categoryId,
+    const result = await this.crossBorderService.listItemCrossBorder(dto.connectionId, {
+      sku: dto.sku,
+      targetMarketplace: dto.targetMarketplace,
+      price: dto.price,
+      fulfillmentPolicyId: dto.fulfillmentPolicyId,
+      returnPolicyId: dto.returnPolicyId,
+      paymentPolicyId: dto.paymentPolicyId,
+      categoryId: dto.categoryId,
     });
 
     return {
       success: true,
-      message: `Item listed on ${body.targetMarketplace}`,
+      message: `Item listed on ${dto.targetMarketplace}`,
       ...result,
     };
   }

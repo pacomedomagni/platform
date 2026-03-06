@@ -110,9 +110,18 @@ export default function MarketplaceAnalyticsPage() {
     if (!selectedConnection) return;
     setTrafficLoading(true);
     try {
+      // Convert date range label to actual start/end dates for the API
+      const now = new Date();
+      let daysBack = 30;
+      if (dateRange === 'LAST_7_DAYS') daysBack = 7;
+      else if (dateRange === 'LAST_90_DAYS') daysBack = 90;
+      const startDate = new Date(now.getTime() - daysBack * 86400000).toISOString().split('T')[0];
+      const endDate = now.toISOString().split('T')[0];
+
       const params = new URLSearchParams({
         connectionId: selectedConnection,
-        dateRange,
+        startDate,
+        endDate,
       });
       const res = await fetch(`/api/v1/marketplace/analytics/traffic?${params}`, {
         credentials: 'include',

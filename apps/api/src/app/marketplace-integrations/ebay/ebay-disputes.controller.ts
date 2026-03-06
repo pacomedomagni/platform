@@ -8,11 +8,17 @@ import {
   UseGuards,
   HttpException,
   HttpStatus,
+  ValidationPipe,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayDisputesService } from './ebay-disputes.service';
+import {
+  AcceptDisputeDto,
+  ContestDisputeDto,
+  AddDisputeEvidenceDto,
+} from '../shared/marketplace.dto';
 
 /**
  * eBay Payment Disputes Controller
@@ -89,15 +95,12 @@ export class EbayDisputesController {
   async acceptDispute(
     @Tenant() tenantId: string,
     @Param('disputeId') disputeId: string,
-    @Body() body: { connectionId: string; revision?: number }
+    @Body(ValidationPipe) dto: AcceptDisputeDto
   ) {
-    if (!body.connectionId) {
-      throw new HttpException('connectionId is required', HttpStatus.BAD_REQUEST);
-    }
     const result = await this.disputesService.acceptDispute(
-      body.connectionId,
+      dto.connectionId,
       disputeId,
-      body.revision
+      dto.revision
     );
     return { success: true, message: 'Dispute accepted', ...result };
   }
@@ -111,17 +114,11 @@ export class EbayDisputesController {
   async contestDispute(
     @Tenant() tenantId: string,
     @Param('disputeId') disputeId: string,
-    @Body() body: { connectionId: string; reason: string; revision?: number }
+    @Body(ValidationPipe) dto: ContestDisputeDto
   ) {
-    if (!body.connectionId) {
-      throw new HttpException('connectionId is required', HttpStatus.BAD_REQUEST);
-    }
-    if (!body.reason) {
-      throw new HttpException('reason is required', HttpStatus.BAD_REQUEST);
-    }
-    const result = await this.disputesService.contestDispute(body.connectionId, disputeId, {
-      reason: body.reason,
-      revision: body.revision,
+    const result = await this.disputesService.contestDispute(dto.connectionId, disputeId, {
+      reason: dto.reason,
+      revision: dto.revision,
     });
     return { success: true, message: 'Dispute contested', ...result };
   }
@@ -135,23 +132,12 @@ export class EbayDisputesController {
   async addEvidence(
     @Tenant() tenantId: string,
     @Param('disputeId') disputeId: string,
-    @Body() body: {
-      connectionId: string;
-      evidenceType: string;
-      lineItems?: string[];
-      evidenceIds?: string[];
-    }
+    @Body(ValidationPipe) dto: AddDisputeEvidenceDto
   ) {
-    if (!body.connectionId) {
-      throw new HttpException('connectionId is required', HttpStatus.BAD_REQUEST);
-    }
-    if (!body.evidenceType) {
-      throw new HttpException('evidenceType is required', HttpStatus.BAD_REQUEST);
-    }
-    const result = await this.disputesService.addEvidence(body.connectionId, disputeId, {
-      evidenceType: body.evidenceType,
-      lineItems: body.lineItems,
-      evidenceIds: body.evidenceIds,
+    const result = await this.disputesService.addEvidence(dto.connectionId, disputeId, {
+      evidenceType: dto.evidenceType,
+      lineItems: dto.lineItems,
+      evidenceIds: dto.evidenceIds,
     });
     return { success: true, message: 'Evidence added to dispute', ...result };
   }

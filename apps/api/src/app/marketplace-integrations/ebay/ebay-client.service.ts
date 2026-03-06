@@ -1,5 +1,23 @@
 import { Injectable, Logger } from '@nestjs/common';
 import eBayApi from 'ebay-api';
+import type {
+  EbayOrder,
+  EbayInventoryItem,
+  EbayCreateOfferResponse,
+  EbayPublishOfferResponse,
+  EbayGetOffersResponse,
+  EbayFulfillment,
+  EbayFulfillmentPolicy,
+  EbayPaymentPolicy,
+  EbayReturnPolicy,
+  EbayInventoryLocation,
+  EbayInventoryItemGroup,
+  EbayPublishGroupResponse,
+  EbayGetMyMessagesResponse,
+  EbayGetBestOffersResponse,
+  EbayGetFeedbackResponse,
+  EbayTradingResponse,
+} from './ebay.types';
 
 /**
  * eBay API Client Wrapper
@@ -55,6 +73,57 @@ export class EbayClientService {
   }
 
   /**
+   * Extract an OAuth2 access token from an eBay API client instance.
+   */
+  getAccessToken(client: eBayApi): string {
+    // TODO: remove when ebay-api types are fixed
+    return (client as any).authToken
+      || (client as any).auth?.oAuth2?.accessToken
+      || '';
+  }
+
+  /**
+   * Call the eBay Post-Order API with rate-limit retry.
+   * The Post-Order API is not covered by the ebay-api SDK, so we use raw fetch.
+   */
+  async callPostOrderApi(
+    client: eBayApi,
+    method: 'GET' | 'POST',
+    path: string,
+    marketplaceId: string,
+    body?: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Post-Order API ${method} ${path}`);
+      return {};
+    }
+
+    return this.withRateLimitRetry(async () => {
+      const accessToken = this.getAccessToken(client);
+      const url = `https://api.ebay.com/post-order/v2${path}`;
+      const headers: Record<string, string> = {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'X-EBAY-C-MARKETPLACE-ID': marketplaceId || 'EBAY_US',
+      };
+
+      const response = await fetch(url, {
+        method,
+        headers,
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      });
+
+      if (!response.ok) {
+        const err: any = new Error(`eBay Post-Order API returned ${response.status}: ${response.statusText}`);
+        err.status = response.status;
+        throw err;
+      }
+
+      return response.json().catch(() => ({}));
+    });
+  }
+
+  /**
    * Create or replace inventory item
    */
   async createOrReplaceInventoryItem(
@@ -95,7 +164,7 @@ export class EbayClientService {
         };
       };
     }
-  ) {
+  ): Promise<unknown> {
     if (this.mockMode) {
       this.logger.log(`[MOCK] Created/updated inventory item: ${sku}`);
       return { sku, statusCode: 204 };
@@ -115,7 +184,7 @@ export class EbayClientService {
   /**
    * Delete an inventory item (for rollback on publish failure)
    */
-  async deleteInventoryItem(client: eBayApi, sku: string) {
+  async deleteInventoryItem(client: eBayApi, sku: string): Promise<void> {
     if (this.mockMode) {
       this.logger.log(`[MOCK] Deleted inventory item: ${sku}`);
       return;
@@ -169,7 +238,7 @@ export class EbayClientService {
       lotSize?: number;
       listingStartDate?: string; // ISO 8601 for scheduled listings
     }
-  ) {
+  ): Promise<EbayCreateOfferResponse> {
     if (this.mockMode) {
       const offerId = `mock_offer_${Date.now()}`;
       this.logger.log(`[MOCK] Created offer ${offerId} for SKU: ${data.sku}`);
@@ -190,7 +259,7 @@ export class EbayClientService {
   /**
    * Publish offer to eBay
    */
-  async publishOffer(client: eBayApi, offerId: string) {
+  async publishOffer(client: eBayApi, offerId: string): Promise<EbayPublishOfferResponse> {
     if (this.mockMode) {
       const listingId = `mock_listing_${Date.now()}`;
       this.logger.log(`[MOCK] Published offer: ${offerId} → listing ${listingId}`);
@@ -211,7 +280,7 @@ export class EbayClientService {
   /**
    * Get a single inventory item by SKU
    */
-  async getInventoryItem(client: eBayApi, sku: string) {
+  async getInventoryItem(client: eBayApi, sku: string): Promise<EbayInventoryItem> {
     if (this.mockMode) {
       this.logger.log(`[MOCK] Fetched inventory item: ${sku}`);
       return {
@@ -244,7 +313,7 @@ export class EbayClientService {
    * availability field, which is a full-replace operation that destroyed
    * all other item data (product title, description, images, etc.).
    */
-  async updateInventoryQuantity(client: eBayApi, sku: string, quantity: number) {
+  async updateInventoryQuantity(client: eBayApi, sku: string, quantity: number): Promise<void> {
     if (this.mockMode) {
       this.logger.log(`[MOCK] Updated quantity for SKU ${sku}: ${quantity}`);
       return;
@@ -267,7 +336,7 @@ export class EbayClientService {
         };
 
         // Write back the full item with only the quantity changed
-        await client.sell.inventory.createOrReplaceInventoryItem(sku, updatedItem);
+        await client.sell.inventory.createOrReplaceInventoryItem(sku, updatedItem as any);
         this.logger.log(`Updated quantity for SKU ${sku}: ${quantity}`);
       } catch (error) {
         this.logger.error(`Failed to update quantity for SKU ${sku}`, error);
@@ -286,7 +355,7 @@ export class EbayClientService {
       limit?: number;
       offset?: number;
     }
-  ) {
+  ): Promise<EbayOrder[]> {
     if (this.mockMode) {
       this.logger.log(`[MOCK] Fetched 0 orders from eBay`);
       return [];
@@ -317,7 +386,7 @@ export class EbayClientService {
       shippingCarrierCode: string;
       trackingNumber: string;
     }
-  ) {
+  ): Promise<EbayFulfillment> {
     if (this.mockMode) {
       this.logger.log(`[MOCK] Created shipping fulfillment for order: ${orderId}`);
       return { fulfillmentId: `mock_fulfill_${Date.now()}` };
@@ -344,7 +413,7 @@ export class EbayClientService {
       offset?: number;
       sku?: string;
     }
-  ) {
+  ): Promise<EbayInventoryItem[]> {
     if (this.mockMode) {
       this.logger.log(`[MOCK] Fetched 0 active listings`);
       return [];
@@ -364,7 +433,7 @@ export class EbayClientService {
   /**
    * End listing
    */
-  async withdrawOffer(client: eBayApi, offerId: string) {
+  async withdrawOffer(client: eBayApi, offerId: string): Promise<void> {
     if (this.mockMode) {
       this.logger.log(`[MOCK] Withdrew offer: ${offerId}`);
       return;
@@ -383,12 +452,13 @@ export class EbayClientService {
   /**
    * Get fulfillment policies
    */
-  async getFulfillmentPolicies(client: eBayApi, marketplaceId: string) {
+  async getFulfillmentPolicies(client: eBayApi, marketplaceId: string): Promise<EbayFulfillmentPolicy[]> {
     if (this.mockMode) {
       return [{ fulfillmentPolicyId: 'mock_fp_1', name: 'Mock Fulfillment Policy' }];
     }
     return this.withRateLimitRetry(async () => {
       try {
+        // TODO: remove when ebay-api types are fixed
         const response = await client.sell.account.getFulfillmentPolicies(marketplaceId as any);
         return response.fulfillmentPolicies || [];
       } catch (error) {
@@ -401,12 +471,13 @@ export class EbayClientService {
   /**
    * Get payment policies
    */
-  async getPaymentPolicies(client: eBayApi, marketplaceId: string) {
+  async getPaymentPolicies(client: eBayApi, marketplaceId: string): Promise<EbayPaymentPolicy[]> {
     if (this.mockMode) {
       return [{ paymentPolicyId: 'mock_pp_1', name: 'Mock Payment Policy' }];
     }
     return this.withRateLimitRetry(async () => {
       try {
+        // TODO: remove when ebay-api types are fixed
         const response = await client.sell.account.getPaymentPolicies(marketplaceId as any);
         return response.paymentPolicies || [];
       } catch (error) {
@@ -419,12 +490,13 @@ export class EbayClientService {
   /**
    * Get return policies
    */
-  async getReturnPolicies(client: eBayApi, marketplaceId: string) {
+  async getReturnPolicies(client: eBayApi, marketplaceId: string): Promise<EbayReturnPolicy[]> {
     if (this.mockMode) {
       return [{ returnPolicyId: 'mock_rp_1', name: 'Mock Return Policy' }];
     }
     return this.withRateLimitRetry(async () => {
       try {
+        // TODO: remove when ebay-api types are fixed
         const response = await client.sell.account.getReturnPolicies(marketplaceId as any);
         return response.returnPolicies || [];
       } catch (error) {
@@ -437,7 +509,7 @@ export class EbayClientService {
   /**
    * Get inventory locations
    */
-  async getInventoryLocations(client: eBayApi) {
+  async getInventoryLocations(client: eBayApi): Promise<EbayInventoryLocation[]> {
     if (this.mockMode) {
       return [{ merchantLocationKey: 'mock_loc_1', name: 'Mock Location' }];
     }
@@ -471,13 +543,14 @@ export class EbayClientService {
         returnPolicyId: string;
       };
     }
-  ) {
+  ): Promise<unknown> {
     if (this.mockMode) {
       this.logger.log(`[MOCK] Updated offer: ${offerId}`);
       return { offerId };
     }
     return this.withRateLimitRetry(async () => {
       try {
+        // TODO: remove when ebay-api types are fixed
         const response = await (client.sell.inventory as any).updateOffer(offerId, data);
         this.logger.log(`Updated offer: ${offerId}`);
         return response;
@@ -491,13 +564,14 @@ export class EbayClientService {
   /**
    * Get offers for a SKU
    */
-  async getOffers(client: eBayApi, params: { sku?: string; format?: string; limit?: number; offset?: number }) {
+  async getOffers(client: eBayApi, params: { sku?: string; format?: string; limit?: number; offset?: number }): Promise<EbayGetOffersResponse> {
     if (this.mockMode) {
       this.logger.log(`[MOCK] Fetched offers`);
       return { offers: [], total: 0 };
     }
     return this.withRateLimitRetry(async () => {
       try {
+        // TODO: remove when ebay-api types are fixed
         const response = await (client.sell.inventory as any).getOffers(params);
         this.logger.log(`Fetched ${response.offers?.length || 0} offers`);
         return response;
@@ -529,7 +603,7 @@ export class EbayClientService {
         specifications: Array<{ name: string; values: string[] }>;
       };
     }
-  ) {
+  ): Promise<unknown> {
     if (this.mockMode) {
       this.logger.log(`[MOCK] Created/updated inventory item group: ${inventoryItemGroupKey}`);
       return { inventoryItemGroupKey, statusCode: 204 };
@@ -552,7 +626,7 @@ export class EbayClientService {
   /**
    * Get inventory item group
    */
-  async getInventoryItemGroup(client: eBayApi, inventoryItemGroupKey: string) {
+  async getInventoryItemGroup(client: eBayApi, inventoryItemGroupKey: string): Promise<EbayInventoryItemGroup> {
     if (this.mockMode) {
       this.logger.log(`[MOCK] Fetched inventory item group: ${inventoryItemGroupKey}`);
       return { inventoryItemGroupKey, title: 'Mock Group', variantSKUs: [] };
@@ -572,7 +646,7 @@ export class EbayClientService {
   /**
    * Delete inventory item group
    */
-  async deleteInventoryItemGroup(client: eBayApi, inventoryItemGroupKey: string) {
+  async deleteInventoryItemGroup(client: eBayApi, inventoryItemGroupKey: string): Promise<void> {
     if (this.mockMode) {
       this.logger.log(`[MOCK] Deleted inventory item group: ${inventoryItemGroupKey}`);
       return;
@@ -613,7 +687,7 @@ export class EbayClientService {
         merchantLocationKey?: string;
       }>;
     }
-  ) {
+  ): Promise<EbayPublishGroupResponse> {
     if (this.mockMode) {
       const listingId = `mock_group_listing_${Date.now()}`;
       this.logger.log(`[MOCK] Published offers by group: ${data.inventoryItemGroupKey} → ${listingId}`);
@@ -621,6 +695,7 @@ export class EbayClientService {
     }
     return this.withRateLimitRetry(async () => {
       try {
+        // TODO: remove when ebay-api types are fixed
         const response = await (client.sell.inventory as any).publishOfferByInventoryItemGroup(data);
         this.logger.log(`Published offers by group: ${data.inventoryItemGroupKey}`);
         return response;
@@ -641,14 +716,15 @@ export class EbayClientService {
   async getMyMessages(
     client: eBayApi,
     params: { folder?: string; startTime?: string; endTime?: string; detailLevel?: string }
-  ) {
+  ): Promise<EbayGetMyMessagesResponse> {
     if (this.mockMode) {
       this.logger.log(`[MOCK] Fetched 0 messages from eBay`);
       return { Messages: { Message: [] } };
     }
     return this.withRateLimitRetry(async () => {
       try {
-        const response = await (client as any).trading.GetMyMessages({
+        // TODO: remove when ebay-api types are fixed
+        const response: EbayGetMyMessagesResponse = await (client as any).trading.GetMyMessages({
           Folder: params.folder || 'Inbox',
           StartTime: params.startTime,
           EndTime: params.endTime,
@@ -669,14 +745,15 @@ export class EbayClientService {
   async addMemberMessageAAQToPartner(
     client: eBayApi,
     data: { itemId: string; recipientId: string; subject: string; body: string }
-  ) {
+  ): Promise<EbayTradingResponse> {
     if (this.mockMode) {
       this.logger.log(`[MOCK] Sent message to ${data.recipientId}`);
       return { Ack: 'Success' };
     }
     return this.withRateLimitRetry(async () => {
       try {
-        const response = await (client as any).trading.AddMemberMessageAAQToPartner({
+        // TODO: remove when ebay-api types are fixed
+        const response: EbayTradingResponse = await (client as any).trading.AddMemberMessageAAQToPartner({
           ItemID: data.itemId,
           MemberMessage: {
             Body: data.body,
@@ -697,16 +774,17 @@ export class EbayClientService {
   /**
    * Get best offers for a listing (Trading API)
    */
-  async getBestOffers(client: eBayApi, itemId: string, status?: string) {
+  async getBestOffers(client: eBayApi, itemId: string, status?: string): Promise<EbayGetBestOffersResponse> {
     if (this.mockMode) {
       this.logger.log(`[MOCK] Fetched best offers for item ${itemId}`);
       return { BestOfferArray: { BestOffer: [] } };
     }
     return this.withRateLimitRetry(async () => {
       try {
-        const params: any = { ItemID: itemId };
+        const params: Record<string, unknown> = { ItemID: itemId };
         if (status) params.BestOfferStatus = status;
-        const response = await (client as any).trading.GetBestOffers(params);
+        // TODO: remove when ebay-api types are fixed
+        const response: EbayGetBestOffersResponse = await (client as any).trading.GetBestOffers(params);
         this.logger.log(`Fetched best offers for item ${itemId}`);
         return response;
       } catch (error) {
@@ -726,14 +804,14 @@ export class EbayClientService {
     action: 'Accept' | 'Decline' | 'Counter',
     counterAmount?: number,
     sellerMessage?: string
-  ) {
+  ): Promise<EbayTradingResponse> {
     if (this.mockMode) {
       this.logger.log(`[MOCK] Responded to best offer ${bestOfferId} with ${action}`);
       return { Ack: 'Success' };
     }
     return this.withRateLimitRetry(async () => {
       try {
-        const params: any = {
+        const params: Record<string, unknown> = {
           ItemID: itemId,
           BestOfferID: bestOfferId,
           Action: action,
@@ -742,7 +820,8 @@ export class EbayClientService {
           params.CounterOfferPrice = { _value: counterAmount, _attrs: { currencyID: 'USD' } };
         }
         if (sellerMessage) params.SellerResponse = sellerMessage;
-        const response = await (client as any).trading.RespondToBestOffer(params);
+        // TODO: remove when ebay-api types are fixed
+        const response: EbayTradingResponse = await (client as any).trading.RespondToBestOffer(params);
         this.logger.log(`Responded to best offer ${bestOfferId} with ${action}`);
         return response;
       } catch (error) {
@@ -755,14 +834,15 @@ export class EbayClientService {
   /**
    * Get feedback (Trading API)
    */
-  async getFeedback(client: eBayApi, params?: { userId?: string; entriesPerPage?: number; pageNumber?: number }) {
+  async getFeedback(client: eBayApi, params?: { userId?: string; entriesPerPage?: number; pageNumber?: number }): Promise<EbayGetFeedbackResponse> {
     if (this.mockMode) {
       this.logger.log(`[MOCK] Fetched feedback`);
       return { FeedbackDetailArray: { FeedbackDetail: [] }, FeedbackScore: 0 };
     }
     return this.withRateLimitRetry(async () => {
       try {
-        const response = await (client as any).trading.GetFeedback({
+        // TODO: remove when ebay-api types are fixed
+        const response: EbayGetFeedbackResponse = await (client as any).trading.GetFeedback({
           DetailLevel: 'ReturnAll',
           Pagination: {
             EntriesPerPage: params?.entriesPerPage || 25,

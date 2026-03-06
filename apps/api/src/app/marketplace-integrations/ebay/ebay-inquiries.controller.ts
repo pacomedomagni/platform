@@ -8,11 +8,19 @@ import {
   UseGuards,
   HttpException,
   HttpStatus,
+  ValidationPipe,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayInquiriesService } from './ebay-inquiries.service';
+import {
+  AppealCaseDto,
+  ProvideShipmentInfoDto,
+  IssueInquiryRefundDto,
+  ConnectionIdDto,
+  SendInquiryMessageDto,
+} from '../shared/marketplace.dto';
 
 /**
  * eBay Inquiries & Case Management Controller
@@ -91,15 +99,9 @@ export class EbayInquiriesController {
   async appealCase(
     @Tenant() tenantId: string,
     @Param('caseId') caseId: string,
-    @Body() body: { connectionId: string; comments: string }
+    @Body(ValidationPipe) dto: AppealCaseDto
   ) {
-    if (!body.connectionId) {
-      throw new HttpException('connectionId is required', HttpStatus.BAD_REQUEST);
-    }
-    if (!body.comments) {
-      throw new HttpException('comments is required', HttpStatus.BAD_REQUEST);
-    }
-    const result = await this.inquiriesService.appealCase(body.connectionId, caseId, body.comments);
+    const result = await this.inquiriesService.appealCase(dto.connectionId, caseId, dto.comments);
     return { success: true, message: 'Case appeal submitted', ...result };
   }
 
@@ -129,19 +131,13 @@ export class EbayInquiriesController {
   async provideShipmentInfo(
     @Tenant() tenantId: string,
     @Param('inquiryId') inquiryId: string,
-    @Body() body: { connectionId: string; trackingNumber: string; carrier: string }
+    @Body(ValidationPipe) dto: ProvideShipmentInfoDto
   ) {
-    if (!body.connectionId) {
-      throw new HttpException('connectionId is required', HttpStatus.BAD_REQUEST);
-    }
-    if (!body.trackingNumber || !body.carrier) {
-      throw new HttpException('trackingNumber and carrier are required', HttpStatus.BAD_REQUEST);
-    }
     const result = await this.inquiriesService.provideShipmentInfo(
-      body.connectionId,
+      dto.connectionId,
       inquiryId,
-      body.trackingNumber,
-      body.carrier
+      dto.trackingNumber,
+      dto.carrier
     );
     return { success: true, message: 'Shipment info provided', ...result };
   }
@@ -155,16 +151,13 @@ export class EbayInquiriesController {
   async issueInquiryRefund(
     @Tenant() tenantId: string,
     @Param('inquiryId') inquiryId: string,
-    @Body() body: { connectionId: string; amount?: number; comment?: string }
+    @Body(ValidationPipe) dto: IssueInquiryRefundDto
   ) {
-    if (!body.connectionId) {
-      throw new HttpException('connectionId is required', HttpStatus.BAD_REQUEST);
-    }
     const result = await this.inquiriesService.issueInquiryRefund(
-      body.connectionId,
+      dto.connectionId,
       inquiryId,
-      body.amount,
-      body.comment
+      dto.amount,
+      dto.comment
     );
     return { success: true, message: 'Inquiry refund issued', ...result };
   }
@@ -178,12 +171,9 @@ export class EbayInquiriesController {
   async escalateInquiry(
     @Tenant() tenantId: string,
     @Param('inquiryId') inquiryId: string,
-    @Body() body: { connectionId: string }
+    @Body(ValidationPipe) dto: ConnectionIdDto
   ) {
-    if (!body.connectionId) {
-      throw new HttpException('connectionId is required', HttpStatus.BAD_REQUEST);
-    }
-    const result = await this.inquiriesService.escalateInquiry(body.connectionId, inquiryId);
+    const result = await this.inquiriesService.escalateInquiry(dto.connectionId, inquiryId);
     return { success: true, message: 'Inquiry escalated to case', ...result };
   }
 
@@ -196,18 +186,12 @@ export class EbayInquiriesController {
   async sendInquiryMessage(
     @Tenant() tenantId: string,
     @Param('inquiryId') inquiryId: string,
-    @Body() body: { connectionId: string; message: string }
+    @Body(ValidationPipe) dto: SendInquiryMessageDto
   ) {
-    if (!body.connectionId) {
-      throw new HttpException('connectionId is required', HttpStatus.BAD_REQUEST);
-    }
-    if (!body.message) {
-      throw new HttpException('message is required', HttpStatus.BAD_REQUEST);
-    }
     const result = await this.inquiriesService.sendInquiryMessage(
-      body.connectionId,
+      dto.connectionId,
       inquiryId,
-      body.message
+      dto.message
     );
     return { success: true, message: 'Message sent on inquiry', ...result };
   }
