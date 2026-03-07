@@ -558,9 +558,10 @@ export class EbayListingsService {
       const photos = JSON.parse(listing.photos as string) as string[];
 
       // C1: Upload images to eBay Picture Services (EPS) before creating inventory item.
+      // Downloads each image from MinIO storage, uploads binary to eBay EPS.
       // eBay requires EPS-hosted URLs for full listing features (zoom, 24 images, etc).
       const epsImageUrls = await this.ebayClient.uploadImagesToEps(
-        client, listing.connectionId, photos.slice(0, 24), this.mediaService
+        listing.connectionId, photos.slice(0, 24), this.mediaService
       );
 
       // Parse platformData for product identifiers and other stored fields

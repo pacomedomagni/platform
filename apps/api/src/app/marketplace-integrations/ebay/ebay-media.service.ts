@@ -1,12 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { StorageService } from '@platform/storage';
 import { ClsService } from 'nestjs-cls';
 import { EbayStoreService } from './ebay-store.service';
+import { EbayClientService } from './ebay-client.service';
 
 /**
  * eBay Media Service
- * Manages image uploads via the eBay Commerce Media API.
- * Supports uploading images from URLs, from file buffers, and retrieving image details.
+ * Manages image and video uploads via the eBay Commerce Media API.
+ * All media is sourced from MinIO (via StorageService) and uploaded to eBay.
+ *
+ * Image flow: MinIO → download buffer → uploadImageFromFile → EPS URL (i.ebayimg.com)
+ * Video flow: MinIO → download buffer → createVideo → chunked upload → videoId
  */
 @Injectable()
 export class EbayMediaService {
@@ -16,7 +21,9 @@ export class EbayMediaService {
   constructor(
     private prisma: PrismaService,
     private cls: ClsService,
-    private ebayStore: EbayStoreService
+    private ebayStore: EbayStoreService,
+    private ebayClient: EbayClientService,
+    private storage: StorageService
   ) {}
 
   /**
@@ -207,6 +214,161 @@ export class EbayMediaService {
       this.logger.error(`Failed to get video ${videoId} for connection ${connectionId}`, error);
       throw error;
     }
+  }
+
+  // ============================================
+  // Storage-Based Uploads (MinIO → eBay)
+  // ============================================
+
+  /**
+   * Extract storage key from a MinIO/S3 URL.
+   * MinIO URLs follow: ${endpoint}/${bucket}/${key}
+   * S3 URLs follow: https://${bucket}.s3.${region}.amazonaws.com/${key}
+   * Falls back to using the URL as-is if extraction fails.
+   */
+  extractStorageKey(url: string): string {
+    try {
+      const parsed = new URL(url);
+      const pathParts = parsed.pathname.split('/').filter(Boolean);
+      // For MinIO path-style: /bucket/tenant/prefix/file → remove bucket (first segment)
+      if (pathParts.length >= 2) {
+        return pathParts.slice(1).join('/');
+      }
+      return pathParts.join('/');
+    } catch {
+      // Not a valid URL - assume it's already a storage key
+      return url;
+    }
+  }
+
+  /**
+   * Upload an image to eBay EPS from MinIO storage.
+   * Downloads the image buffer from MinIO, then uploads as binary to eBay.
+   * This avoids the problem of eBay not being able to reach internal MinIO URLs.
+   */
+  async uploadImageFromStorage(
+    connectionId: string,
+    imageUrlOrKey: string
+  ): Promise<{ imageId: string; imageUrl: string }> {
+    const storageKey = this.extractStorageKey(imageUrlOrKey);
+
+    if (this.mockMode) {
+      const mockImageId = `mock_image_storage_${Date.now()}`;
+      this.logger.log(
+        `[MOCK] Uploaded image from storage for connection ${connectionId}: ${storageKey} (${mockImageId})`
+      );
+      return {
+        imageId: mockImageId,
+        imageUrl: `https://i.ebayimg.com/images/mock/${mockImageId}/s-l1600.jpg`,
+      };
+    }
+
+    try {
+      // Download image buffer from MinIO
+      const buffer = await this.storage.download(storageKey);
+
+      // Determine content type from file extension
+      const contentType = this.getContentTypeFromKey(storageKey);
+
+      // Upload binary to eBay EPS
+      const result = await this.uploadImageFromFile(connectionId, buffer, contentType);
+
+      this.logger.log(
+        `Uploaded image from storage for connection ${connectionId}: ${storageKey} → ${result.imageId}`
+      );
+      return result;
+    } catch (error) {
+      this.logger.error(
+        `Failed to upload image from storage for connection ${connectionId}: ${storageKey}`,
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Upload a video to eBay from MinIO storage.
+   * Downloads the video buffer from MinIO, creates a video entry on eBay,
+   * then uploads the binary to the eBay upload URL.
+   */
+  async uploadVideoFromStorage(
+    connectionId: string,
+    videoUrlOrKey: string,
+    title: string,
+    description?: string
+  ): Promise<{ videoId: string; status: string }> {
+    const storageKey = this.extractStorageKey(videoUrlOrKey);
+
+    if (this.mockMode) {
+      const mockVideoId = `mock_video_storage_${Date.now()}`;
+      this.logger.log(
+        `[MOCK] Uploaded video from storage for connection ${connectionId}: ${storageKey} (${mockVideoId})`
+      );
+      return { videoId: mockVideoId, status: 'PROCESSING' };
+    }
+
+    try {
+      // Step 1: Download video buffer from MinIO
+      const buffer = await this.storage.download(storageKey);
+      this.logger.log(`Downloaded video from storage: ${storageKey} (${buffer.length} bytes)`);
+
+      // Step 2: Create video entry on eBay to get upload URL
+      const { videoId, uploadUrl } = await this.createVideo(connectionId, title, description);
+
+      // Step 3: Upload video binary to eBay's upload URL
+      const client = await this.ebayStore.getClient(connectionId);
+      const accessToken = this.ebayClient.getAccessToken(client);
+
+      const contentType = this.getContentTypeFromKey(storageKey) || 'video/mp4';
+      const response = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': contentType,
+          'Content-Length': buffer.length.toString(),
+          'Content-Range': `bytes 0-${buffer.length - 1}/${buffer.length}`,
+        },
+        body: new Uint8Array(buffer),
+      });
+
+      if (!response.ok && response.status !== 200 && response.status !== 201) {
+        throw new Error(`eBay video upload failed with status ${response.status}: ${response.statusText}`);
+      }
+
+      this.logger.log(
+        `Uploaded video from storage for connection ${connectionId}: ${storageKey} → ${videoId}`
+      );
+
+      return { videoId, status: 'PROCESSING' };
+    } catch (error) {
+      this.logger.error(
+        `Failed to upload video from storage for connection ${connectionId}: ${storageKey}`,
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Determine MIME content type from a storage key or filename.
+   */
+  private getContentTypeFromKey(key: string): string {
+    const ext = key.split('.').pop()?.toLowerCase();
+    const contentTypes: Record<string, string> = {
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      png: 'image/png',
+      gif: 'image/gif',
+      webp: 'image/webp',
+      bmp: 'image/bmp',
+      tiff: 'image/tiff',
+      tif: 'image/tiff',
+      mp4: 'video/mp4',
+      mov: 'video/quicktime',
+      avi: 'video/x-msvideo',
+      webm: 'video/webm',
+    };
+    return contentTypes[ext || ''] || 'application/octet-stream';
   }
 
   /**

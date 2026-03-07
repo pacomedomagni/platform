@@ -1000,14 +1000,14 @@ export class EbayClientService {
 
   /**
    * Upload images to eBay Picture Services (EPS) via Media API.
+   * Downloads each image from MinIO storage, then uploads the binary buffer to eBay EPS.
    * Returns array of EPS-hosted URLs (i.ebayimg.com) ready for inventory items.
    * Rate limit: 50 uploads per 5 seconds.
    */
   async uploadImagesToEps(
-    client: eBayApi,
     connectionId: string,
     imageUrls: string[],
-    mediaService: { uploadImageFromUrl: (connId: string, url: string) => Promise<{ imageId: string; imageUrl: string }> }
+    mediaService: { uploadImageFromStorage: (connId: string, urlOrKey: string) => Promise<{ imageId: string; imageUrl: string }> }
   ): Promise<string[]> {
     if (this.mockMode) {
       this.logger.log(`[MOCK] Uploaded ${imageUrls.length} images to EPS`);
@@ -1022,7 +1022,7 @@ export class EbayClientService {
       const results = await Promise.all(
         batch.map(async (url) => {
           try {
-            const result = await mediaService.uploadImageFromUrl(connectionId, url);
+            const result = await mediaService.uploadImageFromStorage(connectionId, url);
             return result.imageUrl;
           } catch (error) {
             this.logger.warn(`Failed to upload image to EPS: ${url}. Using original URL.`);
