@@ -9,6 +9,7 @@ import { PrismaService } from '@platform/db';
 import { ClsService } from 'nestjs-cls';
 import { EbayStoreService } from './ebay-store.service';
 import { MarketplaceAuditService } from '../shared/marketplace-audit.service';
+import { DistributedLockService } from '../shared/distributed-lock.service';
 import {
   SyncType,
   SyncDirection,
@@ -37,13 +38,13 @@ export class EbayMessagingService implements OnModuleInit, OnModuleDestroy {
   private syncInterval: ReturnType<typeof setInterval> | null = null;
   private readonly SYNC_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
   private readonly mockMode = process.env.MOCK_EXTERNAL_SERVICES === 'true';
-  private isSyncing = false;
 
   constructor(
     private prisma: PrismaService,
     private cls: ClsService,
     private ebayStore: EbayStoreService,
-    private audit: MarketplaceAuditService
+    private audit: MarketplaceAuditService,
+    private distributedLock: DistributedLockService
   ) {}
 
   onModuleInit() {
@@ -70,12 +71,8 @@ export class EbayMessagingService implements OnModuleInit, OnModuleDestroy {
    * Runs outside of CLS context, so tenantId is read from each connection record.
    */
   private async syncAllActiveMessages() {
-    if (this.isSyncing) {
-      this.logger.warn('Message sync already in progress, skipping this tick');
-      return;
-    }
-    this.isSyncing = true;
-    try {
+    // M4: Use distributed lock to prevent concurrent message sync across instances
+    const result = await this.distributedLock.withLock('ebay:message-sync', 300, async () => {
       const connections = await this.prisma.marketplaceConnection.findMany({
         where: {
           platform: 'EBAY',
@@ -97,13 +94,12 @@ export class EbayMessagingService implements OnModuleInit, OnModuleDestroy {
             `Scheduled message sync failed for connection ${connection.id} (tenant ${connection.tenantId})`,
             error
           );
-          // Continue to next connection on failure
         }
       }
-    } catch (error) {
-      this.logger.error('Scheduled message sync global error', error);
-    } finally {
-      this.isSyncing = false;
+    });
+
+    if (result === null) {
+      this.logger.warn('Message sync already in progress on another instance, skipping this tick');
     }
   }
 

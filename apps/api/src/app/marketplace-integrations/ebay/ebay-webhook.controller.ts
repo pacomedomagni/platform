@@ -56,6 +56,8 @@ export class EbayWebhookController {
   /**
    * Account deletion notification.
    * eBay sends a POST when a user requests account deletion.
+   * Per eBay spec: respond with 200 OK IMMEDIATELY, then verify signature
+   * and process asynchronously to avoid eBay timeout/retry loops.
    * POST /api/marketplace/ebay/webhooks/account-deletion
    */
   @Post('account-deletion')
@@ -76,6 +78,26 @@ export class EbayWebhookController {
         .json({ error: 'Missing signature header' });
     }
 
+    // Respond immediately per eBay spec, then verify + process asynchronously
+    res.status(HttpStatus.OK).json({ status: 'ok' });
+
+    // Process asynchronously after responding
+    this.verifyAndProcessAccountDeletion(body, signatureHeader, timestamp, parsedBody)
+      .catch((error) => {
+        this.logger.error('Failed to process account deletion webhook asynchronously', error);
+      });
+  }
+
+  /**
+   * Verify signature and handle account deletion asynchronously.
+   * Called after the HTTP response has been sent to eBay.
+   */
+  private async verifyAndProcessAccountDeletion(
+    body: string,
+    signatureHeader: string,
+    timestamp: string,
+    parsedBody: any
+  ): Promise<void> {
     const isValid = await this.webhookService.verifySignature(
       body,
       signatureHeader,
@@ -83,21 +105,12 @@ export class EbayWebhookController {
     );
 
     if (!isValid) {
-      this.logger.warn('Account deletion webhook signature verification failed');
-      return res
-        .status(HttpStatus.UNAUTHORIZED)
-        .json({ error: 'Invalid signature' });
+      this.logger.warn('Account deletion webhook signature verification failed (async)');
+      return;
     }
 
-    try {
-      await this.webhookService.handleAccountDeletion(parsedBody);
-      this.logger.log('Account deletion webhook processed successfully');
-      return res.status(HttpStatus.OK).json({ status: 'ok' });
-    } catch (error) {
-      this.logger.error('Failed to process account deletion webhook', error);
-      // Return 200 to eBay so it does not retry endlessly; log the error internally
-      return res.status(HttpStatus.OK).json({ status: 'ok' });
-    }
+    await this.webhookService.handleAccountDeletion(parsedBody);
+    this.logger.log('Account deletion webhook processed successfully (async)');
   }
 
   /**

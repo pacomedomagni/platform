@@ -3,6 +3,8 @@ import { PrismaService } from '@platform/db';
 import { ClsService } from 'nestjs-cls';
 import { EbayStoreService } from './ebay-store.service';
 import { EbayClientService } from './ebay-client.service';
+import { EbayMediaService } from './ebay-media.service';
+import { EbayTaxonomyService } from './ebay-taxonomy.service';
 import { MarketplaceAuditService } from '../shared/marketplace-audit.service';
 import { ListingStatus, SyncStatus } from '../shared/marketplace.types';
 import { Prisma } from '@prisma/client';
@@ -37,6 +39,8 @@ export class EbayListingsService {
     private cls: ClsService,
     private ebayStore: EbayStoreService,
     private ebayClient: EbayClientService,
+    private mediaService: EbayMediaService,
+    private taxonomyService: EbayTaxonomyService,
     private audit: MarketplaceAuditService
   ) {}
 
@@ -531,6 +535,18 @@ export class EbayListingsService {
       throw new BadRequestException('eBay connection is not fully configured. Please complete OAuth and fetch business policies.');
     }
 
+    // C4: Validate merchantLocationKey before publishing
+    const connection = listing.connection;
+    if (!connection.locationKey) {
+      await this.prisma.marketplaceListing.update({
+        where: { id: listingId },
+        data: { status: listing.status },
+      });
+      throw new BadRequestException(
+        'No inventory location configured. Please create an inventory location via Settings before publishing.'
+      );
+    }
+
     let inventoryItemCreated = false;
     let offerCreated = false;
     let offerId: string | undefined;
@@ -541,16 +557,41 @@ export class EbayListingsService {
       client = await this.ebayStore.getClient(listing.connectionId);
       const photos = JSON.parse(listing.photos as string) as string[];
 
+      // C1: Upload images to eBay Picture Services (EPS) before creating inventory item.
+      // eBay requires EPS-hosted URLs for full listing features (zoom, 24 images, etc).
+      const epsImageUrls = await this.ebayClient.uploadImagesToEps(
+        client, listing.connectionId, photos.slice(0, 24), this.mediaService
+      );
+
       // Parse platformData for product identifiers and other stored fields
       const platformData = listing.platformData
         ? JSON.parse(listing.platformData as string)
         : {};
 
+      // M8: Validate item specifics/aspects against eBay taxonomy if available
+      if (listing.itemSpecifics && listing.categoryId) {
+        try {
+          const aspects = await this.taxonomyService.getItemAspectsForCategory(
+            listing.connectionId, connection.marketplaceId || 'EBAY_US', listing.categoryId
+          );
+          const requiredAspects = aspects
+            .filter((a: any) => a.aspectConstraint?.aspectRequired)
+            .map((a: any) => a.localizedAspectName);
+          const providedAspects = Object.keys(listing.itemSpecifics as any);
+          const missing = requiredAspects.filter((a: string) => !providedAspects.includes(a));
+          if (missing.length > 0) {
+            this.logger.warn(`Listing ${listingId} missing required aspects: ${missing.join(', ')}`);
+          }
+        } catch {
+          // Non-blocking: if taxonomy lookup fails, proceed anyway
+        }
+      }
+
       // Step 1: Create inventory item
       const productPayload: any = {
         title: listing.title,
         description: listing.description,
-        imageUrls: photos.slice(0, 24), // eBay limit: 24 images for standard listings
+        imageUrls: epsImageUrls, // Use EPS-hosted URLs instead of raw S3 URLs
         aspects: listing.itemSpecifics ? (listing.itemSpecifics as any) : undefined,
       };
 
@@ -562,6 +603,11 @@ export class EbayListingsService {
       if (platformData.isbn) productPayload.isbn = Array.isArray(platformData.isbn) ? platformData.isbn : [platformData.isbn];
       if (listing.epid) productPayload.epid = listing.epid;
       if (listing.subtitle) productPayload.subtitle = listing.subtitle;
+
+      // L4: Include video IDs if present (uploaded via Media API)
+      if (platformData.videoIds && Array.isArray(platformData.videoIds) && platformData.videoIds.length > 0) {
+        productPayload.videoIds = platformData.videoIds;
+      }
 
       const inventoryItem = await this.ebayClient.createOrReplaceInventoryItem(client, listing.sku, {
         product: productPayload,
@@ -595,7 +641,6 @@ export class EbayListingsService {
       inventoryItemCreated = true;
 
       // Step 2: Create offer
-      const connection = listing.connection;
       const marketplaceId = connection.marketplaceId || 'EBAY_US';
       const currency = this.getMarketplaceCurrency(marketplaceId);
       const format = listing.format || 'FIXED_PRICE';
@@ -968,6 +1013,13 @@ export class EbayListingsService {
 
     if (listing.status !== ListingStatus.PUBLISHED || !listing.externalOfferId) {
       throw new BadRequestException('Only published listings with an active offer can be updated');
+    }
+
+    // H4: Check 250 revision/day limit before updating
+    if (!this.ebayClient.checkRevisionLimit(listingId)) {
+      throw new BadRequestException(
+        'Listing has reached the eBay daily revision limit (250). Try again tomorrow.'
+      );
     }
 
     const client = await this.ebayStore.getClient(listing.connectionId);

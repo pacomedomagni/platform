@@ -11,6 +11,7 @@ import { ClsService } from 'nestjs-cls';
 import { EbayStoreService } from './ebay-store.service';
 import { EbayClientService } from './ebay-client.service';
 import { MarketplaceAuditService } from '../shared/marketplace-audit.service';
+import { DistributedLockService } from '../shared/distributed-lock.service';
 import { SyncType, SyncDirection, SyncLogStatus, ReturnStatus } from '../shared/marketplace.types';
 import { Prisma } from '@prisma/client';
 const Decimal = Prisma.Decimal;
@@ -32,14 +33,14 @@ export class EbayReturnsService implements OnModuleInit, OnModuleDestroy {
   private syncInterval: ReturnType<typeof setInterval> | null = null;
   private readonly SYNC_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
   private readonly mockMode = process.env.MOCK_EXTERNAL_SERVICES === 'true';
-  private isSyncing = false;
 
   constructor(
     private prisma: PrismaService,
     private cls: ClsService,
     private ebayStore: EbayStoreService,
     private ebayClient: EbayClientService,
-    private audit: MarketplaceAuditService
+    private audit: MarketplaceAuditService,
+    private distributedLock: DistributedLockService
   ) {}
 
   onModuleInit() {
@@ -63,12 +64,8 @@ export class EbayReturnsService implements OnModuleInit, OnModuleDestroy {
    * Runs outside of CLS context, so tenantId is read from each connection record.
    */
   private async syncAllActiveReturns() {
-    if (this.isSyncing) {
-      this.logger.warn('Return sync already in progress, skipping this tick');
-      return;
-    }
-    this.isSyncing = true;
-    try {
+    // M4: Use distributed lock to prevent concurrent return sync across instances
+    const result = await this.distributedLock.withLock('ebay:return-sync', 900, async () => {
       const connections = await this.prisma.marketplaceConnection.findMany({
         where: {
           platform: 'EBAY',
@@ -90,13 +87,12 @@ export class EbayReturnsService implements OnModuleInit, OnModuleDestroy {
             `Scheduled return sync failed for connection ${connection.id} (tenant ${connection.tenantId})`,
             error
           );
-          // Continue to next connection on failure
         }
       }
-    } catch (error) {
-      this.logger.error('Scheduled return sync global error', error);
-    } finally {
-      this.isSyncing = false;
+    });
+
+    if (result === null) {
+      this.logger.warn('Return sync already in progress on another instance, skipping this tick');
     }
   }
 

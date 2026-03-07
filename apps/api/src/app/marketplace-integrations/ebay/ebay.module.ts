@@ -3,6 +3,7 @@ import { DbModule } from '@platform/db';
 import { OperationsModule } from '../../operations/operations.module';
 import { EncryptionService } from '../shared/encryption.service';
 import { MarketplaceAuditService } from '../shared/marketplace-audit.service';
+import { DistributedLockService } from '../shared/distributed-lock.service';
 import { EbayClientService } from './ebay-client.service';
 import { EbayStoreService } from './ebay-store.service';
 import { EbayAuthService } from './ebay-auth.service';
@@ -102,6 +103,7 @@ import { EbayMediaController } from './ebay-media.controller';
   providers: [
     EncryptionService,
     MarketplaceAuditService,
+    DistributedLockService,
     EbayClientService,
     EbayStoreService,
     EbayAuthService,

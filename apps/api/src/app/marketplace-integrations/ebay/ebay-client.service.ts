@@ -20,9 +20,29 @@ import type {
 } from './ebay.types';
 
 /**
+ * Structured eBay API error with category classification per eBay's error spec.
+ * Categories: REQUEST (client error), BUSINESS (rule violation), APPLICATION (server error).
+ */
+export class EbayApiError extends Error {
+  constructor(
+    message: string,
+    public readonly statusCode: number,
+    public readonly category: 'REQUEST' | 'BUSINESS' | 'APPLICATION' | 'UNKNOWN',
+    public readonly errorId?: number,
+    public readonly errors?: Array<{ errorId: number; domain: string; category: string; message: string; longMessage?: string }>,
+    public readonly isTokenRevoked?: boolean,
+  ) {
+    super(message);
+    this.name = 'EbayApiError';
+  }
+}
+
+/**
  * eBay API Client Wrapper
  * Provides methods for interacting with eBay Sell API.
- * Includes automatic rate limit handling with exponential backoff.
+ * Includes automatic retry with exponential backoff for rate limits (429)
+ * and transient server errors (500, 502, 503).
+ * Classifies errors per eBay's error spec (REQUEST/BUSINESS/APPLICATION).
  */
 @Injectable()
 export class EbayClientService {
@@ -31,11 +51,126 @@ export class EbayClientService {
   private readonly BASE_DELAY_MS = 1000;
   private readonly mockMode = process.env.MOCK_EXTERNAL_SERVICES === 'true';
 
+  // Per-API daily call tracking for proactive rate limiting (M7)
+  private readonly dailyCallCounts = new Map<string, { count: number; resetAt: number }>();
+  private readonly API_DAILY_LIMITS: Record<string, number> = {
+    'sell.inventory': 2_000_000,
+    'sell.account': 25_000,
+    'sell.fulfillment': 2_000_000,
+    'sell.marketing': 200_000,
+    'sell.finances': 200_000,
+    'sell.analytics': 200_000,
+    'commerce.taxonomy': 5_000,
+    'commerce.media': 1_000_000,
+    'oauth2.token': 50_000,
+  };
+
+  // Revision tracking per listing per day (H4)
+  private readonly revisionCounts = new Map<string, { count: number; resetAt: number }>();
+  private readonly MAX_REVISIONS_PER_DAY = 250;
+
   /**
-   * Execute an eBay API call with automatic rate limit (HTTP 429) retry handling.
-   * Uses exponential backoff and respects the Retry-After header when present.
+   * Classify an eBay API error based on status code and error body.
    */
-  private async withRateLimitRetry<T>(operation: () => Promise<T>): Promise<T> {
+  private classifyError(error: any): EbayApiError {
+    const status = error?.statusCode ?? error?.status ?? error?.response?.status ?? 0;
+    const errors = error?.response?.data?.errors ?? error?.errors ?? [];
+    const firstError = errors[0];
+    const category = firstError?.category || (
+      status >= 500 ? 'APPLICATION' :
+      status === 401 || status === 403 ? 'REQUEST' :
+      status >= 400 ? 'BUSINESS' : 'UNKNOWN'
+    );
+
+    // Detect revoked/invalid tokens
+    const isTokenRevoked = status === 401 && (
+      error?.message?.includes('token') ||
+      error?.message?.includes('auth') ||
+      firstError?.errorId === 1001 ||
+      firstError?.message?.toLowerCase()?.includes('invalid access token')
+    );
+
+    return new EbayApiError(
+      firstError?.longMessage || firstError?.message || error?.message || `eBay API error (${status})`,
+      status,
+      category as any,
+      firstError?.errorId,
+      errors,
+      isTokenRevoked,
+    );
+  }
+
+  /**
+   * Track API call count for proactive rate limiting.
+   * Returns true if the call should proceed, false if limit would be exceeded.
+   */
+  trackApiCall(apiGroup: string): boolean {
+    const now = Date.now();
+    const entry = this.dailyCallCounts.get(apiGroup);
+    if (!entry || now >= entry.resetAt) {
+      // New day - reset counter
+      this.dailyCallCounts.set(apiGroup, {
+        count: 1,
+        resetAt: now + 24 * 60 * 60 * 1000,
+      });
+      return true;
+    }
+
+    const limit = this.API_DAILY_LIMITS[apiGroup] || 100_000;
+    if (entry.count >= limit * 0.95) {
+      this.logger.warn(
+        `eBay API daily limit warning: ${apiGroup} at ${entry.count}/${limit} (95% threshold)`
+      );
+    }
+    if (entry.count >= limit) {
+      this.logger.error(`eBay API daily limit EXCEEDED for ${apiGroup}: ${entry.count}/${limit}`);
+      return false;
+    }
+
+    entry.count++;
+    return true;
+  }
+
+  /**
+   * Track listing revisions. Returns true if revision is allowed.
+   */
+  checkRevisionLimit(listingId: string): boolean {
+    const now = Date.now();
+    const entry = this.revisionCounts.get(listingId);
+
+    if (!entry || now >= entry.resetAt) {
+      // Start of new calendar day
+      const tomorrow = new Date();
+      tomorrow.setHours(24, 0, 0, 0);
+      this.revisionCounts.set(listingId, { count: 1, resetAt: tomorrow.getTime() });
+      return true;
+    }
+
+    if (entry.count >= this.MAX_REVISIONS_PER_DAY) {
+      this.logger.warn(
+        `Listing ${listingId} has reached ${this.MAX_REVISIONS_PER_DAY} revisions today. Blocked.`
+      );
+      return false;
+    }
+
+    entry.count++;
+    return true;
+  }
+
+  /**
+   * Execute an eBay API call with automatic retry handling.
+   * Retries on: HTTP 429 (rate limit), 500, 502, 503 (transient server errors).
+   * Uses exponential backoff and respects the Retry-After header when present.
+   * Classifies errors per eBay's spec and detects revoked tokens.
+   */
+  private async withRetry<T>(operation: () => Promise<T>, apiGroup?: string): Promise<T> {
+    if (apiGroup && !this.trackApiCall(apiGroup)) {
+      throw new EbayApiError(
+        `eBay API daily limit exceeded for ${apiGroup}. Try again tomorrow.`,
+        429, 'APPLICATION'
+      );
+    }
+
     let lastError: any;
     for (let attempt = 0; attempt <= this.MAX_RETRIES; attempt++) {
       try {
@@ -43,10 +178,10 @@ export class EbayClientService {
       } catch (error: any) {
         lastError = error;
 
-        // Check for rate limit (429) or eBay-specific rate limit errors
         const status = error?.statusCode ?? error?.status ?? error?.response?.status;
-        if (status === 429 && attempt < this.MAX_RETRIES) {
-          // Respect Retry-After header if present (value in seconds)
+        const isRetryable = (status === 429 || status === 500 || status === 502 || status === 503);
+
+        if (isRetryable && attempt < this.MAX_RETRIES) {
           const retryAfterHeader =
             error?.response?.headers?.['retry-after'] ??
             error?.meta?.headers?.['retry-after'];
@@ -58,18 +193,18 @@ export class EbayClientService {
               : this.BASE_DELAY_MS * Math.pow(2, attempt);
 
           this.logger.warn(
-            `eBay API rate limited (429). Retrying in ${delayMs}ms (attempt ${attempt + 1}/${this.MAX_RETRIES})`
+            `eBay API error (${status}). Retrying in ${delayMs}ms (attempt ${attempt + 1}/${this.MAX_RETRIES})`
           );
 
           await new Promise((resolve) => setTimeout(resolve, delayMs));
           continue;
         }
 
-        // Not a rate limit error or max retries exceeded
-        throw error;
+        // Classify and throw structured error
+        throw this.classifyError(error);
       }
     }
-    throw lastError;
+    throw this.classifyError(lastError);
   }
 
   /**
@@ -98,7 +233,7 @@ export class EbayClientService {
       return {};
     }
 
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       const accessToken = this.getAccessToken(client);
       const url = `https://api.ebay.com/post-order/v2${path}`;
       const headers: Record<string, string> = {
@@ -169,7 +304,7 @@ export class EbayClientService {
       this.logger.log(`[MOCK] Created/updated inventory item: ${sku}`);
       return { sku, statusCode: 204 };
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         const response = await client.sell.inventory.createOrReplaceInventoryItem(sku, data as any);
         this.logger.log(`Created/updated inventory item: ${sku}`);
@@ -189,7 +324,7 @@ export class EbayClientService {
       this.logger.log(`[MOCK] Deleted inventory item: ${sku}`);
       return;
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         await client.sell.inventory.deleteInventoryItem(sku);
         this.logger.log(`Deleted inventory item: ${sku}`);
@@ -244,7 +379,7 @@ export class EbayClientService {
       this.logger.log(`[MOCK] Created offer ${offerId} for SKU: ${data.sku}`);
       return { offerId };
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         const response = await client.sell.inventory.createOffer(data);
         this.logger.log(`Created offer for SKU: ${data.sku}`);
@@ -265,7 +400,7 @@ export class EbayClientService {
       this.logger.log(`[MOCK] Published offer: ${offerId} → listing ${listingId}`);
       return { listingId };
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         const response = await client.sell.inventory.publishOffer(offerId);
         this.logger.log(`Published offer: ${offerId}`);
@@ -290,7 +425,7 @@ export class EbayClientService {
         availability: { shipToLocationAvailability: { quantity: 100 } },
       };
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         const response = await client.sell.inventory.getInventoryItem(sku);
         this.logger.log(`Fetched inventory item: ${sku}`);
@@ -318,7 +453,7 @@ export class EbayClientService {
       this.logger.log(`[MOCK] Updated quantity for SKU ${sku}: ${quantity}`);
       return;
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         // Fetch the existing inventory item to preserve all current data
         const existingItem = await this.getInventoryItem(client, sku);
@@ -360,7 +495,7 @@ export class EbayClientService {
       this.logger.log(`[MOCK] Fetched 0 orders from eBay`);
       return [];
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         const response = await client.sell.fulfillment.getOrders(params);
         this.logger.log(`Fetched ${response.orders?.length || 0} orders from eBay`);
@@ -391,7 +526,7 @@ export class EbayClientService {
       this.logger.log(`[MOCK] Created shipping fulfillment for order: ${orderId}`);
       return { fulfillmentId: `mock_fulfill_${Date.now()}` };
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         const response = await client.sell.fulfillment.createShippingFulfillment(orderId, data);
         this.logger.log(`Created shipping fulfillment for order: ${orderId}`);
@@ -418,7 +553,7 @@ export class EbayClientService {
       this.logger.log(`[MOCK] Fetched 0 active listings`);
       return [];
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         const response = await client.sell.inventory.getInventoryItems(params);
         this.logger.log(`Fetched ${response.inventoryItems?.length || 0} active listings`);
@@ -438,7 +573,7 @@ export class EbayClientService {
       this.logger.log(`[MOCK] Withdrew offer: ${offerId}`);
       return;
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         await client.sell.inventory.withdrawOffer(offerId);
         this.logger.log(`Withdrew offer: ${offerId}`);
@@ -456,7 +591,7 @@ export class EbayClientService {
     if (this.mockMode) {
       return [{ fulfillmentPolicyId: 'mock_fp_1', name: 'Mock Fulfillment Policy' }];
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         // TODO: remove when ebay-api types are fixed
         const response = await client.sell.account.getFulfillmentPolicies(marketplaceId as any);
@@ -475,7 +610,7 @@ export class EbayClientService {
     if (this.mockMode) {
       return [{ paymentPolicyId: 'mock_pp_1', name: 'Mock Payment Policy' }];
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         // TODO: remove when ebay-api types are fixed
         const response = await client.sell.account.getPaymentPolicies(marketplaceId as any);
@@ -494,7 +629,7 @@ export class EbayClientService {
     if (this.mockMode) {
       return [{ returnPolicyId: 'mock_rp_1', name: 'Mock Return Policy' }];
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         // TODO: remove when ebay-api types are fixed
         const response = await client.sell.account.getReturnPolicies(marketplaceId as any);
@@ -513,7 +648,7 @@ export class EbayClientService {
     if (this.mockMode) {
       return [{ merchantLocationKey: 'mock_loc_1', name: 'Mock Location' }];
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         const response = await client.sell.inventory.getInventoryLocations();
         return response.locations || [];
@@ -548,7 +683,7 @@ export class EbayClientService {
       this.logger.log(`[MOCK] Updated offer: ${offerId}`);
       return { offerId };
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         // TODO: remove when ebay-api types are fixed
         const response = await (client.sell.inventory as any).updateOffer(offerId, data);
@@ -569,7 +704,7 @@ export class EbayClientService {
       this.logger.log(`[MOCK] Fetched offers`);
       return { offers: [], total: 0 };
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         // TODO: remove when ebay-api types are fixed
         const response = await (client.sell.inventory as any).getOffers(params);
@@ -608,7 +743,7 @@ export class EbayClientService {
       this.logger.log(`[MOCK] Created/updated inventory item group: ${inventoryItemGroupKey}`);
       return { inventoryItemGroupKey, statusCode: 204 };
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         const response = await client.sell.inventory.createOrReplaceInventoryItemGroup(
           inventoryItemGroupKey,
@@ -631,7 +766,7 @@ export class EbayClientService {
       this.logger.log(`[MOCK] Fetched inventory item group: ${inventoryItemGroupKey}`);
       return { inventoryItemGroupKey, title: 'Mock Group', variantSKUs: [] };
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         const response = await client.sell.inventory.getInventoryItemGroup(inventoryItemGroupKey);
         this.logger.log(`Fetched inventory item group: ${inventoryItemGroupKey}`);
@@ -651,7 +786,7 @@ export class EbayClientService {
       this.logger.log(`[MOCK] Deleted inventory item group: ${inventoryItemGroupKey}`);
       return;
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         await client.sell.inventory.deleteInventoryItemGroup(inventoryItemGroupKey);
         this.logger.log(`Deleted inventory item group: ${inventoryItemGroupKey}`);
@@ -693,7 +828,7 @@ export class EbayClientService {
       this.logger.log(`[MOCK] Published offers by group: ${data.inventoryItemGroupKey} → ${listingId}`);
       return { listingId, offers: data.offers.map((o, i) => ({ offerId: `mock_offer_${i}`, sku: o.sku })) };
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         // TODO: remove when ebay-api types are fixed
         const response = await (client.sell.inventory as any).publishOfferByInventoryItemGroup(data);
@@ -721,7 +856,7 @@ export class EbayClientService {
       this.logger.log(`[MOCK] Fetched 0 messages from eBay`);
       return { Messages: { Message: [] } };
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         // TODO: remove when ebay-api types are fixed
         const response: EbayGetMyMessagesResponse = await (client as any).trading.GetMyMessages({
@@ -750,7 +885,7 @@ export class EbayClientService {
       this.logger.log(`[MOCK] Sent message to ${data.recipientId}`);
       return { Ack: 'Success' };
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         // TODO: remove when ebay-api types are fixed
         const response: EbayTradingResponse = await (client as any).trading.AddMemberMessageAAQToPartner({
@@ -779,7 +914,7 @@ export class EbayClientService {
       this.logger.log(`[MOCK] Fetched best offers for item ${itemId}`);
       return { BestOfferArray: { BestOffer: [] } };
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         const params: Record<string, unknown> = { ItemID: itemId };
         if (status) params.BestOfferStatus = status;
@@ -809,7 +944,7 @@ export class EbayClientService {
       this.logger.log(`[MOCK] Responded to best offer ${bestOfferId} with ${action}`);
       return { Ack: 'Success' };
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         const params: Record<string, unknown> = {
           ItemID: itemId,
@@ -839,7 +974,7 @@ export class EbayClientService {
       this.logger.log(`[MOCK] Fetched feedback`);
       return { FeedbackDetailArray: { FeedbackDetail: [] }, FeedbackScore: 0 };
     }
-    return this.withRateLimitRetry(async () => {
+    return this.withRetry(async () => {
       try {
         // TODO: remove when ebay-api types are fixed
         const response: EbayGetFeedbackResponse = await (client as any).trading.GetFeedback({
@@ -857,5 +992,222 @@ export class EbayClientService {
         throw error;
       }
     });
+  }
+
+  // ============================================
+  // EPS Image Upload (C1)
+  // ============================================
+
+  /**
+   * Upload images to eBay Picture Services (EPS) via Media API.
+   * Returns array of EPS-hosted URLs (i.ebayimg.com) ready for inventory items.
+   * Rate limit: 50 uploads per 5 seconds.
+   */
+  async uploadImagesToEps(
+    client: eBayApi,
+    connectionId: string,
+    imageUrls: string[],
+    mediaService: { uploadImageFromUrl: (connId: string, url: string) => Promise<{ imageId: string; imageUrl: string }> }
+  ): Promise<string[]> {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Uploaded ${imageUrls.length} images to EPS`);
+      return imageUrls.map((_, i) => `https://i.ebayimg.com/images/mock/eps_${Date.now()}_${i}/s-l1600.jpg`);
+    }
+
+    const epsUrls: string[] = [];
+    const BATCH_SIZE = 10; // Process in batches to respect 50/5s rate limit
+
+    for (let i = 0; i < imageUrls.length; i += BATCH_SIZE) {
+      const batch = imageUrls.slice(i, i + BATCH_SIZE);
+      const results = await Promise.all(
+        batch.map(async (url) => {
+          try {
+            const result = await mediaService.uploadImageFromUrl(connectionId, url);
+            return result.imageUrl;
+          } catch (error) {
+            this.logger.warn(`Failed to upload image to EPS: ${url}. Using original URL.`);
+            return url; // Fallback to original URL if EPS upload fails
+          }
+        })
+      );
+      epsUrls.push(...results);
+
+      // Rate limit: wait between batches if more to process
+      if (i + BATCH_SIZE < imageUrls.length) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    }
+
+    this.logger.log(`Uploaded ${epsUrls.filter(u => u.includes('ebayimg.com')).length}/${imageUrls.length} images to EPS`);
+    return epsUrls;
+  }
+
+  // ============================================
+  // Bulk Operations (L2, L3)
+  // ============================================
+
+  /**
+   * Bulk create or replace inventory items (up to 25 per call).
+   */
+  async bulkCreateOrReplaceInventoryItems(
+    client: eBayApi,
+    items: Array<{ sku: string; data: any }>
+  ): Promise<{ responses: Array<{ sku: string; statusCode: number; errors?: any[] }> }> {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Bulk created ${items.length} inventory items`);
+      return {
+        responses: items.map((item) => ({ sku: item.sku, statusCode: 200 })),
+      };
+    }
+    return this.withRetry(async () => {
+      try {
+        const payload = {
+          requests: items.map((item) => ({
+            sku: item.sku,
+            ...item.data,
+          })),
+        };
+        const response = await (client.sell.inventory as any).bulkCreateOrReplaceInventoryItem(payload);
+        this.logger.log(`Bulk created/updated ${items.length} inventory items`);
+        return response;
+      } catch (error) {
+        this.logger.error(`Failed to bulk create inventory items`, error);
+        throw error;
+      }
+    }, 'sell.inventory');
+  }
+
+  /**
+   * Bulk create offers (up to 25 per call).
+   */
+  async bulkCreateOffers(
+    client: eBayApi,
+    offers: Array<any>
+  ): Promise<{ responses: Array<{ offerId?: string; statusCode: number; errors?: any[] }> }> {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Bulk created ${offers.length} offers`);
+      return {
+        responses: offers.map((_, i) => ({ offerId: `mock_offer_bulk_${i}`, statusCode: 200 })),
+      };
+    }
+    return this.withRetry(async () => {
+      try {
+        const response = await (client.sell.inventory as any).bulkCreateOffer({ requests: offers });
+        this.logger.log(`Bulk created ${offers.length} offers`);
+        return response;
+      } catch (error) {
+        this.logger.error(`Failed to bulk create offers`, error);
+        throw error;
+      }
+    }, 'sell.inventory');
+  }
+
+  // ============================================
+  // Bid Recommendations (M1)
+  // ============================================
+
+  /**
+   * Get promoted listings bid recommendations for listings.
+   * Uses the eBay Recommendation API.
+   */
+  async getAdRateRecommendations(
+    client: eBayApi,
+    listingIds: string[]
+  ): Promise<Array<{ listingId: string; suggestedBidPercentage: string; trendingBidPercentage?: string }>> {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Got bid recommendations for ${listingIds.length} listings`);
+      return listingIds.map((id) => ({
+        listingId: id,
+        suggestedBidPercentage: '8.5',
+        trendingBidPercentage: '7.2',
+      }));
+    }
+    return this.withRetry(async () => {
+      try {
+        const response = await (client.sell as any).recommendation.findListingRecommendations({
+          listingIds: listingIds.map((id) => ({ listingId: id })),
+          filter: { types: ['AD'] },
+        });
+
+        const recommendations = response?.listingRecommendations || [];
+        return recommendations.map((rec: any) => ({
+          listingId: rec.listingId,
+          suggestedBidPercentage: rec.marketing?.ad?.bidPercentages?.find((b: any) => b.basis === 'ITEM')?.value || '5.0',
+          trendingBidPercentage: rec.marketing?.ad?.bidPercentages?.find((b: any) => b.basis === 'TRENDING')?.value,
+        }));
+      } catch (error) {
+        this.logger.error('Failed to get bid recommendations', error);
+        throw error;
+      }
+    }, 'sell.marketing');
+  }
+
+  // ============================================
+  // Digital Signatures for EU/UK (C2)
+  // ============================================
+
+  /**
+   * Generate digital signature headers for EU/UK seller API calls.
+   * Required for: all Finances API, issueRefund (Fulfillment), Post-Order refund/cancellation methods.
+   * Uses eBay's RFC9421 / RFC9530 spec.
+   */
+  async getDigitalSignatureHeaders(
+    client: eBayApi,
+    method: string,
+    url: string,
+    body?: string,
+  ): Promise<Record<string, string>> {
+    // Check if we have signing keys configured
+    const privateKey = process.env['EBAY_SIGNING_PRIVATE_KEY'];
+    const publicKeyJwe = process.env['EBAY_SIGNING_PUBLIC_KEY_JWE'];
+
+    if (!privateKey || !publicKeyJwe) {
+      // Not configured — only needed for EU/UK sellers
+      return {};
+    }
+
+    try {
+      const crypto = await import('crypto');
+      const headers: Record<string, string> = {};
+
+      // x-ebay-signature-key header (Public Key as JWE)
+      headers['x-ebay-signature-key'] = publicKeyJwe;
+
+      // Content-Digest (SHA-256 of body, only if payload exists)
+      if (body) {
+        const digest = crypto.createHash('sha256').update(body).digest('base64');
+        headers['Content-Digest'] = `sha-256=:${digest}:`;
+      }
+
+      // Build signature base per RFC9421
+      const timestamp = Math.floor(Date.now() / 1000);
+      const coveredComponents = ['"@method"', '"@path"', '"@authority"'];
+      if (body) coveredComponents.push('"content-digest"');
+
+      const signatureInput = `sig1=(${coveredComponents.join(' ')});created=${timestamp}`;
+      headers['Signature-Input'] = signatureInput;
+
+      // Generate signature
+      const signatureBase = coveredComponents
+        .map((c) => {
+          const name = c.replace(/"/g, '');
+          if (name === '@method') return `"@method": ${method.toUpperCase()}`;
+          if (name === '@path') return `"@path": ${new URL(url).pathname}`;
+          if (name === '@authority') return `"@authority": ${new URL(url).host}`;
+          if (name === 'content-digest') return `"content-digest": ${headers['Content-Digest']}`;
+          return '';
+        })
+        .join('\n') + `\n"@signature-params": ${signatureInput}`;
+
+      const sign = crypto.createSign('SHA256');
+      sign.update(signatureBase);
+      const signature = sign.sign(privateKey, 'base64');
+      headers['Signature'] = `sig1=:${signature}:`;
+
+      return headers;
+    } catch (error) {
+      this.logger.warn('Failed to generate digital signature headers', error);
+      return {};
+    }
   }
 }

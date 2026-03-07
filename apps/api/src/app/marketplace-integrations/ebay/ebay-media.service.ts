@@ -123,6 +123,92 @@ export class EbayMediaService {
     }
   }
 
+  // ============================================
+  // Video Support (L4)
+  // ============================================
+
+  /**
+   * L4: Create a video on eBay and get an upload URL.
+   * eBay Commerce Media API requires: 1) createVideo (get videoId + upload URL),
+   * 2) Upload the video binary to the upload URL, 3) Wait for processing.
+   *
+   * Videos must be: MP4, H.264, 30 sec min, 1 min max recommended,
+   * 225MB max, min 480x480 resolution.
+   */
+  async createVideo(
+    connectionId: string,
+    title: string,
+    description?: string
+  ): Promise<{ videoId: string; uploadUrl: string }> {
+    if (this.mockMode) {
+      const mockVideoId = `mock_video_${Date.now()}`;
+      this.logger.log(`[MOCK] Created video for connection ${connectionId}: ${title} (${mockVideoId})`);
+      return {
+        videoId: mockVideoId,
+        uploadUrl: `https://api.ebay.com/commerce/media/v1_beta/video/${mockVideoId}/upload`,
+      };
+    }
+
+    const client = await this.ebayStore.getClient(connectionId);
+
+    try {
+      const response = await (client.commerce as any).media.createVideo({
+        title,
+        description: description || title,
+      });
+
+      const videoId = response?.videoId || response?.href?.split('/').pop();
+      // The upload URL is typically in the response headers (Location) or in the body
+      const uploadUrl = response?.uploadUrl ||
+        `https://apiz.ebay.com/commerce/media/v1_beta/video/${videoId}/upload`;
+
+      this.logger.log(`Created video ${videoId} for connection ${connectionId}`);
+
+      return { videoId, uploadUrl };
+    } catch (error) {
+      this.logger.error(`Failed to create video for connection ${connectionId}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * L4: Get video processing status and playable URL.
+   * After upload, eBay processes the video. Status progresses:
+   * PENDING_UPLOAD → PROCESSING → LIVE (or BLOCKED/PROCESSING_FAILED).
+   */
+  async getVideo(connectionId: string, videoId: string): Promise<{
+    videoId: string;
+    status: string;
+    playableUrl?: string;
+    thumbnail?: string;
+  }> {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Fetched video ${videoId} for connection ${connectionId}`);
+      return {
+        videoId,
+        status: 'LIVE',
+        playableUrl: `https://www.ebay.com/video/${videoId}`,
+        thumbnail: `https://i.ebayimg.com/images/mock/${videoId}/thumb.jpg`,
+      };
+    }
+
+    const client = await this.ebayStore.getClient(connectionId);
+
+    try {
+      const response = await (client.commerce as any).media.getVideo(videoId);
+
+      return {
+        videoId: response?.videoId || videoId,
+        status: response?.status || 'UNKNOWN',
+        playableUrl: response?.playableUrl,
+        thumbnail: response?.thumbnail?.imageUrl,
+      };
+    } catch (error) {
+      this.logger.error(`Failed to get video ${videoId} for connection ${connectionId}`, error);
+      throw error;
+    }
+  }
+
   /**
    * Get image details from eBay by image ID.
    */

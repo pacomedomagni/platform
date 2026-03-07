@@ -10,6 +10,7 @@ import { PrismaService } from '@platform/db';
 import { EbayStoreService } from './ebay-store.service';
 import { EbayClientService } from './ebay-client.service';
 import { MarketplaceAuditService } from '../shared/marketplace-audit.service';
+import { DistributedLockService } from '../shared/distributed-lock.service';
 import { SyncType, SyncDirection, SyncLogStatus, SyncStatus, ListingStatus } from '../shared/marketplace.types';
 import type { EbayOrder, MappedOrderLineItem } from './ebay.types';
 import { Prisma } from '@prisma/client';
@@ -27,9 +28,6 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
   private inventorySyncInterval: ReturnType<typeof setInterval> | null = null;
   private readonly SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
   private readonly INVENTORY_SYNC_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
-  private isSyncingOrders = false;
-  private isSyncingInventory = false;
-
   // In-memory lock to prevent concurrent inventory updates for the same SKU
   private readonly inventoryLocks = new Map<string, Promise<void>>();
 
@@ -37,7 +35,8 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
     private prisma: PrismaService,
     private ebayStore: EbayStoreService,
     private ebayClient: EbayClientService,
-    private audit: MarketplaceAuditService
+    private audit: MarketplaceAuditService,
+    private distributedLock: DistributedLockService
   ) {}
 
   onModuleInit() {
@@ -174,10 +173,28 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
       // Get authenticated eBay client (pass tenantId explicitly to avoid CLS dependency)
       const client = await this.ebayStore.getClient(connectionId, tenantId);
 
-      // Fetch orders from eBay (last 30 days by default) with pagination
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      const filterDate = thirtyDaysAgo.toISOString();
+      // H3: Incremental sync using lastSyncAt from connection record.
+      // Uses lastModifiedDate filter when available (eBay best practice: never have gaps).
+      // Falls back to 30-day window for initial sync.
+      const connection = await this.prisma.marketplaceConnection.findUnique({
+        where: { id: connectionId },
+      });
+      const lastSyncAt = connection?.lastSyncAt;
+
+      let filterDate: string;
+      let filterField: string;
+      if (lastSyncAt) {
+        // Incremental: use modification time since last sync (with 5-min overlap for safety)
+        const overlapMs = 5 * 60 * 1000;
+        filterDate = new Date(lastSyncAt.getTime() - overlapMs).toISOString();
+        filterField = 'lastmodifieddate';
+      } else {
+        // Initial sync: 30-day window by creation date
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        filterDate = thirtyDaysAgo.toISOString();
+        filterField = 'creationdate';
+      }
 
       const PAGE_SIZE = 50;
       let offset = 0;
@@ -186,7 +203,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
       // Paginate through all orders
       while (true) {
         const pageOrders = await this.ebayClient.getOrders(client, {
-          filter: `creationdate:[${filterDate}..],orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS}`,
+          filter: `${filterField}:[${filterDate}..],orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS}`,
           limit: PAGE_SIZE,
           offset,
         });
@@ -742,12 +759,8 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
    * Runs outside of CLS context, so tenantId is read from each connection record.
    */
   private async syncAllActiveConnections() {
-    if (this.isSyncingOrders) {
-      this.logger.warn('Order sync already in progress, skipping this tick');
-      return;
-    }
-    this.isSyncingOrders = true;
-    try {
+    // M4: Use distributed lock to prevent concurrent order sync across instances
+    const result = await this.distributedLock.withLock('ebay:order-sync', 600, async () => {
       const connections = await this.prisma.marketplaceConnection.findMany({
         where: {
           platform: 'EBAY',
@@ -769,13 +782,12 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
             `Scheduled order sync failed for connection ${connection.id} (tenant ${connection.tenantId})`,
             error
           );
-          // Continue to next connection on failure
         }
       }
-    } catch (error) {
-      this.logger.error('Scheduled order sync global error', error);
-    } finally {
-      this.isSyncingOrders = false;
+    });
+
+    if (result === null) {
+      this.logger.warn('Order sync already in progress on another instance, skipping this tick');
     }
   }
 
@@ -852,12 +864,8 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
    * Runs outside of CLS context, so tenantId is read from each connection record.
    */
   private async syncAllActiveInventory() {
-    if (this.isSyncingInventory) {
-      this.logger.warn('Inventory sync already in progress, skipping this tick');
-      return;
-    }
-    this.isSyncingInventory = true;
-    try {
+    // M4: Use distributed lock to prevent concurrent inventory sync across instances
+    const result = await this.distributedLock.withLock('ebay:inventory-sync', 1200, async () => {
       const connections = await this.prisma.marketplaceConnection.findMany({
         where: {
           platform: 'EBAY',
@@ -873,7 +881,6 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
 
       for (const connection of connections) {
         try {
-          // Find all published listings for this connection
           const listings = await this.prisma.marketplaceListing.findMany({
             where: {
               connectionId: connection.id,
@@ -902,13 +909,12 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
             `Scheduled inventory sync failed for connection ${connection.id} (tenant ${connection.tenantId})`,
             error
           );
-          // Continue to next connection on failure
         }
       }
-    } catch (error) {
-      this.logger.error('Scheduled inventory sync global error', error);
-    } finally {
-      this.isSyncingInventory = false;
+    });
+
+    if (result === null) {
+      this.logger.warn('Inventory sync already in progress on another instance, skipping this tick');
     }
   }
 }

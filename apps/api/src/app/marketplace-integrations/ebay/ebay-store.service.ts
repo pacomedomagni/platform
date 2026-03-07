@@ -17,6 +17,15 @@ export class EbayStoreService {
   private readonly TOKEN_BUFFER_MS = 60000; // Refresh 1 min before expiry
   private readonly mockMode = process.env.MOCK_EXTERNAL_SERVICES === 'true';
 
+  // M5: OAuth token rate limit tracking per grant type per day
+  // eBay limits: 1K client credentials, 10K auth code, 50K refresh per day
+  private readonly tokenRateLimits = new Map<string, { count: number; resetAt: number }>();
+  private readonly TOKEN_DAILY_LIMITS: Record<string, number> = {
+    'client_credentials': 1_000,
+    'authorization_code': 10_000,
+    'refresh_token': 50_000,
+  };
+
   constructor(
     private prisma: PrismaService,
     private cls: ClsService,
@@ -234,7 +243,25 @@ export class EbayStoreService {
       .finally(() => this.refreshLocks.delete(connectionId));
     this.refreshLocks.set(connectionId, refreshPromise);
 
-    const tokens = await refreshPromise;
+    let tokens: EbayTokenResponse;
+    try {
+      tokens = await refreshPromise;
+    } catch (error: any) {
+      // H2: If token is revoked, mark connection as disconnected
+      if (error?.isTokenRevoked) {
+        await this.prisma.marketplaceConnection.update({
+          where: { id: connectionId },
+          data: {
+            isConnected: false,
+            accessToken: null,
+            accessTokenExpiry: null,
+          },
+        });
+        this.clientCache.delete(connectionId);
+        this.logger.error(`Connection ${connectionId} disconnected due to revoked token`);
+      }
+      throw error;
+    }
 
     client.OAuth2.setCredentials({
       access_token: tokens.access_token,
@@ -272,6 +299,12 @@ export class EbayStoreService {
     if (this.mockMode) {
       return { access_token: 'mock_access_token', refresh_token: refreshToken, expires_in: 7200, token_type: 'Bearer' };
     }
+
+    // M5: Check OAuth token rate limit before making the request
+    if (!this.checkTokenRateLimit('refresh_token')) {
+      throw new Error('eBay OAuth refresh_token daily rate limit reached. Try again tomorrow.');
+    }
+
     const { appId, certId } = this.getEbayCredentials();
     const isSandbox = process.env.EBAY_SANDBOX === 'true';
     const tokenEndpoint = isSandbox
@@ -292,10 +325,61 @@ export class EbayStoreService {
     if (!response.ok) {
       const errorText = await response.text();
       this.logger.error(`Token refresh failed: ${response.status} - ${errorText}`);
+
+      // H2: Detect revoked/invalid refresh tokens
+      if (response.status === 400 || response.status === 401) {
+        const isRevoked = errorText.includes('invalid_grant') ||
+          errorText.includes('token') ||
+          errorText.includes('revoked') ||
+          errorText.includes('expired');
+
+        if (isRevoked) {
+          this.logger.error(
+            `Refresh token appears to be revoked or expired. User must re-authenticate.`
+          );
+          // Mark connection as disconnected so UI shows re-auth prompt
+          // We can't update DB here without connectionId, so throw a specific error
+          const err = new Error('eBay refresh token revoked. Please reconnect your eBay account.');
+          (err as any).isTokenRevoked = true;
+          throw err;
+        }
+      }
+
       throw new Error(`Failed to refresh eBay access token: ${response.status}`);
     }
 
     return response.json();
+  }
+
+  /**
+   * M5: Track OAuth token request counts per grant type per day.
+   * Returns true if the request should proceed, false if limit would be exceeded.
+   */
+  private checkTokenRateLimit(grantType: string): boolean {
+    const now = Date.now();
+    const entry = this.tokenRateLimits.get(grantType);
+
+    if (!entry || now >= entry.resetAt) {
+      this.tokenRateLimits.set(grantType, {
+        count: 1,
+        resetAt: now + 24 * 60 * 60 * 1000,
+      });
+      return true;
+    }
+
+    const limit = this.TOKEN_DAILY_LIMITS[grantType] || 10_000;
+    if (entry.count >= limit * 0.9) {
+      this.logger.warn(
+        `OAuth ${grantType} daily limit warning: ${entry.count}/${limit} (90% threshold)`
+      );
+    }
+    if (entry.count >= limit) {
+      this.logger.error(`OAuth ${grantType} daily limit EXCEEDED: ${entry.count}/${limit}`);
+      return false;
+    }
+
+    entry.count++;
+    return true;
   }
 
   /**

@@ -16,6 +16,13 @@ export class EbayTaxonomyService {
   private readonly treeIdCache = new Map<string, { treeId: string; expiry: number }>();
   private readonly CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+  /**
+   * M6: Bulk aspects cache - categoryId -> aspects[]
+   * Populated by fetchItemAspects() which downloads all aspects for a marketplace in one call.
+   * Dramatically reduces per-category API calls (from 5K/day Taxonomy limit).
+   */
+  private readonly bulkAspectsCache = new Map<string, { aspects: any[]; expiry: number }>();
+
   constructor(private ebayStore: EbayStoreService) {}
 
   // ============================================
@@ -154,6 +161,14 @@ export class EbayTaxonomyService {
     marketplaceId: string,
     categoryId: string
   ): Promise<any[]> {
+    // M6: Check bulk aspects cache first (populated by fetchItemAspects)
+    const bulkCacheKey = `${marketplaceId}:${categoryId}`;
+    const bulkCached = this.bulkAspectsCache.get(bulkCacheKey);
+    if (bulkCached && Date.now() < bulkCached.expiry) {
+      this.logger.log(`Using cached bulk aspects for category ${categoryId} on ${marketplaceId}`);
+      return bulkCached.aspects;
+    }
+
     if (this.mockMode) {
       this.logger.log(`[MOCK] Getting item aspects for category ${categoryId} on ${marketplaceId}`);
       return [
@@ -272,6 +287,72 @@ export class EbayTaxonomyService {
         `Failed to get conditions for category ${categoryId} on ${marketplaceId}`,
         error
       );
+      throw error;
+    }
+  }
+
+  /**
+   * M6: Bulk download all item aspects for a marketplace category tree.
+   * Uses the Taxonomy API's fetchItemAspects endpoint which returns a downloadable
+   * file containing all aspects for every category in the tree.
+   * Results are cached in memory with a 24-hour TTL.
+   *
+   * This dramatically reduces per-category API calls (single call vs. one per category).
+   */
+  async fetchItemAspects(
+    connectionId: string,
+    marketplaceId: string
+  ): Promise<{ categoriesLoaded: number; cachedUntil: string }> {
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] Bulk-loaded item aspects for ${marketplaceId}`);
+      return { categoriesLoaded: 0, cachedUntil: new Date(Date.now() + this.CACHE_TTL_MS).toISOString() };
+    }
+
+    try {
+      const categoryTreeId = await this.getCategoryTreeId(connectionId, marketplaceId);
+      const client = await this.ebayStore.getClient(connectionId);
+
+      // fetchItemAspects returns a task ID or direct data depending on tree size
+      const response = await (client.commerce.taxonomy as any).fetchItemAspects(categoryTreeId);
+
+      // Parse the response - may be a URL to download or direct JSON
+      let aspectsData: any[] = [];
+
+      if (response?.taskId) {
+        // Async download - poll for result
+        this.logger.log(`Bulk aspects download initiated (task: ${response.taskId}). Will poll for results.`);
+        // For now, return without caching - async tasks are more complex
+        return { categoriesLoaded: 0, cachedUntil: new Date().toISOString() };
+      }
+
+      // Direct response with category aspects
+      aspectsData = response?.categoryAspects || response?.aspects || [];
+
+      const expiry = Date.now() + this.CACHE_TTL_MS;
+      let categoriesLoaded = 0;
+
+      for (const categoryAspect of aspectsData) {
+        const categoryId = categoryAspect.category?.categoryId;
+        if (categoryId && categoryAspect.aspects) {
+          const cacheKey = `${marketplaceId}:${categoryId}`;
+          this.bulkAspectsCache.set(cacheKey, {
+            aspects: categoryAspect.aspects,
+            expiry,
+          });
+          categoriesLoaded++;
+        }
+      }
+
+      this.logger.log(
+        `Bulk-loaded item aspects for ${categoriesLoaded} categories on ${marketplaceId} (cached 24h)`
+      );
+
+      return {
+        categoriesLoaded,
+        cachedUntil: new Date(expiry).toISOString(),
+      };
+    } catch (error) {
+      this.logger.error(`Failed to bulk-load item aspects for ${marketplaceId}`, error);
       throw error;
     }
   }

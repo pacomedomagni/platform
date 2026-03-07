@@ -1,7 +1,8 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { ClsService } from 'nestjs-cls';
 import { EbayStoreService } from './ebay-store.service';
+import { EbayClientService } from './ebay-client.service';
 import { MarketplaceAuditService } from '../shared/marketplace-audit.service';
 
 /**
@@ -15,10 +16,14 @@ export class EbayCampaignsService {
   private readonly logger = new Logger(EbayCampaignsService.name);
   private readonly mockMode = process.env.MOCK_EXTERNAL_SERVICES === 'true';
 
+  /** M2: Max ads per campaign (eBay limit) */
+  private readonly MAX_ADS_PER_CAMPAIGN = 50_000;
+
   constructor(
     private prisma: PrismaService,
     private cls: ClsService,
     private ebayStore: EbayStoreService,
+    private ebayClient: EbayClientService,
     private audit: MarketplaceAuditService
   ) {}
 
@@ -152,7 +157,22 @@ export class EbayCampaignsService {
   }
 
   /**
+   * M1: Get bid percentage recommendations for listings.
+   * Uses the eBay Recommendation API to suggest optimal bid percentages.
+   */
+  async getBidRecommendations(
+    tenantId: string,
+    connectionId: string,
+    listingIds: string[]
+  ): Promise<Array<{ listingId: string; suggestedBidPercentage: string; trendingBidPercentage?: string }>> {
+    await this.ebayStore.getConnection(connectionId, tenantId);
+    const client = await this.ebayStore.getClient(connectionId, tenantId);
+    return this.ebayClient.getAdRateRecommendations(client, listingIds);
+  }
+
+  /**
    * Add a listing to a campaign as a promoted ad.
+   * M2: Enforces the 50,000 ad limit per campaign.
    */
   async addListingToCampaign(
     tenantId: string,
@@ -162,6 +182,26 @@ export class EbayCampaignsService {
   ): Promise<void> {
     const campaign = await this.getCampaign(tenantId, campaignId);
     await this.ebayStore.getConnection(campaign.connectionId, tenantId);
+
+    // M2: Check ad count limit
+    if (!this.mockMode) {
+      try {
+        const client = await this.ebayStore.getClient(campaign.connectionId, tenantId);
+        const adsResponse = await (client.sell as any).marketing.getAds(
+          campaign.externalCampaignId, { limit: 1 }
+        );
+        const currentAdCount = adsResponse?.total || 0;
+        if (currentAdCount >= this.MAX_ADS_PER_CAMPAIGN) {
+          throw new BadRequestException(
+            `Campaign has reached the maximum of ${this.MAX_ADS_PER_CAMPAIGN} ads. Remove existing ads before adding new ones.`
+          );
+        }
+      } catch (error: any) {
+        if (error instanceof BadRequestException) throw error;
+        // If ad count check fails, proceed anyway (best effort)
+        this.logger.warn(`Could not verify ad count for campaign ${campaignId}: ${error?.message}`);
+      }
+    }
 
     if (this.mockMode) {
       this.logger.log(

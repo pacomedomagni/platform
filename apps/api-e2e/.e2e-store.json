@@ -9,7 +9,7 @@
   "warehouseCode": "",
   "locationIds": [],
   "locationCodes": [],
-  "testCustomerEmail": "e2e-customer-1772843067637@test.com",
+  "testCustomerEmail": "e2e-customer-1772845100743@test.com",
   "testCustomerPassword": "TestPass123!",
   "testCustomerId": "",
   "addressId": "",
@@ -48,14 +48,14 @@
   "ebayOAuthState": "",
   "weightTierId": "",
   "importJobId": "",
-  "e2eCategoryId": "27a741cb-0380-43b5-a42a-cf7d912c415f",
+  "e2eCategoryId": "de11fc44-0dca-4ffc-a87d-abe4e153dc52",
   "e2eProductIds": [
-    "1c2e6e99-2efe-4153-9bd9-ba08e0244b31",
-    "1ef1dd23-c6c3-4ec7-8961-f4928e46af17",
-    "b570f272-da60-444a-bfdf-3ef09b46b674"
+    "d4c58ac5-2df2-4412-b32b-a3004db4d011",
+    "8da3a1cd-af10-42d5-a368-b86a45775a4c",
+    "813df978-b677-4c52-8ca9-03d6d9709238"
   ],
-  "e2eConnectionId": "cff79313-9649-43fb-a566-db2006cd735b",
-  "e2eOAuthState": "d7987cfdc1e80aa63ee5b272d4785f4007e5c3e781a9c9863a3b0ec065be26b9",
-  "e2eListingId": "27ed07d4-8315-4e9e-bdcd-37ef2c0aa151",
-  "e2eCampaignId": "fab0c166-4c03-4192-a334-a6fd8fff04c5"
+  "e2eConnectionId": "6253b7a4-b260-422a-bffb-4c73629aba68",
+  "e2eOAuthState": "04a6bf5195f68ddaec591a985068eddac969df19fa7125ce62359eb3384be09a",
+  "e2eListingId": "9a9d8b79-97bb-46f1-ab5d-9ea2d210345a",
+  "e2eCampaignId": "81d21872-b175-4f54-ae16-bd3fb5194b66"
 }

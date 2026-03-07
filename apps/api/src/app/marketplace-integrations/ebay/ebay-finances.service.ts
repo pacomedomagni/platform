@@ -6,11 +6,26 @@ import { EbayClientService } from './ebay-client.service';
  * eBay Finances Service
  * Provides access to payouts, transactions, summaries, and seller funds
  * via the eBay Finances API.
+ *
+ * IMPORTANT: Due to EU/UK Payment regulations (PSD2), all Finances API methods
+ * require digital signatures when called for EU/UK-domiciled sellers.
+ * Digital signature generation is handled by EbayClientService.getDigitalSignatureHeaders().
+ *
+ * NOTE: Transaction data may not be immediately available after a sale.
+ * There can be a 24-48 hour delay before payment transactions appear in the
+ * Finances API. Do not use order notifications as a trigger to query this API.
  */
 @Injectable()
 export class EbayFinancesService {
   private readonly logger = new Logger(EbayFinancesService.name);
   private readonly mockMode = process.env.MOCK_EXTERNAL_SERVICES === 'true';
+
+  /**
+   * M3: Data availability warning included in all responses.
+   * Transaction data may lag 24-48 hours behind actual payments.
+   */
+  private readonly DATA_LAG_WARNING =
+    'Financial data may be delayed up to 48 hours. Recent transactions may not appear immediately.';
 
   constructor(
     private ebayStore: EbayStoreService,
@@ -41,7 +56,7 @@ export class EbayFinancesService {
       const response = await client.sell.finances.getPayouts(params as any);
 
       this.logger.log(`Fetched payouts for connection ${connectionId}`);
-      return response;
+      return { ...response, _warning: this.DATA_LAG_WARNING };
     } catch (error: any) {
       this.logger.error(
         `Failed to fetch payouts for connection ${connectionId}: ${error?.message || String(error)}`,
@@ -101,7 +116,7 @@ export class EbayFinancesService {
       const response = await client.sell.finances.getTransactions(params as any);
 
       this.logger.log(`Fetched transactions for connection ${connectionId}`);
-      return response;
+      return { ...response, _warning: this.DATA_LAG_WARNING };
     } catch (error: any) {
       this.logger.error(
         `Failed to fetch transactions for connection ${connectionId}: ${error?.message || String(error)}`,
