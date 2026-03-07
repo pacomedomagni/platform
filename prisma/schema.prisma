@@ -2625,7 +2625,6 @@ model MarketplaceListing {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([connectionId, productListingId])
   @@unique([connectionId, sku])
   @@index([tenantId, status])
   @@index([connectionId])
