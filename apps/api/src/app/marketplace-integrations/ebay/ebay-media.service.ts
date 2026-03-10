@@ -315,25 +315,12 @@ export class EbayMediaService {
       // Step 2: Create video entry on eBay to get upload URL
       const { videoId, uploadUrl } = await this.createVideo(connectionId, title, description);
 
-      // Step 3: Upload video binary to eBay's upload URL
+      // Step 3: Upload video binary to eBay's upload URL with retry
       const client = await this.ebayStore.getClient(connectionId);
       const accessToken = this.ebayClient.getAccessToken(client);
 
       const contentType = this.getContentTypeFromKey(storageKey) || 'video/mp4';
-      const response = await fetch(uploadUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': contentType,
-          'Content-Length': buffer.length.toString(),
-          'Content-Range': `bytes 0-${buffer.length - 1}/${buffer.length}`,
-        },
-        body: new Uint8Array(buffer),
-      });
-
-      if (!response.ok && response.status !== 200 && response.status !== 201) {
-        throw new Error(`eBay video upload failed with status ${response.status}: ${response.statusText}`);
-      }
+      await this.uploadVideoWithRetry(uploadUrl, accessToken, contentType, buffer);
 
       this.logger.log(
         `Uploaded video from storage for connection ${connectionId}: ${storageKey} → ${videoId}`
@@ -346,6 +333,63 @@ export class EbayMediaService {
         error
       );
       throw error;
+    }
+  }
+
+  /**
+   * Upload video binary to eBay's upload URL with retry and exponential backoff.
+   * Retries up to 3 times on transient failures (network errors, 5xx, 429).
+   */
+  private async uploadVideoWithRetry(
+    uploadUrl: string,
+    accessToken: string,
+    contentType: string,
+    buffer: Buffer,
+    maxRetries = 3
+  ): Promise<void> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await fetch(uploadUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': contentType,
+            'Content-Length': buffer.length.toString(),
+            'Content-Range': `bytes 0-${buffer.length - 1}/${buffer.length}`,
+          },
+          body: new Uint8Array(buffer),
+        });
+
+        if (response.ok || response.status === 200 || response.status === 201) {
+          return;
+        }
+
+        // Retry on 429 (rate limit) or 5xx (server errors)
+        const isRetryable = response.status === 429 || response.status >= 500;
+        if (isRetryable && attempt < maxRetries) {
+          const backoffMs = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+          this.logger.warn(
+            `Video upload attempt ${attempt}/${maxRetries} failed with ${response.status}, retrying in ${backoffMs}ms`
+          );
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
+          continue;
+        }
+
+        throw new Error(
+          `eBay video upload failed with status ${response.status}: ${response.statusText}`
+        );
+      } catch (error) {
+        // Retry on network-level errors (fetch failures)
+        if (attempt < maxRetries && !(error instanceof Error && error.message.includes('eBay video upload failed'))) {
+          const backoffMs = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+          this.logger.warn(
+            `Video upload attempt ${attempt}/${maxRetries} failed with network error, retrying in ${backoffMs}ms`
+          );
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
+          continue;
+        }
+        throw error;
+      }
     }
   }
 

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { EbayStoreService } from './ebay-store.service';
 import { EbayOrderSyncService } from './ebay-order-sync.service';
+import { EbayWebhookService } from './ebay-webhook.service';
 
 /**
  * eBay Notification Service
@@ -17,25 +18,105 @@ import { EbayOrderSyncService } from './ebay-order-sync.service';
 export class EbayNotificationService {
   private readonly logger = new Logger(EbayNotificationService.name);
 
+  /**
+   * In-memory deduplication cache for processed notification IDs.
+   * Prevents reprocessing the same event on eBay retries.
+   * Entries expire after 1 hour.
+   */
+  private readonly processedNotifications = new Map<string, number>();
+  private readonly DEDUP_TTL_MS = 60 * 60 * 1000; // 1 hour
+  private dedupCleanupTimer: ReturnType<typeof setInterval> | null = null;
+
   constructor(
     private prisma: PrismaService,
     private ebayStore: EbayStoreService,
-    private orderSync: EbayOrderSyncService
-  ) {}
+    private orderSync: EbayOrderSyncService,
+    private webhookService: EbayWebhookService
+  ) {
+    // Periodically clean up expired dedup entries every 10 minutes
+    this.dedupCleanupTimer = setInterval(() => this.cleanupDedupCache(), 10 * 60 * 1000);
+  }
+
+  onModuleDestroy() {
+    if (this.dedupCleanupTimer) {
+      clearInterval(this.dedupCleanupTimer);
+      this.dedupCleanupTimer = null;
+    }
+  }
+
+  /**
+   * Extract a unique notification ID from the payload for deduplication.
+   */
+  private getNotificationId(payload: any): string | null {
+    return (
+      payload?.metadata?.notificationId ||
+      payload?.metadata?.eventId ||
+      payload?.notificationId ||
+      null
+    );
+  }
+
+  /**
+   * Check if a notification has already been processed (deduplication).
+   * Returns true if the notification is a duplicate.
+   */
+  private isDuplicate(notificationId: string): boolean {
+    const processed = this.processedNotifications.get(notificationId);
+    if (processed && Date.now() < processed) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Mark a notification as processed for deduplication.
+   */
+  private markProcessed(notificationId: string): void {
+    this.processedNotifications.set(notificationId, Date.now() + this.DEDUP_TTL_MS);
+  }
+
+  /**
+   * Remove expired entries from the dedup cache.
+   */
+  private cleanupDedupCache(): void {
+    const now = Date.now();
+    let cleaned = 0;
+    for (const [key, expiry] of this.processedNotifications) {
+      if (now >= expiry) {
+        this.processedNotifications.delete(key);
+        cleaned++;
+      }
+    }
+    if (cleaned > 0) {
+      this.logger.debug(`Cleaned ${cleaned} expired notification dedup entries`);
+    }
+  }
 
   /**
    * Route an incoming notification to the appropriate handler based on topic.
+   * Includes deduplication to prevent reprocessing on eBay retries.
    */
   async processNotification(topic: string, payload: any): Promise<void> {
-    this.logger.log(`Processing eBay notification: ${topic}`);
+    // Deduplication check
+    const notificationId = this.getNotificationId(payload);
+    if (notificationId) {
+      if (this.isDuplicate(notificationId)) {
+        this.logger.log(`Skipping duplicate eBay notification: ${topic} (id=${notificationId})`);
+        return;
+      }
+      this.markProcessed(notificationId);
+    }
+
+    this.logger.log(`Processing eBay notification: ${topic}${notificationId ? ` (id=${notificationId})` : ''}`);
 
     try {
       switch (topic) {
         case 'MARKETPLACE_ACCOUNT_DELETION':
           this.logger.warn(
-            `Received MARKETPLACE_ACCOUNT_DELETION notification. Payload: ${JSON.stringify(payload)}`
+            `Received MARKETPLACE_ACCOUNT_DELETION notification`
           );
-          // eBay requires acknowledgement; no action needed beyond logging
+          // Route to webhook service for actual account anonymization
+          await this.webhookService.handleAccountDeletion(payload);
           break;
 
         case 'ORDER_CREATED':
