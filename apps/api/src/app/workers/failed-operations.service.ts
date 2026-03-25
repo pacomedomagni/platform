@@ -221,14 +221,19 @@ export class FailedOperationsService {
     const payload = operation.payload as any;
     const { orderId, items, warehouseId } = payload;
 
-    // Idempotency: check if stock posting already exists for this order
-    const existingPosting = await this.prisma.stockPosting.findFirst({
+    // Idempotency: check if a stock movement audit log already exists for this order
+    const existingMovement = await this.prisma.auditLog.findFirst({
       where: {
         tenantId: operation.tenantId,
-        voucherNo: { contains: payload.orderNumber },
+        docType: 'StockMovement',
+        action: 'STOCK_MOVEMENT_CREATED',
+        meta: {
+          path: ['reference'],
+          equals: `Order ${payload.orderNumber}`,
+        },
       },
     });
-    if (existingPosting) {
+    if (existingMovement) {
       this.logger.log(`Stock deduction already exists for order ${payload.orderNumber}, skipping retry`);
       return;
     }
@@ -264,14 +269,19 @@ export class FailedOperationsService {
     const payload = operation.payload as any;
     const { orderId, orderNumber } = payload;
 
-    // Idempotency: check if a RECEIPT posting already exists for this refund
-    const existingPosting = await this.prisma.stockPosting.findFirst({
+    // Idempotency: check if a stock return audit log already exists for this refund
+    const existingMovement = await this.prisma.auditLog.findFirst({
       where: {
         tenantId: operation.tenantId,
-        voucherNo: { contains: `Refund for Order ${orderNumber}` },
+        docType: 'StockMovement',
+        action: 'STOCK_MOVEMENT_CREATED',
+        meta: {
+          path: ['reference'],
+          equals: `Refund for Order ${orderNumber}`,
+        },
       },
     });
-    if (existingPosting) {
+    if (existingMovement) {
       this.logger.log(`Stock return already exists for order ${orderNumber}, skipping retry`);
       return;
     }

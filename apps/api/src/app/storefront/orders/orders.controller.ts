@@ -7,10 +7,12 @@ import {
   Query,
   Body,
   Headers,
+  Req,
   BadRequestException,
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { OrdersService } from './orders.service';
 import { PaymentsService } from '../payments/payments.service';
@@ -32,10 +34,11 @@ export class OrdersController {
    */
   @Get()
   async listOrders(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Headers('authorization') authHeader: string,
     @Query() query: ListOrdersDto
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -50,10 +53,11 @@ export class OrdersController {
    */
   @Get(':id')
   async getOrder(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Headers('authorization') authHeader: string,
     @Param('id') orderId: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -69,10 +73,11 @@ export class OrdersController {
   @Throttle({ medium: { limit: 5, ttl: 60000 } }) // 5 lookups per minute to prevent enumeration
   @Get('lookup/:orderNumber')
   async lookupOrder(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('orderNumber') orderNumber: string,
     @Query('email') email: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -88,10 +93,11 @@ export class OrdersController {
    */
   @Post(':id/cancel')
   async cancelOrder(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Headers('authorization') authHeader: string,
     @Param('id') orderId: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -112,8 +118,9 @@ export class OrdersController {
   @Get('admin/stats')
   @UseGuards(StoreAdminGuard)
   async getOrderStats(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -127,9 +134,10 @@ export class OrdersController {
   @Get('admin/all')
   @UseGuards(StoreAdminGuard)
   async listAllOrders(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Query() query: ListOrdersDto & { search?: string }
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -143,9 +151,10 @@ export class OrdersController {
   @Get('admin/:id')
   @UseGuards(StoreAdminGuard)
   async getOrderAdmin(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') orderId: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -159,10 +168,11 @@ export class OrdersController {
   @Put('admin/:id/status')
   @UseGuards(StoreAdminGuard)
   async updateOrderStatus(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') orderId: string,
     @Body() body: { status: string; carrier?: string; trackingNumber?: string; adminNotes?: string }
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -180,10 +190,11 @@ export class OrdersController {
   @Post('admin/:id/refund')
   @UseGuards(StoreAdminGuard)
   async refundOrder(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') orderId: string,
     @Body() body: { amount?: number; reason?: string }
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }

@@ -5,10 +5,11 @@ import {
   Param,
   Query,
   Body,
-  Headers,
+  Req,
   BadRequestException,
   UseGuards,
 } from '@nestjs/common';
+import { Request } from 'express';
 import {
   IsOptional,
   IsString,
@@ -67,12 +68,13 @@ export class AdminCustomersController {
    */
   @Get()
   async listCustomers(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Query('search') search?: string,
     @Query('segment') segment?: string,
     @Query('page') page?: string,
     @Query('limit') limit?: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -90,9 +92,10 @@ export class AdminCustomersController {
    */
   @Get(':id')
   async getCustomer(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') customerId: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -105,9 +108,10 @@ export class AdminCustomersController {
    */
   @Get(':id/orders')
   async getCustomerOrders(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') customerId: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -120,10 +124,11 @@ export class AdminCustomersController {
    */
   @Put(':id')
   async updateCustomer(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') customerId: string,
     @Body() body: UpdateCustomerDto
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -136,10 +141,11 @@ export class AdminCustomersController {
    */
   @Put(':id/notes')
   async updateCustomerNotes(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') customerId: string,
     @Body() body: UpdateCustomerNotesDto
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }

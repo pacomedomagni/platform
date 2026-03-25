@@ -28,8 +28,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
   private inventorySyncInterval: ReturnType<typeof setInterval> | null = null;
   private readonly SYNC_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
   private readonly INVENTORY_SYNC_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
-  // In-memory lock to prevent concurrent inventory updates for the same SKU
-  private readonly inventoryLocks = new Map<string, Promise<void>>();
+  // M10: In-memory lock removed; using DistributedLockService instead
 
   constructor(
     private prisma: PrismaService,
@@ -811,28 +810,8 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Acquire a per-SKU lock to prevent concurrent read-modify-write on the same inventory item.
-   * Returns a release function.
-   */
-  private async acquireSkuLock(sku: string): Promise<() => void> {
-    // Wait for any existing lock on this SKU
-    while (this.inventoryLocks.has(sku)) {
-      await this.inventoryLocks.get(sku);
-    }
-    let release: () => void;
-    const lockPromise = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    this.inventoryLocks.set(sku, lockPromise);
-    return () => {
-      this.inventoryLocks.delete(sku);
-      release!();
-    };
-  }
-
-  /**
-   * Update inventory for a single listing with SKU-level locking.
-   * Prevents concurrent read-modify-write race conditions.
+   * Update inventory for a single listing with distributed SKU-level locking.
+   * M10: Replaced in-memory Map lock with DistributedLockService to work across instances.
    */
   private async syncListingInventoryWithLock(
     connection: { id: string; tenantId: string },
@@ -840,7 +819,13 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
   ): Promise<void> {
     if (!listing.warehouseId || !listing.productListing) return;
 
-    const release = await this.acquireSkuLock(listing.sku);
+    const lockKey = `ebay:sku:${connection.id}:${listing.sku}`;
+    const acquired = await this.distributedLock.acquire(lockKey, 30);
+    if (!acquired) {
+      this.logger.debug(`SKU lock not acquired for ${listing.sku}, skipping`);
+      return;
+    }
+
     try {
       const balance = await this.prisma.warehouseItemBalance.findUnique({
         where: {
@@ -874,7 +859,7 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
         `Inventory sync: updated listing ${listing.id} (SKU ${listing.sku}) to qty ${availableQty}`
       );
     } finally {
-      release();
+      await this.distributedLock.release(lockKey);
     }
   }
 

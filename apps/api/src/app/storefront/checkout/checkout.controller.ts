@@ -7,15 +7,20 @@ import {
   Param,
   Body,
   Headers,
+  Req,
   BadRequestException,
   ForbiddenException,
+  UseGuards,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { CheckoutService } from './checkout.service';
 import { CustomerAuthService } from '../auth/customer-auth.service';
+import { StorePublishedGuard } from '../../common/guards/store-published.guard';
 import { CreateCheckoutDto, UpdateCheckoutDto } from './dto';
 
 @Controller('store/checkout')
+@UseGuards(StorePublishedGuard)
 export class CheckoutController {
   constructor(
     private readonly checkoutService: CheckoutService,
@@ -67,10 +72,11 @@ export class CheckoutController {
   @Post()
   @Throttle({ medium: { limit: 10, ttl: 60000 } }) // 10 checkouts per minute - strict to prevent abuse
   async createCheckout(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Headers('authorization') authHeader: string | undefined,
     @Body() dto: CreateCheckoutDto
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -85,11 +91,12 @@ export class CheckoutController {
   @Get(':id')
   @Throttle({ medium: { limit: 30, ttl: 60000 } }) // 30 requests per minute
   async getCheckout(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') orderId: string,
     @Headers('authorization') authHeader?: string,
     @Headers('x-customer-email') email?: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -108,11 +115,12 @@ export class CheckoutController {
   @Get('order/:orderNumber')
   @Throttle({ medium: { limit: 30, ttl: 60000 } }) // 30 requests per minute
   async getCheckoutByOrderNumber(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('orderNumber') orderNumber: string,
     @Headers('authorization') authHeader?: string,
     @Headers('x-customer-email') email?: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -138,12 +146,13 @@ export class CheckoutController {
   @Put(':id')
   @Throttle({ medium: { limit: 10, ttl: 60000 } }) // 10 requests per minute
   async updateCheckout(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') orderId: string,
     @Body() dto: UpdateCheckoutDto,
     @Headers('authorization') authHeader?: string,
     @Headers('x-customer-email') email?: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -162,11 +171,12 @@ export class CheckoutController {
   @Post(':id/retry-payment')
   @Throttle({ medium: { limit: 5, ttl: 60000 } })
   async retryPaymentIntent(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') orderId: string,
     @Headers('authorization') authHeader?: string,
     @Headers('x-customer-email') email?: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -184,11 +194,12 @@ export class CheckoutController {
   @Delete(':id')
   @Throttle({ medium: { limit: 5, ttl: 60000 } }) // 5 requests per minute - strict for cancellations
   async cancelCheckout(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') orderId: string,
     @Headers('authorization') authHeader?: string,
     @Headers('x-customer-email') email?: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }

@@ -92,6 +92,22 @@ export class StockMovementService {
     return this.prisma.$transaction(async (tx) => {
       // Set RLS tenant context
       await tx.$executeRaw`SELECT set_config('app.tenant', ${ctx.tenantId}, true)`;
+
+      // Idempotency check: if a reference is provided, check if a movement with the same reference already exists
+      if (dto.reference) {
+        const existing = await tx.auditLog.findFirst({
+          where: {
+            tenantId: ctx.tenantId,
+            docType: 'StockMovement',
+            meta: { path: ['reference'], equals: dto.reference },
+          },
+        });
+        if (existing) {
+          this.logger.log(`Stock movement already exists for reference: ${dto.reference}, skipping`);
+          return { voucherNo: existing.docName, alreadyExists: true };
+        }
+      }
+
       // Validate warehouse (exclude soft-deleted)
       const warehouse = await tx.warehouse.findFirst({
         where: { tenantId: ctx.tenantId, code: dto.warehouseCode, deletedAt: null },

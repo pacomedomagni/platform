@@ -32,7 +32,8 @@ export class PaymentsController {
    * GET /api/v1/store/payments/config
    */
   @Get('config')
-  async getConfig(@Headers('x-tenant-id') tenantId: string) {
+  async getConfig(@Req() req: Request) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     return this.paymentsService.getConfig(tenantId);
   }
 
@@ -60,10 +61,11 @@ export class PaymentsController {
    */
   @Get('order/:orderId')
   async getOrderPayments(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('orderId') orderId: string,
     @Headers('authorization') authHeader?: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -89,9 +91,10 @@ export class PaymentsController {
   @Post('refund')
   @UseGuards(StoreAdminGuard)
   async createRefund(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Body() dto: CreateRefundDto
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -110,9 +113,10 @@ export class PaymentsController {
   @Post('square')
   @UseGuards(CustomerAuthGuard)
   async processSquarePayment(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Body() dto: SquarePaymentDto,
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }

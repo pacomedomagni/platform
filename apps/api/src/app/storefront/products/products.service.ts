@@ -872,8 +872,12 @@ export class ProductsService {
             actualQty: 0,
             reservedQty: 0,
           },
-        }).catch(() => {
-          // Balance may already exist — ignore
+        }).catch((err: any) => {
+          if (err?.code === 'P2002') {
+            // Balance already exists for this item+warehouse — ignore
+            return;
+          }
+          throw err; // Re-throw non-duplicate errors
         });
       }
 

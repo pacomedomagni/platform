@@ -364,15 +364,20 @@ export class PaymentsService {
       return;
     }
 
-    // Idempotency: skip if stock movement already exists for this order
-    const existingPosting = await this.prisma.stockPosting.findFirst({
+    // Idempotency: skip if a stock movement audit log already exists for this order
+    // The reference field is stored in auditLog.meta as JSON, and docType='StockMovement'
+    const existingMovement = await this.prisma.auditLog.findFirst({
       where: {
         tenantId: order.tenantId,
-        voucherNo: { contains: order.orderNumber },
-        voucherType: { contains: 'Order' },
+        docType: 'StockMovement',
+        action: 'STOCK_MOVEMENT_CREATED',
+        meta: {
+          path: ['reference'],
+          equals: `Order ${order.orderNumber}`,
+        },
       },
     });
-    if (existingPosting) {
+    if (existingMovement) {
       this.logger.log(`Stock already deducted for order ${order.orderNumber}, skipping`);
       return;
     }

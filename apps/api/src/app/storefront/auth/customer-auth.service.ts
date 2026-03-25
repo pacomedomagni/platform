@@ -259,16 +259,22 @@ export class CustomerAuthService implements OnModuleInit {
     const passwordHash = await bcrypt.hash(dto.newPassword, SALT_ROUNDS);
 
     // Increment tokenVersion to revoke existing tokens + invalidate pending reset tokens
-    const [updatedCustomer] = await this.prisma.$transaction([
-      this.prisma.storeCustomer.update({
+    const updatedCustomer = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.storeCustomer.update({
         where: { id: customerId },
         data: { passwordHash, tokenVersion: { increment: 1 } },
-      }),
-      this.prisma.passwordReset.updateMany({
+      });
+      await tx.passwordReset.updateMany({
         where: { customerId, usedAt: null },
         data: { usedAt: new Date() },
-      }),
-    ]);
+      });
+      // Revoke all refresh tokens (force re-login on all devices)
+      await tx.refreshToken.updateMany({
+        where: { customerId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      return updated;
+    });
 
     // H3: Return a new JWT token with the updated tokenVersion so the frontend can update its stored token
     const newToken = this.generateToken(customerId, tenantId, updatedCustomer.tokenVersion ?? 0);
@@ -346,16 +352,21 @@ export class CustomerAuthService implements OnModuleInit {
 
     // Update password and mark token as used
     // Increment tokenVersion to revoke existing tokens + invalidate ALL pending reset tokens
-    await this.prisma.$transaction([
-      this.prisma.storeCustomer.update({
+    await this.prisma.$transaction(async (tx) => {
+      await tx.storeCustomer.update({
         where: { id: resetRecord.customerId },
         data: { passwordHash, tokenVersion: { increment: 1 } },
-      }),
-      this.prisma.passwordReset.updateMany({
+      });
+      await tx.passwordReset.updateMany({
         where: { customerId: resetRecord.customerId, usedAt: null },
         data: { usedAt: new Date() },
-      }),
-    ]);
+      });
+      // Revoke all refresh tokens (force re-login on all devices)
+      await tx.refreshToken.updateMany({
+        where: { customerId: resetRecord.customerId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    });
 
     return { success: true, message: 'Password reset successfully' };
   }
@@ -709,31 +720,31 @@ export class CustomerAuthService implements OnModuleInit {
    * Refresh access token using a valid refresh token
    */
   async refreshAccessToken(refreshTokenValue: string) {
-    const tokenRecord = await this.prisma.refreshToken.findUnique({
-      where: { token: refreshTokenValue },
-      include: { customer: true },
-    });
-
-    if (!tokenRecord || !tokenRecord.customer) {
-      throw new UnauthorizedException('Invalid refresh token');
-    }
-
-    if (tokenRecord.revokedAt) {
-      throw new UnauthorizedException('Refresh token has been revoked');
-    }
-
-    if (tokenRecord.expiresAt < new Date()) {
-      throw new UnauthorizedException('Refresh token has expired');
-    }
-
-    const customer = tokenRecord.customer;
-
-    if (!customer.isActive) {
-      throw new UnauthorizedException('Account is deactivated');
-    }
-
-    // Revoke old refresh token and create new one atomically (Fix #41)
+    // Wrap entire read-validate-rotate flow in a single transaction to prevent double-rotation
     const { token, newRefreshToken } = await this.prisma.$transaction(async (tx) => {
+      const tokenRecord = await tx.refreshToken.findUnique({
+        where: { token: refreshTokenValue },
+        include: { customer: true },
+      });
+
+      if (!tokenRecord || !tokenRecord.customer) {
+        throw new UnauthorizedException('Invalid refresh token');
+      }
+
+      if (tokenRecord.revokedAt) {
+        throw new UnauthorizedException('Refresh token has been revoked');
+      }
+
+      if (tokenRecord.expiresAt < new Date()) {
+        throw new UnauthorizedException('Refresh token has expired');
+      }
+
+      const customer = tokenRecord.customer;
+
+      if (!customer.isActive) {
+        throw new UnauthorizedException('Account is deactivated');
+      }
+
       // Revoke old refresh token (rotation)
       await tx.refreshToken.update({
         where: { id: tokenRecord.id },
@@ -741,23 +752,23 @@ export class CustomerAuthService implements OnModuleInit {
       });
 
       // Create new refresh token
-      const refreshTokenValue = crypto.randomBytes(64).toString('hex');
+      const newTokenValue = crypto.randomBytes(64).toString('hex');
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_EXPIRY_DAYS);
 
       await tx.refreshToken.create({
         data: {
-          token: refreshTokenValue,
+          token: newTokenValue,
           customerId: customer.id,
           tenantId: customer.tenantId,
           expiresAt,
         },
       });
 
-      // Issue new access token
+      // Issue new access token (JWT signing is synchronous, safe inside tx)
       const accessToken = this.generateToken(customer.id, customer.tenantId, customer.tokenVersion ?? 0);
 
-      return { token: accessToken, newRefreshToken: refreshTokenValue };
+      return { token: accessToken, newRefreshToken: newTokenValue };
     });
 
     return {

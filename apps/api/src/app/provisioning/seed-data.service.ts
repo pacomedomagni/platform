@@ -185,16 +185,21 @@ export class SeedDataService {
       }
     }
 
-    // Create an initial audit log entry
-    await this.prisma.auditLog.create({
-      data: {
-        tenantId,
-        action: 'CREATE',
-        docType: 'Tenant',
-        docName: tenantId,
-        meta: { event: 'tenant_provisioned', timestamp: new Date().toISOString() },
-      },
+    // Create an initial audit log entry (idempotent: skip if already exists from prior run)
+    const existingLog = await this.prisma.auditLog.findFirst({
+      where: { tenantId, action: 'CREATE', docType: 'Tenant', docName: tenantId },
     });
+    if (!existingLog) {
+      await this.prisma.auditLog.create({
+        data: {
+          tenantId,
+          action: 'CREATE',
+          docType: 'Tenant',
+          docName: tenantId,
+          meta: { event: 'tenant_provisioned', timestamp: new Date().toISOString() },
+        },
+      });
+    }
 
     this.logger.debug(`Seeded defaults for tenant ${tenantId}`);
   }

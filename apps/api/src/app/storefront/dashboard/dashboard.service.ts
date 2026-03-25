@@ -1,6 +1,7 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { StripeConnectService } from '../../onboarding/stripe-connect.service';
+import { AuditLogService } from '../../operations/audit-log.service';
 
 @Injectable()
 export class DashboardService {
@@ -9,6 +10,7 @@ export class DashboardService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly stripeConnectService: StripeConnectService,
+    private readonly auditLog: AuditLogService,
   ) {}
 
   async getDashboardStats(tenantId: string) {
@@ -212,13 +214,40 @@ export class DashboardService {
       data: { storePublished: true, storePublishedAt: new Date() },
     });
 
+    await this.auditLog.log({ tenantId }, {
+      action: 'STORE_PUBLISHED',
+      docType: 'Tenant',
+      docName: tenantId,
+    });
+
     return { success: true, storePublished: true };
   }
 
   async unpublishStore(tenantId: string) {
+    // Check for in-flight orders
+    const activeOrders = await this.prisma.order.count({
+      where: {
+        tenantId,
+        status: { in: ['PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPED'] },
+      },
+    });
+
+    if (activeOrders > 0) {
+      throw new BadRequestException(
+        `Cannot unpublish store: ${activeOrders} orders are still in progress. ` +
+        `Please complete or cancel all active orders first.`
+      );
+    }
+
     await this.prisma.tenant.update({
       where: { id: tenantId },
       data: { storePublished: false },
+    });
+
+    await this.auditLog.log({ tenantId }, {
+      action: 'STORE_UNPUBLISHED',
+      docType: 'Tenant',
+      docName: tenantId,
     });
 
     return { success: true, storePublished: false };

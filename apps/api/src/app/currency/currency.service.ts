@@ -1,6 +1,7 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { PrismaService, Prisma } from '@platform/db';
 import { StoreCurrency } from '@prisma/client';
+import { AuditLogService } from '../operations/audit-log.service';
 import {
   CreateStoreCurrencyDto,
   UpdateStoreCurrencyDto,
@@ -41,7 +42,10 @@ const CURRENCY_DATA: Record<string, { symbol: string; name: string }> = {
 export class CurrencyService {
   private readonly logger = new Logger(CurrencyService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditLog: AuditLogService,
+  ) {}
 
   // ==========================================
   // Store Currency Management
@@ -180,6 +184,13 @@ export class CurrencyService {
       }),
     ]);
 
+    await this.auditLog.log({ tenantId: ctx.tenantId }, {
+      action: 'BASE_CURRENCY_CHANGED',
+      docType: 'StoreCurrency',
+      docName: currencyCode.toUpperCase(),
+      meta: { tenantId: ctx.tenantId },
+    });
+
     return { success: true, baseCurrency: currencyCode.toUpperCase() };
   }
 
@@ -201,6 +212,13 @@ export class CurrencyService {
     );
 
     await this.prisma.$transaction(updates);
+
+    await this.auditLog.log({ tenantId: ctx.tenantId }, {
+      action: 'EXCHANGE_RATES_UPDATED',
+      docType: 'StoreCurrency',
+      docName: ctx.tenantId,
+      meta: { currencies: Object.keys(rates) },
+    });
 
     return { updated: Object.keys(rates).length };
   }

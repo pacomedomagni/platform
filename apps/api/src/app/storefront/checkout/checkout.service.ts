@@ -329,6 +329,14 @@ export class CheckoutService {
           cartId: cart.id,
           email: dto.email,
           phone: dto.phone,
+          // TODO: Multi-currency checkout not yet implemented.
+          // Currently all orders are created in the tenant's base currency.
+          // The storefront may display prices in the customer's preferred currency,
+          // but checkout always charges in base currency. To implement multi-currency:
+          // 1. Accept customer's currency in CreateCheckoutDto
+          // 2. Convert all line item prices from base to customer currency at checkout
+          // 3. Create payment intent in customer's currency
+          // 4. Store both base and customer currency amounts on the order
           currency: tenant?.baseCurrency || 'USD',
           couponCode: cart.couponCode,
 
@@ -376,6 +384,7 @@ export class CheckoutService {
             create: cart.items.map((item) => ({
               tenantId,
               productId: item.productId,
+              variantId: item.variantId || null,
               sku: item.product.item.code,
               name: item.product.displayName,
               description: item.product.shortDescription,

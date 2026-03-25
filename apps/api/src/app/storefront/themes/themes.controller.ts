@@ -6,10 +6,11 @@ import {
   Delete,
   Param,
   Body,
-  Headers,
+  Req,
   BadRequestException,
   UseGuards,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { ThemesService } from './themes.service';
 import { CreateThemeDto, UpdateThemeDto } from './dto';
 import { StoreAdminGuard } from '@platform/auth';
@@ -23,7 +24,8 @@ export class ThemesController {
    * GET /api/v1/store/themes
    */
   @Get('themes')
-  async listThemes(@Headers('x-tenant-id') tenantId: string) {
+  async listThemes(@Req() req: Request) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -35,7 +37,8 @@ export class ThemesController {
    * GET /api/v1/store/themes/active
    */
   @Get('themes/active')
-  async getActiveTheme(@Headers('x-tenant-id') tenantId: string) {
+  async getActiveTheme(@Req() req: Request) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -71,9 +74,10 @@ export class ThemesController {
    */
   @Get('themes/:id')
   async getThemeById(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') id: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -89,9 +93,10 @@ export class ThemesController {
   @Post('admin/themes')
   @UseGuards(StoreAdminGuard)
   async createTheme(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Body() dto: CreateThemeDto
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -105,9 +110,10 @@ export class ThemesController {
   @Post('admin/themes/validate')
   @UseGuards(StoreAdminGuard)
   async validateTheme(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Body() dto: CreateThemeDto
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) throw new BadRequestException('Tenant ID required');
     // Validation is done by the global validation pipe on CreateThemeDto
     return { valid: true };
@@ -120,10 +126,11 @@ export class ThemesController {
   @Post('admin/themes/from-preset/:presetType')
   @UseGuards(StoreAdminGuard)
   async createFromPreset(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('presetType') presetType: string,
     @Body() body: { name?: string }
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) throw new BadRequestException('Tenant ID required');
     return this.themesService.resetToPreset(tenantId, presetType);
   }
@@ -135,10 +142,11 @@ export class ThemesController {
   @Put('admin/themes/:id')
   @UseGuards(StoreAdminGuard)
   async updateTheme(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') id: string,
     @Body() dto: UpdateThemeDto
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -152,9 +160,10 @@ export class ThemesController {
   @Delete('admin/themes/:id')
   @UseGuards(StoreAdminGuard)
   async deleteTheme(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') id: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -168,9 +177,10 @@ export class ThemesController {
   @Post('admin/themes/:id/activate')
   @UseGuards(StoreAdminGuard)
   async activateTheme(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') id: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -185,10 +195,11 @@ export class ThemesController {
   @Post('admin/themes/:id/duplicate')
   @UseGuards(StoreAdminGuard)
   async duplicateTheme(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') id: string,
     @Body('name') name: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -205,9 +216,10 @@ export class ThemesController {
   @Post('admin/themes/:id/reset')
   @UseGuards(StoreAdminGuard)
   async resetTheme(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') id: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) throw new BadRequestException('Tenant ID required');
     const theme = await this.themesService.getThemeById(id, tenantId);
     if (!theme) throw new BadRequestException('Theme not found');
@@ -224,9 +236,10 @@ export class ThemesController {
   @Post('admin/themes/reset-preset')
   @UseGuards(StoreAdminGuard)
   async resetToPreset(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Body('presetSlug') presetSlug: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }

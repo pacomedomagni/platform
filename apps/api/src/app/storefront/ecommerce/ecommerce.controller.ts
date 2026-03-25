@@ -24,6 +24,7 @@ import { ReviewsService } from './reviews.service';
 import { GiftCardsService } from './gift-cards.service';
 import { WishlistService } from './wishlist.service';
 import { StoreAdminGuard } from '@platform/auth';
+import { StorePublishedGuard } from '../../common/guards/store-published.guard';
 import { Tenant } from '../../tenant.middleware';
 import {
   CreateAttributeTypeDto,
@@ -56,6 +57,7 @@ export class EcommerceController {
   // ============ VARIANTS - PUBLIC ============
 
   @Get('products/:productId/variants')
+  @UseGuards(StorePublishedGuard)
   async listVariants(
     @Tenant() tenantId: string,
     @Param('productId') productId: string
@@ -65,6 +67,7 @@ export class EcommerceController {
   }
 
   @Get('variants/:id')
+  @UseGuards(StorePublishedGuard)
   async getVariant(
     @Tenant() tenantId: string,
     @Param('id') id: string
@@ -217,6 +220,7 @@ export class EcommerceController {
   // ============ REVIEWS - PUBLIC ============
 
   @Get('products/:productId/reviews')
+  @UseGuards(StorePublishedGuard)
   async getProductReviews(
     @Tenant() tenantId: string,
     @Param('productId') productId: string,
@@ -235,6 +239,7 @@ export class EcommerceController {
   }
 
   @Post('products/:productId/reviews')
+  @UseGuards(StorePublishedGuard)
   async createReview(
     @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
@@ -248,6 +253,7 @@ export class EcommerceController {
   }
 
   @Post('reviews/upload-images')
+  @UseGuards(StorePublishedGuard)
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseInterceptors(FilesInterceptor('images', 5, { limits: { fileSize: 5 * 1024 * 1024 } }))
   async uploadReviewImages(
@@ -283,6 +289,7 @@ export class EcommerceController {
   }
 
   @Post('reviews/:reviewId/vote')
+  @UseGuards(StorePublishedGuard)
   async voteReview(
     @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
@@ -383,6 +390,7 @@ export class EcommerceController {
 
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Get('gift-cards/check')
+  @UseGuards(StorePublishedGuard)
   async checkGiftCardBalance(
     @Tenant() tenantId: string,
     @Query('code') code: string,
@@ -465,6 +473,7 @@ export class EcommerceController {
   // ============ WISHLIST - AUTHENTICATED ============
 
   @Get('wishlist')
+  @UseGuards(StorePublishedGuard)
   async getWishlists(
     @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string
@@ -475,6 +484,7 @@ export class EcommerceController {
   }
 
   @Get('wishlist/:id')
+  @UseGuards(StorePublishedGuard)
   async getWishlist(
     @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
@@ -486,6 +496,7 @@ export class EcommerceController {
   }
 
   @Post('wishlist')
+  @UseGuards(StorePublishedGuard)
   async createWishlist(
     @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
@@ -497,6 +508,7 @@ export class EcommerceController {
   }
 
   @Put('wishlist/:id')
+  @UseGuards(StorePublishedGuard)
   async updateWishlist(
     @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
@@ -509,6 +521,7 @@ export class EcommerceController {
   }
 
   @Delete('wishlist/:id')
+  @UseGuards(StorePublishedGuard)
   async deleteWishlist(
     @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
@@ -520,6 +533,7 @@ export class EcommerceController {
   }
 
   @Post('wishlist/items')
+  @UseGuards(StorePublishedGuard)
   async addWishlistItem(
     @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
@@ -531,6 +545,7 @@ export class EcommerceController {
   }
 
   @Post('wishlist/:wishlistId/items')
+  @UseGuards(StorePublishedGuard)
   async addItemToWishlist(
     @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
@@ -543,6 +558,7 @@ export class EcommerceController {
   }
 
   @Delete('wishlist/items/:itemId')
+  @UseGuards(StorePublishedGuard)
   async removeWishlistItem(
     @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
@@ -554,6 +570,7 @@ export class EcommerceController {
   }
 
   @Post('wishlist/items/:itemId/move-to-cart')
+  @UseGuards(StorePublishedGuard)
   async moveWishlistItemToCart(
     @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
@@ -569,6 +586,7 @@ export class EcommerceController {
   // ============ WISHLIST - PUBLIC (SHARED) ============
 
   @Get('wishlist/shared/:shareToken')
+  @UseGuards(StorePublishedGuard)
   async getSharedWishlist(
     @Tenant() tenantId: string,
     @Param('shareToken') shareToken: string,

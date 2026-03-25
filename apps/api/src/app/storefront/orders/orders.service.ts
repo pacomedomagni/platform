@@ -560,29 +560,38 @@ export class OrdersService {
    */
   private async reverseGiftCardForOrder(tenantId: string, orderId: string) {
     try {
-      const existingRefund = await this.prisma.giftCardTransaction.findFirst({
-        where: { orderId, tenantId, type: 'refund' }
-      });
-      if (existingRefund) return; // Already reversed
+      // Use a transaction with FOR UPDATE to prevent concurrent double-reversal
+      await this.prisma.$transaction(async (tx) => {
+        // Lock the gift card row to serialize concurrent reversal attempts
+        const gcTransaction = await tx.giftCardTransaction.findFirst({
+          where: { orderId, tenantId, type: 'redemption' },
+          include: { giftCard: true },
+        });
 
-      const gcTransaction = await this.prisma.giftCardTransaction.findFirst({
-        where: { orderId, tenantId, type: 'redemption' },
-        include: { giftCard: true },
-      });
+        if (!gcTransaction || !gcTransaction.giftCard) return;
 
-      if (!gcTransaction || !gcTransaction.giftCard) return;
+        // Check for existing refund INSIDE the transaction (after potential lock wait)
+        const existingRefund = await tx.giftCardTransaction.findFirst({
+          where: { orderId, tenantId, type: 'refund' }
+        });
+        if (existingRefund) return; // Already reversed by concurrent request
 
-      const refundAmount = Math.abs(Number(gcTransaction.amount));
-      const currentBalance = Number(gcTransaction.giftCard.currentBalance);
-      const restoredBalance = currentBalance + refundAmount;
+        // Lock the gift card row to get fresh balance
+        const [lockedCard] = await tx.$queryRaw<any[]>`
+          SELECT * FROM gift_cards WHERE id = ${gcTransaction.giftCardId} FOR UPDATE
+        `;
+        if (!lockedCard) return;
 
-      const order = await this.prisma.order.findUnique({
-        where: { id: orderId },
-        select: { orderNumber: true },
-      });
+        const refundAmount = Math.abs(Number(gcTransaction.amount));
+        const currentBalance = Number(lockedCard.currentBalance);
+        const restoredBalance = currentBalance + refundAmount;
 
-      await this.prisma.$transaction([
-        this.prisma.giftCardTransaction.create({
+        const order = await tx.order.findUnique({
+          where: { id: orderId },
+          select: { orderNumber: true },
+        });
+
+        await tx.giftCardTransaction.create({
           data: {
             tenantId,
             giftCardId: gcTransaction.giftCardId,
@@ -593,17 +602,18 @@ export class OrdersService {
             orderId,
             notes: `Reversed due to order cancellation (${order?.orderNumber || orderId})`,
           },
-        }),
-        this.prisma.giftCard.update({
+        });
+
+        await tx.giftCard.update({
           where: { id: gcTransaction.giftCardId },
           data: {
             currentBalance: restoredBalance,
             status: 'active',
           },
-        }),
-      ]);
+        });
+      });
 
-      this.logger.log(`Gift card ${gcTransaction.giftCardId} balance restored by ${refundAmount} for cancelled order ${orderId}`);
+      this.logger.log(`Gift card balance restored for cancelled order ${orderId}`);
     } catch (error) {
       this.logger.error(`Failed to reverse gift card for order ${orderId}:`, error);
 

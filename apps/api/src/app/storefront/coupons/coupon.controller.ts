@@ -4,13 +4,14 @@ import {
   Post,
   Put,
   Delete,
-  Headers,
+  Req,
   Param,
   Query,
   Body,
   BadRequestException,
   UseGuards,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { StoreAdminGuard } from '@platform/auth';
 import { CouponService } from './coupon.service';
 import { CreateCouponDto, UpdateCouponDto, ListCouponsDto } from './coupon.dto';
@@ -26,9 +27,10 @@ export class CouponController {
    */
   @Get()
   async listCoupons(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Query() query: ListCouponsDto,
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) throw new BadRequestException('Tenant ID required');
     return this.couponService.listCoupons(tenantId, query);
   }
@@ -39,9 +41,10 @@ export class CouponController {
    */
   @Get(':id')
   async getCoupon(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') id: string,
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) throw new BadRequestException('Tenant ID required');
     return this.couponService.getCoupon(tenantId, id);
   }
@@ -52,9 +55,10 @@ export class CouponController {
    */
   @Post()
   async createCoupon(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Body() dto: CreateCouponDto,
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) throw new BadRequestException('Tenant ID required');
     return this.couponService.createCoupon(tenantId, dto);
   }
@@ -65,10 +69,11 @@ export class CouponController {
    */
   @Put(':id')
   async updateCoupon(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') id: string,
     @Body() dto: UpdateCouponDto,
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) throw new BadRequestException('Tenant ID required');
     return this.couponService.updateCoupon(tenantId, id, dto);
   }
@@ -79,9 +84,10 @@ export class CouponController {
    */
   @Delete(':id')
   async deleteCoupon(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') id: string,
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) throw new BadRequestException('Tenant ID required');
     return this.couponService.deleteCoupon(tenantId, id);
   }

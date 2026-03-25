@@ -7,15 +7,20 @@ import {
   Param,
   Body,
   Headers,
+  Req,
   BadRequestException,
   ForbiddenException,
+  UseGuards,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { CartService } from './cart.service';
 import { CustomerAuthService } from '../auth/customer-auth.service';
+import { StorePublishedGuard } from '../../common/guards/store-published.guard';
 import { AddToCartDto, UpdateCartItemDto, ApplyCouponDto, MergeCartDto } from './dto';
 
 @Controller('store/cart')
+@UseGuards(StorePublishedGuard)
 export class CartController {
   constructor(
     private readonly cartService: CartService,
@@ -72,10 +77,11 @@ export class CartController {
   @Get()
   @Throttle({ medium: { limit: 30, ttl: 60000 } }) // 30 requests per minute
   async getCart(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -90,11 +96,12 @@ export class CartController {
   @Get(':id')
   @Throttle({ medium: { limit: 30, ttl: 60000 } }) // 30 requests per minute
   async getCartById(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') cartId: string,
     @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -113,12 +120,13 @@ export class CartController {
   @Post(':id/items')
   @Throttle({ medium: { limit: 20, ttl: 60000 } }) // 20 requests per minute
   async addItem(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') cartId: string,
     @Body() dto: AddToCartDto,
     @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -137,13 +145,14 @@ export class CartController {
   @Put(':id/items/:itemId')
   @Throttle({ medium: { limit: 20, ttl: 60000 } }) // 20 requests per minute
   async updateItem(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') cartId: string,
     @Param('itemId') itemId: string,
     @Body() dto: UpdateCartItemDto,
     @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -162,12 +171,13 @@ export class CartController {
   @Delete(':id/items/:itemId')
   @Throttle({ medium: { limit: 20, ttl: 60000 } }) // 20 requests per minute
   async removeItem(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') cartId: string,
     @Param('itemId') itemId: string,
     @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -186,12 +196,13 @@ export class CartController {
   @Post(':id/coupon')
   @Throttle({ medium: { limit: 5, ttl: 60000 } }) // 5 requests per minute - strict to prevent coupon brute-forcing
   async applyCoupon(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') cartId: string,
     @Body() dto: ApplyCouponDto,
     @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -210,11 +221,12 @@ export class CartController {
   @Delete(':id/coupon')
   @Throttle({ medium: { limit: 10, ttl: 60000 } }) // 10 requests per minute
   async removeCoupon(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') cartId: string,
     @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -233,10 +245,11 @@ export class CartController {
   @Post('merge')
   @Throttle({ medium: { limit: 10, ttl: 60000 } }) // 10 requests per minute
   async mergeCart(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Headers('authorization') authHeader: string,
     @Body() dto: MergeCartDto
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -257,11 +270,12 @@ export class CartController {
   @Delete(':id')
   @Throttle({ medium: { limit: 10, ttl: 60000 } }) // 10 requests per minute
   async clearCart(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Param('id') cartId: string,
     @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }

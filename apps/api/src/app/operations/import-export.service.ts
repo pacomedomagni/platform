@@ -452,10 +452,14 @@ export class ImportExportService {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
+    let aborted = false;
+    res.on('close', () => { aborted = true; });
+
     let isFirst = true;
     let headers: string[] = [];
 
     for await (const chunk of generator) {
+      if (aborted) break;
       if (chunk.length === 0) continue;
 
       if (isFirst) {
@@ -509,10 +513,14 @@ export class ImportExportService {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
+    let aborted = false;
+    res.on('close', () => { aborted = true; });
+
     let isFirst = true;
     res.write('[\n');
 
     for await (const chunk of generator) {
+      if (aborted) break;
       for (const row of chunk) {
         if (!isFirst) {
           res.write(',\n');

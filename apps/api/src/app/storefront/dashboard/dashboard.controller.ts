@@ -2,10 +2,11 @@ import {
   Controller,
   Get,
   Post,
-  Headers,
+  Req,
   BadRequestException,
   UseGuards,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { StoreAdminGuard } from '@platform/auth';
 import { DashboardService } from './dashboard.service';
 
@@ -15,7 +16,8 @@ export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
 
   @Get()
-  async getDashboard(@Headers('x-tenant-id') tenantId: string) {
+  async getDashboard(@Req() req: Request) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -23,7 +25,8 @@ export class DashboardController {
   }
 
   @Get('readiness')
-  async getReadiness(@Headers('x-tenant-id') tenantId: string) {
+  async getReadiness(@Req() req: Request) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -31,7 +34,8 @@ export class DashboardController {
   }
 
   @Post('publish')
-  async publishStore(@Headers('x-tenant-id') tenantId: string) {
+  async publishStore(@Req() req: Request) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -39,7 +43,8 @@ export class DashboardController {
   }
 
   @Post('unpublish')
-  async unpublishStore(@Headers('x-tenant-id') tenantId: string) {
+  async unpublishStore(@Req() req: Request) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -47,7 +52,8 @@ export class DashboardController {
   }
 
   @Get('earnings')
-  async getEarnings(@Headers('x-tenant-id') tenantId: string) {
+  async getEarnings(@Req() req: Request) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -55,7 +61,8 @@ export class DashboardController {
   }
 
   @Get('inventory-alerts')
-  async getInventoryAlerts(@Headers('x-tenant-id') tenantId: string) {
+  async getInventoryAlerts(@Req() req: Request) {
+    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }

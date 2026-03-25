@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { AuditLogService } from '../../operations/audit-log.service';
 import { CreateZoneDto, UpdateZoneDto, CreateRateDto, CalculateShippingDto } from './shipping.dto';
 
 @Injectable()
 export class ShippingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditLog: AuditLogService,
+  ) {}
 
   // ── Zone CRUD ──
 
@@ -16,7 +20,7 @@ export class ShippingService {
       });
     }
 
-    return this.prisma.shippingZone.create({
+    const zone = await this.prisma.shippingZone.create({
       data: {
         tenantId,
         name: dto.name,
@@ -27,6 +31,15 @@ export class ShippingService {
       },
       include: { rates: true },
     });
+
+    await this.auditLog.log({ tenantId }, {
+      action: 'ZONE_CREATED',
+      docType: 'ShippingZone',
+      docName: zone.name,
+      meta: { zoneId: zone.id },
+    });
+
+    return zone;
   }
 
   async listZones(tenantId: string) {
@@ -55,7 +68,7 @@ export class ShippingService {
       });
     }
 
-    return this.prisma.shippingZone.update({
+    const updated = await this.prisma.shippingZone.update({
       where: { id: zoneId },
       data: {
         ...(dto.name !== undefined && { name: dto.name }),
@@ -66,6 +79,15 @@ export class ShippingService {
       },
       include: { rates: true },
     });
+
+    await this.auditLog.log({ tenantId }, {
+      action: 'ZONE_UPDATED',
+      docType: 'ShippingZone',
+      docName: updated.name,
+      meta: { zoneId },
+    });
+
+    return updated;
   }
 
   async deleteZone(tenantId: string, zoneId: string) {
@@ -75,6 +97,14 @@ export class ShippingService {
     if (!zone) throw new NotFoundException('Shipping zone not found');
 
     await this.prisma.shippingZone.delete({ where: { id: zoneId } });
+
+    await this.auditLog.log({ tenantId }, {
+      action: 'ZONE_DELETED',
+      docType: 'ShippingZone',
+      docName: zone.name,
+      meta: { zoneId },
+    });
+
     return { deleted: true };
   }
 

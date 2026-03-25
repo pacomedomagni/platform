@@ -1287,6 +1287,7 @@ export class BusinessLogicService {
                     }
                 }, { timeout: 30000 });
 
+                await this.updateDocStatus('Sales Order', doc.name, 'Cancelled', tenantId);
             },
             afterSave: (doc) => {
                 this.logger.log(`Sales Order ${doc.name} saved.`);
@@ -1443,10 +1444,24 @@ export class BusinessLogicService {
                     voucherNo: doc.name,
                     cancelTs: new Date(),
                 });
-                // Fix #6: Reverse GL entries on PR cancellation
-                await this.reverseGlEntries(tenantId, 'Purchase Receipt', doc.name);
-                // Fix #6: Reverse received_qty on linked Purchase Orders
-                await this.reversePurchaseReceiptFromPurchaseOrders(doc, tenantId);
+                // M11: Wrap GL and PO reversals in try/catch so a failure after stock cancel
+                // is logged clearly for manual intervention rather than leaving silent inconsistency.
+                try {
+                    await this.reverseGlEntries(tenantId, 'Purchase Receipt', doc.name);
+                } catch (glError) {
+                    this.logger.error(
+                        `CRITICAL: GL reversal failed for Purchase Receipt ${doc.name} after stock cancel succeeded. ` +
+                        `Manual GL reversal required. Error: ${(glError as Error)?.message || glError}`,
+                    );
+                }
+                try {
+                    await this.reversePurchaseReceiptFromPurchaseOrders(doc, tenantId);
+                } catch (poError) {
+                    this.logger.error(
+                        `CRITICAL: Purchase Order reversal failed for Purchase Receipt ${doc.name} after stock cancel succeeded. ` +
+                        `Manual PO qty reversal required. Error: ${(poError as Error)?.message || poError}`,
+                    );
+                }
             },
         });
     }
@@ -1489,8 +1504,9 @@ export class BusinessLogicService {
                       ? StockConsumptionStrategy.FIFO
 	                      : undefined;
 
+                const valuationData = new Map<string, { valuationRate: number; totalCost: number; qty: number }>();
                 for (const item of doc.items) {
-                    await this.stockService.issueStock({
+                    const result = await this.stockService.issueStock({
                         tenantId,
                         postingKey: `DN:${doc.name}:${item.id ?? item.idx ?? item.item_code ?? 'row'}`,
                         voucherType: 'Delivery Note',
@@ -1507,8 +1523,12 @@ export class BusinessLogicService {
                         strategy,
                         consumeReservation: true,
                     });
+                    if (result) {
+                        const key = item.id ?? item.idx ?? item.item_code ?? 'row';
+                        valuationData.set(String(key), result);
+                    }
                 }
-                await this.postDeliveryNoteToCOGS(doc, user);
+                await this.postDeliveryNoteToCOGS(doc, user, valuationData);
                 await this.applyDeliveryNoteToSalesOrders(doc, tenantId);
             },
             onCancel: async (doc, user) => {
@@ -1520,10 +1540,24 @@ export class BusinessLogicService {
                     voucherNo: doc.name,
                     cancelTs: new Date(),
                 });
-                // Fix #5: Reverse COGS GL entries on DN cancellation
-                await this.reverseGlEntries(tenantId, 'Delivery Note', doc.name);
-                // Fix #5: Reverse delivered_qty on linked Sales Orders
-                await this.reverseDeliveryNoteFromSalesOrders(doc, tenantId);
+                // M11: Wrap GL and SO reversals in try/catch so a failure after stock cancel
+                // is logged clearly for manual intervention rather than leaving silent inconsistency.
+                try {
+                    await this.reverseGlEntries(tenantId, 'Delivery Note', doc.name);
+                } catch (glError) {
+                    this.logger.error(
+                        `CRITICAL: GL reversal failed for Delivery Note ${doc.name} after stock cancel succeeded. ` +
+                        `Manual GL reversal required. Error: ${(glError as Error)?.message || glError}`,
+                    );
+                }
+                try {
+                    await this.reverseDeliveryNoteFromSalesOrders(doc, tenantId);
+                } catch (soError) {
+                    this.logger.error(
+                        `CRITICAL: Sales Order reversal failed for Delivery Note ${doc.name} after stock cancel succeeded. ` +
+                        `Manual SO qty reversal required. Error: ${(soError as Error)?.message || soError}`,
+                    );
+                }
             },
         });
     }
@@ -2058,22 +2092,26 @@ export class BusinessLogicService {
         const pattern = `${prefix}-${ym}-%`;
         const tableName = this.toTableName(docType);
 
-        const rows = await this.withTenant(tenantId, async (tx) => {
-            return tx.$queryRawUnsafe<Array<{ max_name: string | null }>>(
+        // Use advisory lock to serialize name generation per docType+tenant
+        const lockKey = `docname:${tenantId}:${docType}`;
+        return this.withTenant(tenantId, async (tx) => {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+
+            const rows = await tx.$queryRawUnsafe<Array<{ max_name: string | null }>>(
                 `SELECT MAX(name) as max_name FROM "${tableName}" WHERE name LIKE $1`,
                 pattern,
             );
+
+            const maxName = (rows as Array<{ max_name: string | null }>)?.[0]?.max_name;
+            let nextSeq = 1;
+            if (maxName) {
+                const parts = maxName.split('-');
+                const lastSeq = parseInt(parts[parts.length - 1], 10);
+                if (!isNaN(lastSeq)) nextSeq = lastSeq + 1;
+            }
+
+            return `${prefix}-${ym}-${String(nextSeq).padStart(5, '0')}`;
         });
-
-        const maxName = (rows as Array<{ max_name: string | null }>)?.[0]?.max_name;
-        let nextSeq = 1;
-        if (maxName) {
-            const parts = maxName.split('-');
-            const lastSeq = parseInt(parts[parts.length - 1], 10);
-            if (!isNaN(lastSeq)) nextSeq = lastSeq + 1;
-        }
-
-        return `${prefix}-${ym}-${String(nextSeq).padStart(5, '0')}`;
     }
 
     private resolveAccountDefaults(code: string) {
@@ -2702,6 +2740,21 @@ export class BusinessLogicService {
             });
         }
 
+        // Purchase Invoice GL: Dr Expense/Stock + Dr Input Tax = Cr Accounts Payable (grand_total)
+        // Tax entries are DEBITS (input tax credit), not credits
+        const taxes = doc.taxes || [];
+        for (const tax of taxes) {
+            const taxAmount = Number(tax.tax_amount || 0);
+            if (taxAmount > 0) {
+                entries.push({
+                    accountCode: tax.account_head,
+                    debit: taxAmount,
+                    credit: 0,
+                    remarks: `Purchase Invoice ${voucherNo} - Input Tax`,
+                });
+            }
+        }
+
         const creditTo = doc.credit_to || 'Accounts Payable';
         entries.push({
             accountCode: creditTo,
@@ -2709,19 +2762,6 @@ export class BusinessLogicService {
             credit: Number(doc.grand_total || 0),
             remarks: `Purchase Invoice ${voucherNo}`,
         });
-
-        const taxes = doc.taxes || [];
-        for (const tax of taxes) {
-            const taxAmount = Number(tax.tax_amount || 0);
-            if (taxAmount > 0) {
-                entries.push({
-                    accountCode: tax.account_head,
-                    debit: 0,
-                    credit: taxAmount,
-                    remarks: `Purchase Invoice ${voucherNo}`,
-                });
-            }
-        }
 
         await this.createGlEntries(tenantId, postingDate, postingTs, entries, voucherType, voucherNo, txClient);
     }
@@ -2777,7 +2817,7 @@ export class BusinessLogicService {
         await this.createGlEntries(tenantId, postingDate, postingTs, entries, voucherType, voucherNo);
     }
 
-    private async postDeliveryNoteToCOGS(doc: any, user: any) {
+    private async postDeliveryNoteToCOGS(doc: any, user: any, valuationData?: Map<string, { valuationRate: number; totalCost: number; qty: number }>) {
         const tenantId = user?.tenantId ?? doc.tenant_id ?? doc.tenantId;
         if (!tenantId) throw new Error('Missing tenantId for GL posting');
         const voucherType = 'Delivery Note';
@@ -2792,7 +2832,9 @@ export class BusinessLogicService {
         await this.prisma.$transaction(async (tx) => {
             await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
             for (const item of items) {
-                const valuationAmount = Number(item.valuation_amount || item.amount || 0);
+                const itemKey = String(item.id ?? item.idx ?? item.item_code ?? 'row');
+                const fifoData = valuationData?.get(itemKey);
+                const valuationAmount = fifoData ? fifoData.totalCost : Number(item.valuation_amount || item.amount || 0);
                 if (!valuationAmount) continue;
                 let stockAccount = 'Stock Asset';
                 let cogsAccount = 'Cost of Goods Sold';

@@ -20,6 +20,7 @@ import {
 } from './dto';
 import { CreateSimpleProductDto } from './simple-product.dto';
 import { StoreAdminGuard } from '@platform/auth';
+import { StorePublishedGuard } from '../../common/guards/store-published.guard';
 import { Tenant } from '../../tenant.middleware';
 
 @Controller('store')
@@ -31,6 +32,7 @@ export class ProductsController {
    * GET /api/v1/store/products
    */
   @Get('products')
+  @UseGuards(StorePublishedGuard)
   async listProducts(
     @Tenant() tenantId: string,
     @Query() query: ListProductsDto
@@ -46,6 +48,7 @@ export class ProductsController {
    * GET /api/v1/store/products/featured
    */
   @Get('products/featured')
+  @UseGuards(StorePublishedGuard)
   async getFeaturedProducts(
     @Tenant() tenantId: string,
     @Query('limit') limit?: string
@@ -66,6 +69,7 @@ export class ProductsController {
    * GET /api/v1/store/products/:slug
    */
   @Get('products/:slug')
+  @UseGuards(StorePublishedGuard)
   async getProduct(
     @Tenant() tenantId: string,
     @Param('slug') slug: string
@@ -81,6 +85,7 @@ export class ProductsController {
    * GET /api/v1/store/categories
    */
   @Get('categories')
+  @UseGuards(StorePublishedGuard)
   async listCategories(@Tenant() tenantId: string) {
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
@@ -93,6 +98,7 @@ export class ProductsController {
    * GET /api/v1/store/categories/:slug
    */
   @Get('categories/:slug')
+  @UseGuards(StorePublishedGuard)
   async getCategory(
     @Tenant() tenantId: string,
     @Param('slug') slug: string

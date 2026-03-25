@@ -40,15 +40,15 @@ export class MonitoringService {
   /**
    * Get comprehensive system metrics
    */
-  async getMetrics(): Promise<MonitoringMetrics> {
+  async getMetrics(tenantId: string): Promise<MonitoringMetrics> {
     const [
       failedOps,
       stockMetrics,
       systemHealth,
     ] = await Promise.all([
-      this.getFailedOperationsMetrics(),
-      this.getStockReservationMetrics(),
-      this.getSystemHealthMetrics(),
+      this.getFailedOperationsMetrics(tenantId),
+      this.getStockReservationMetrics(tenantId),
+      this.getSystemHealthMetrics(tenantId),
     ]);
 
     return {
@@ -66,21 +66,23 @@ export class MonitoringService {
   /**
    * Get failed operations metrics
    */
-  private async getFailedOperationsMetrics() {
+  private async getFailedOperationsMetrics(tenantId: string) {
     const [pending, retrying, failed, succeeded, total] = await Promise.all([
       this.prisma.failedOperation.count({
-        where: { status: OperationStatus.PENDING },
+        where: { tenantId, status: OperationStatus.PENDING },
       }),
       this.prisma.failedOperation.count({
-        where: { status: OperationStatus.RETRYING },
+        where: { tenantId, status: OperationStatus.RETRYING },
       }),
       this.prisma.failedOperation.count({
-        where: { status: OperationStatus.FAILED },
+        where: { tenantId, status: OperationStatus.FAILED },
       }),
       this.prisma.failedOperation.count({
-        where: { status: OperationStatus.SUCCEEDED },
+        where: { tenantId, status: OperationStatus.SUCCEEDED },
       }),
-      this.prisma.failedOperation.count(),
+      this.prisma.failedOperation.count({
+        where: { tenantId },
+      }),
     ]);
 
     const retryRate = total > 0 ? ((succeeded + failed) / total) * 100 : 0;
@@ -99,7 +101,7 @@ export class MonitoringService {
   /**
    * Get stock reservation metrics and detect anomalies
    */
-  private async getStockReservationMetrics() {
+  private async getStockReservationMetrics(tenantId: string) {
     const [metrics] = await this.prisma.$queryRaw<any[]>`
       SELECT
         COUNT(*) FILTER (WHERE "reservedQty" > 0) as reserved_items,
@@ -108,6 +110,7 @@ export class MonitoringService {
         COUNT(*) FILTER (WHERE "actualQty" < 0) as negative_stock_count,
         COUNT(*) FILTER (WHERE "reservedQty" > "actualQty") as over_reserved_count
       FROM warehouse_item_balances
+      WHERE "tenantId" = ${tenantId}
     `;
 
     const totalReservedQty = Number(metrics.total_reserved);
@@ -136,7 +139,7 @@ export class MonitoringService {
   /**
    * Get system health metrics
    */
-  private async getSystemHealthMetrics() {
+  private async getSystemHealthMetrics(tenantId: string) {
     const now = new Date();
 
     const [
@@ -146,16 +149,16 @@ export class MonitoringService {
       failedPaymentsCount,
     ] = await Promise.all([
       this.prisma.cart.count({
-        where: { status: 'active', expiresAt: { gt: now } },
+        where: { tenantId, status: 'active', expiresAt: { gt: now } },
       }),
       this.prisma.cart.count({
-        where: { status: 'active', expiresAt: { lt: now } },
+        where: { tenantId, status: 'active', expiresAt: { lt: now } },
       }),
       this.prisma.order.count({
-        where: { status: 'PENDING', paymentStatus: 'PENDING' },
+        where: { tenantId, status: 'PENDING', paymentStatus: 'PENDING' },
       }),
       this.prisma.payment.count({
-        where: { status: 'FAILED' },
+        where: { tenantId, status: 'FAILED' },
       }),
     ]);
 
@@ -170,11 +173,11 @@ export class MonitoringService {
   /**
    * Check for critical alerts
    */
-  async checkAlerts(): Promise<{
+  async checkAlerts(tenantId: string): Promise<{
     critical: string[];
     warnings: string[];
   }> {
-    const metrics = await this.getMetrics();
+    const metrics = await this.getMetrics(tenantId);
     const critical: string[] = [];
     const warnings: string[] = [];
 

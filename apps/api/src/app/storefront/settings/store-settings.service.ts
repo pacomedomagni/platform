@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException } from '@nes
 import { PrismaService } from '@platform/db';
 import { UpdateStoreSettingsDto } from './store-settings.dto';
 import { DomainResolverService } from '../domain-resolver/domain-resolver.service';
+import { AuditLogService } from '../../operations/audit-log.service';
 import { promises as dns } from 'dns';
 import * as fs from 'fs/promises';
 import * as path from 'path';
@@ -16,6 +17,7 @@ export class StoreSettingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly domainResolver: DomainResolverService,
+    private readonly auditLog: AuditLogService,
   ) {
     this.traefikDynamicDir = process.env['TRAEFIK_DYNAMIC_DIR'] || '/etc/traefik/dynamic/custom-domains';
   }
@@ -103,6 +105,13 @@ export class StoreSettingsService {
         defaultShippingRate: true,
         freeShippingThreshold: true,
       },
+    });
+
+    await this.auditLog.log({ tenantId }, {
+      action: 'SETTINGS_UPDATED',
+      docType: 'StoreSettings',
+      docName: tenantId,
+      meta: { fields: Object.keys(dto) },
     });
 
     return {
@@ -194,6 +203,13 @@ export class StoreSettingsService {
       await this.domainResolver.invalidate(normalized);
       this.logger.log(`Custom domain verified and Traefik config written for: ${normalized}`);
     }
+
+    await this.auditLog.log({ tenantId }, {
+      action: 'DOMAIN_VERIFICATION',
+      docType: 'CustomDomain',
+      docName: normalized,
+      meta: { status, isVerified },
+    });
 
     return {
       customDomain: normalized,

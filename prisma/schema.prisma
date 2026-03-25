@@ -124,9 +124,9 @@ model Tenant {
   storeThemes StoreTheme[]
 
   // Marketplace integrations
-  marketplaceConnections    MarketplaceConnection[]
-  marketplaceListings       MarketplaceListing[]
-  marketplaceOrders         MarketplaceOrder[]
+  marketplaceConnections MarketplaceConnection[]
+  marketplaceListings    MarketplaceListing[]
+  marketplaceOrders      MarketplaceOrder[]
 
   marketplaceSyncLogs       MarketplaceSyncLog[]
   marketplaceReturns        MarketplaceReturn[]
@@ -155,6 +155,27 @@ model Tenant {
 
   // Refresh tokens
   refreshTokens RefreshToken[]
+
+  // Multi-currency
+  storeCurrencies       StoreCurrency[]
+  productPriceOverrides ProductPriceOverride[]
+  variantPriceOverrides VariantPriceOverride[]
+
+  // Shipping
+  shippingCarriers    ShippingCarrier[]
+  shippingZones       ShippingZone[]
+  shippingRates       ShippingRate[]
+  shippingWeightTiers ShippingWeightTier[]
+  shipments           Shipment[]
+  shipmentEvents      ShipmentEvent[]
+
+  // Internationalization
+  storeLanguages           StoreLanguage[]
+  productTranslations      ProductTranslation[]
+  categoryTranslations     CategoryTranslation[]
+  attributeTranslations    AttributeTranslation[]
+  shippingRateTranslations ShippingRateTranslation[]
+  contentTranslations      ContentTranslation[]
 
   @@map("tenants")
 }
@@ -317,6 +338,7 @@ model Warehouse {
 
   @@unique([tenantId, code])
   @@unique([tenantId, name])
+  @@index([tenantId, deletedAt])
   @@map("warehouses")
 }
 
@@ -354,6 +376,7 @@ model Location {
   @@unique([tenantId, warehouseId, code])
   @@unique([tenantId, warehouseId, path])
   @@index([warehouseId])
+  @@index([tenantId, deletedAt])
   @@map("locations")
 }
 
@@ -536,8 +559,8 @@ model BinBalance {
   locationId String
   location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
 
-  batchId String?
-  batch   Batch?  @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  batchId String? @default("__NO_BATCH__")
+  batch   Batch?  @relation(fields: [batchId], references: [id], onDelete: Restrict)
 
   actualQty   Decimal @default(0) @db.Decimal(18, 6)
   reservedQty Decimal @default(0) @db.Decimal(18, 6)
@@ -996,11 +1019,11 @@ model BankTransaction {
   updatedAt DateTime @updatedAt
 
   @@unique([tenantId, name])
+  @@unique([tenantId, externalId])
   @@index([tenantId])
   @@index([tenantId, bankAccount])
   @@index([tenantId, transactionDate])
   @@index([tenantId, status])
-  @@unique([tenantId, externalId])
   @@map("bank_transactions")
 }
 
@@ -1182,6 +1205,7 @@ model ProductListing {
   @@index([tenantId, isPublished])
   @@index([tenantId, categoryId])
   @@index([tenantId, isFeatured])
+  @@index([tenantId, deletedAt])
   @@map("product_listings")
 }
 
@@ -1356,6 +1380,7 @@ model Cart {
   @@index([tenantId, sessionToken])
   @@index([tenantId, status])
   @@index([tenantId, updatedAt])
+  @@index([tenantId, expiresAt])
   @@map("carts")
 }
 
@@ -1988,6 +2013,7 @@ model WishlistItem {
 model StoreCurrency {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   currencyCode       String // ISO 4217 (USD, EUR, GBP)
   symbol             String // $, €, £
@@ -2012,6 +2038,7 @@ model StoreCurrency {
 model ProductPriceOverride {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   productListingId String
   productListing   ProductListing @relation(fields: [productListingId], references: [id], onDelete: Cascade)
@@ -2032,6 +2059,7 @@ model ProductPriceOverride {
 model VariantPriceOverride {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   variantId String
   variant   ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
@@ -2056,6 +2084,7 @@ model VariantPriceOverride {
 model ShippingCarrier {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   name          String // UPS, FedEx, USPS, DHL
   code          String // ups, fedex, usps, dhl
@@ -2082,6 +2111,7 @@ model ShippingCarrier {
 model ShippingZone {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   name      String
   countries String[] @default([])
@@ -2102,6 +2132,7 @@ model ShippingZone {
 model ShippingRate {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   zoneId String
   zone   ShippingZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
@@ -2139,6 +2170,7 @@ model ShippingRate {
 model ShippingWeightTier {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   rateId String
   rate   ShippingRate @relation(fields: [rateId], references: [id], onDelete: Cascade)
@@ -2158,6 +2190,7 @@ model ShippingWeightTier {
 model Shipment {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   orderId String
   order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -2193,6 +2226,7 @@ model Shipment {
 model ShipmentEvent {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   shipmentId String
   shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
@@ -2218,6 +2252,7 @@ model ShipmentEvent {
 model StoreLanguage {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   languageCode String // ISO 639-1 (en, es, fr)
   countryCode  String? // ISO 3166-1 for regional variants
@@ -2239,6 +2274,7 @@ model StoreLanguage {
 model ProductTranslation {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   productListingId String
   productListing   ProductListing @relation(fields: [productListingId], references: [id], onDelete: Cascade)
@@ -2265,6 +2301,7 @@ model ProductTranslation {
 model CategoryTranslation {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   categoryId String
   category   ProductCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
@@ -2288,6 +2325,7 @@ model CategoryTranslation {
 model AttributeTranslation {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   attributeTypeId String?
   attributeType   ItemAttributeType? @relation(fields: [attributeTypeId], references: [id], onDelete: Cascade)
@@ -2309,6 +2347,7 @@ model AttributeTranslation {
 model ShippingRateTranslation {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   shippingRateId String
   shippingRate   ShippingRate @relation(fields: [shippingRateId], references: [id], onDelete: Cascade)
@@ -2329,6 +2368,7 @@ model ShippingRateTranslation {
 model ContentTranslation {
   id       String @id @default(uuid())
   tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   contentKey   String // e.g., "checkout.title", "policy.returns"
   languageCode String
@@ -2496,15 +2536,15 @@ model MarketplaceConnection {
   updatedAt DateTime @updatedAt
 
   // Relations
-  listings              MarketplaceListing[]
-  orders                MarketplaceOrder[]
-  syncLogs              MarketplaceSyncLog[]
+  listings MarketplaceListing[]
+  orders   MarketplaceOrder[]
+  syncLogs MarketplaceSyncLog[]
 
-  returns               MarketplaceReturn[]
-  messageThreads        MarketplaceMessageThread[]
-  campaigns             MarketplaceCampaign[]
+  returns        MarketplaceReturn[]
+  messageThreads MarketplaceMessageThread[]
+  campaigns      MarketplaceCampaign[]
 
-  violations            MarketplaceViolation[]
+  violations MarketplaceViolation[]
 
   @@unique([tenantId, platform, name])
   @@index([tenantId, platform])
@@ -2540,13 +2580,13 @@ model MarketplaceListing {
   title                String
   subtitle             String? // Paid listing upgrade (55 chars)
   description          String
-  price                Decimal  @db.Decimal(18, 2)
+  price                Decimal @db.Decimal(18, 2)
   quantity             Int
   condition            String
   conditionDescription String? // Required for used/refurbished items
   categoryId           String
   secondaryCategoryId  String? // Optional second category (paid)
-  privateListing       Boolean  @default(false) // Hide buyer identity
+  privateListing       Boolean @default(false) // Hide buyer identity
   lotSize              Int? // Number of items in a lot
   epid                 String? // eBay catalog product ID
 
@@ -2561,7 +2601,7 @@ model MarketplaceListing {
   startPrice      Decimal? @db.Decimal(18, 2)
   reservePrice    Decimal? @db.Decimal(18, 2)
   buyItNowPrice   Decimal? @db.Decimal(18, 2)
-  listingDuration String?  // DAYS_1, DAYS_3, DAYS_5, DAYS_7, DAYS_10, GTC
+  listingDuration String? // DAYS_1, DAYS_3, DAYS_5, DAYS_7, DAYS_10, GTC
 
   // Best Offer
   bestOfferEnabled Boolean  @default(false)
@@ -2746,11 +2786,11 @@ model MarketplaceReturn {
   externalOrderId  String
 
   // Return details
-  reason        String // ITEM_NOT_AS_DESCRIBED, ARRIVED_DAMAGED, WRONG_ITEM, etc.
-  buyerComments String?
+  reason         String // ITEM_NOT_AS_DESCRIBED, ARRIVED_DAMAGED, WRONG_ITEM, etc.
+  buyerComments  String?
   sellerComments String?
-  status        String // RETURN_REQUESTED, RETURN_ACCEPTED, RETURN_DECLINED,
-                       // ITEM_SHIPPED, ITEM_RECEIVED, REFUND_ISSUED, CLOSED
+  status         String // RETURN_REQUESTED, RETURN_ACCEPTED, RETURN_DECLINED,
+  // ITEM_SHIPPED, ITEM_RECEIVED, REFUND_ISSUED, CLOSED
 
   // Buyer info
   buyerUsername String
@@ -2761,7 +2801,7 @@ model MarketplaceReturn {
   // Financials
   refundAmount   Decimal? @db.Decimal(18, 2)
   refundCurrency String   @default("USD")
-  refundStatus   String?  // PENDING, ISSUED, FAILED
+  refundStatus   String? // PENDING, ISSUED, FAILED
 
   // Dates
   requestDate  DateTime
@@ -2770,7 +2810,7 @@ model MarketplaceReturn {
   refundDate   DateTime?
 
   // Sync
-  syncStatus   String @default("pending")
+  syncStatus   String  @default("pending")
   errorMessage String?
 
   createdAt DateTime @default(now())
@@ -2793,13 +2833,13 @@ model MarketplaceMessageThread {
   connection   MarketplaceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
   // eBay identifiers
-  externalThreadId String @unique
+  externalThreadId String  @unique
   externalItemId   String?
   itemTitle        String?
 
   // Participants
   buyerUsername String
-  subject      String
+  subject       String
 
   // Status
   isRead       Boolean @default(false)
@@ -2810,7 +2850,7 @@ model MarketplaceMessageThread {
   lastMessageDate DateTime
 
   // Sync
-  syncStatus   String @default("pending")
+  syncStatus   String  @default("pending")
   errorMessage String?
 
   messages MarketplaceMessage[]
@@ -2826,13 +2866,13 @@ model MarketplaceMessageThread {
 
 // Marketplace Message - Individual messages within a thread
 model MarketplaceMessage {
-  id       String @id @default(uuid())
+  id       String                   @id @default(uuid())
   threadId String
   thread   MarketplaceMessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
 
-  externalMessageId String @unique
+  externalMessageId String   @unique
   sender            String // BUYER, SELLER
-  body              String @db.Text
+  body              String   @db.Text
   sentDate          DateTime
 
   createdAt DateTime @default(now())
@@ -3139,14 +3179,14 @@ model Notification {
 }
 
 model RefreshToken {
-  id        String    @id @default(uuid())
-  token     String    @unique
-  userId    String?
+  id         String    @id @default(uuid())
+  token      String    @unique
+  userId     String?
   customerId String?
-  tenantId  String
-  expiresAt DateTime
-  revokedAt DateTime?
-  createdAt DateTime  @default(now())
+  tenantId   String
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
 
   user     User?          @relation(fields: [userId], references: [id], onDelete: Cascade)
   customer StoreCustomer? @relation(fields: [customerId], references: [id], onDelete: Cascade)

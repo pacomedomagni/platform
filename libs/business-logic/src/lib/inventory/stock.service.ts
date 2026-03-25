@@ -420,6 +420,8 @@ export class StockService {
         locationCode: input.locationCode,
         qty: qtyToIssue.toString(),
       });
+
+      return { valuationRate: valuationRate.toNumber(), totalCost: consumption.totalCost.toNumber(), qty: qtyToIssue.toNumber() };
     });
   }
 

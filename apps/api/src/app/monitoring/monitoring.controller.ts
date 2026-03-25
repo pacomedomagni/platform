@@ -1,7 +1,12 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Req, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { MonitoringService } from './monitoring.service';
 import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
+import { Request } from 'express';
+
+interface RequestWithUser extends Request {
+  user: { tenantId: string; roles?: string[] };
+}
 
 /**
  * Monitoring Controller
@@ -19,8 +24,8 @@ export class MonitoringController {
    * GET /api/v1/monitoring/metrics
    */
   @Get('metrics')
-  async getMetrics() {
-    return this.monitoringService.getMetrics();
+  async getMetrics(@Req() req: RequestWithUser) {
+    return this.monitoringService.getMetrics(req.user.tenantId);
   }
 
   /**
@@ -28,10 +33,11 @@ export class MonitoringController {
    * GET /api/v1/monitoring/health
    */
   @Get('health')
-  async getHealth() {
+  async getHealth(@Req() req: RequestWithUser) {
+    const tenantId = req.user.tenantId;
     const [metrics, alerts] = await Promise.all([
-      this.monitoringService.getMetrics(),
-      this.monitoringService.checkAlerts(),
+      this.monitoringService.getMetrics(tenantId),
+      this.monitoringService.checkAlerts(tenantId),
     ]);
 
     return {
@@ -66,7 +72,7 @@ export class MonitoringController {
    * GET /api/v1/monitoring/alerts
    */
   @Get('alerts')
-  async getAlerts() {
-    return this.monitoringService.checkAlerts();
+  async getAlerts(@Req() req: RequestWithUser) {
+    return this.monitoringService.checkAlerts(req.user.tenantId);
   }
 }
