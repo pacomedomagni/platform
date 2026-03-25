@@ -889,7 +889,7 @@ export class BusinessLogicService {
             beforeSave: async (doc, user) => {
                 // Auto-Name
                 if (!doc.name) {
-                    doc.name = `QTN-${Date.now().toString().slice(-6)}`;
+                    doc.name = await this.generateDocName('QTN', 'Quotation', user?.tenantId);
                 }
 
                 // Set customer name from customer link
@@ -1155,7 +1155,7 @@ export class BusinessLogicService {
         this.hookService.register('Bank Reconciliation', {
             beforeSave: async (doc, user) => {
                 if (!doc.name) {
-                    doc.name = `RECON-${doc.bank_account}-${Date.now().toString().slice(-6)}`;
+                    doc.name = await this.generateDocName(`RECON-${doc.bank_account || 'UNKNOWN'}`, 'Bank Reconciliation', user?.tenantId);
                 }
 
                 // Calculate difference
@@ -1216,7 +1216,7 @@ export class BusinessLogicService {
                 
                 // Auto-Name
                 if (!doc.name) {
-                    doc.name = `SO-${Date.now().toString().slice(-6)}`;
+                    doc.name = await this.generateDocName('SO', 'Sales Order', user?.tenantId);
                 }
 
                 // Calculate taxes and totals
@@ -1232,25 +1232,28 @@ export class BusinessLogicService {
                     await this.fillUomDetails(tenantId, items);
                     const postingTs = this.resolveDateFieldTs(doc.date);
 
-                    for (const item of items) {
-                        if (!item.warehouse) {
-                            throw new Error(`Sales Order ${doc.name}: warehouse required on item ${item.item_code}`);
+                    await this.prisma.$transaction(async (tx) => {
+                        await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+                        for (const item of items) {
+                            if (!item.warehouse) {
+                                throw new Error(`Sales Order ${doc.name}: warehouse required on item ${item.item_code}`);
+                            }
+                            await this.stockService.reserveStock({
+                                tenantId,
+                                postingKey: `SO:${doc.name}:${item.id ?? item.idx ?? item.item_code ?? 'row'}`,
+                                voucherType: 'Sales Order',
+                                voucherNo: doc.name,
+                                postingTs,
+                                itemCode: item.item_code,
+                                warehouseCode: item.warehouse,
+                                locationCode: item.location,
+                                batchNo: item.batch_no,
+                                uomCode: item.uom,
+                                conversionFactor: item.conversion_factor,
+                                qty: item.qty,
+                            }, tx);
                         }
-                        await this.stockService.reserveStock({
-                            tenantId,
-                            postingKey: `SO:${doc.name}:${item.id ?? item.idx ?? item.item_code ?? 'row'}`,
-                            voucherType: 'Sales Order',
-                            voucherNo: doc.name,
-                            postingTs,
-                            itemCode: item.item_code,
-                            warehouseCode: item.warehouse,
-                            locationCode: item.location,
-                            batchNo: item.batch_no,
-                            uomCode: item.uom,
-                            conversionFactor: item.conversion_factor,
-                            qty: item.qty,
-                        });
-                    }
+                    }, { timeout: 30000 });
                 }
                 await this.updateDocStatus('Sales Order', doc.name, 'To Deliver', tenantId);
             },
@@ -1263,23 +1266,26 @@ export class BusinessLogicService {
                 await this.fillUomDetails(tenantId, doc.items);
                 const postingTs = new Date();
 
-                for (const item of doc.items) {
-                    if (!item.warehouse) continue;
-                    await this.stockService.unreserveStock({
-                        tenantId,
-                        postingKey: `CANCEL:Sales Order:${doc.name}:${item.id ?? item.idx ?? item.item_code ?? 'row'}`,
-                        voucherType: 'Sales Order (Cancel)',
-                        voucherNo: doc.name,
-                        postingTs,
-                        itemCode: item.item_code,
-                        warehouseCode: item.warehouse,
-                        locationCode: item.location,
-                        batchNo: item.batch_no,
-                        uomCode: item.uom,
-                        conversionFactor: item.conversion_factor,
-                        qty: item.qty,
-                    });
-                }
+                await this.prisma.$transaction(async (tx) => {
+                    await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+                    for (const item of doc.items) {
+                        if (!item.warehouse) continue;
+                        await this.stockService.unreserveStock({
+                            tenantId,
+                            postingKey: `CANCEL:Sales Order:${doc.name}:${item.id ?? item.idx ?? item.item_code ?? 'row'}`,
+                            voucherType: 'Sales Order (Cancel)',
+                            voucherNo: doc.name,
+                            postingTs,
+                            itemCode: item.item_code,
+                            warehouseCode: item.warehouse,
+                            locationCode: item.location,
+                            batchNo: item.batch_no,
+                            uomCode: item.uom,
+                            conversionFactor: item.conversion_factor,
+                            qty: item.qty,
+                        }, tx);
+                    }
+                }, { timeout: 30000 });
 
             },
             afterSave: (doc) => {
@@ -1293,7 +1299,7 @@ export class BusinessLogicService {
 	            beforeSave: async (doc, user) => {
                 // Auto-Name
                 if (!doc.name) {
-                    doc.name = `INV-${Date.now().toString().slice(-6)}`;
+                    doc.name = await this.generateDocName('INV', 'Invoice', user?.tenantId);
                 }
 
                 // Calculate taxes and totals
@@ -1303,10 +1309,11 @@ export class BusinessLogicService {
 	            onSubmit: async (doc, user) => {
 	                const tenantId = user?.tenantId;
 	                if (!tenantId) throw new Error('Missing tenantId in user context');
-	                // Post to GL when invoice is submitted (docstatus = 1)
-	                await this.postInvoiceToGL(doc, user);
-                    await this.applyInvoiceToSalesOrders(doc, tenantId);
-                    await this.updateInvoiceOutstandingStatus('Invoice', doc.name, tenantId);
+	                await this.withTenant(tenantId, async (tx) => {
+	                    await this.postInvoiceToGL(doc, user, tx);
+	                    await this.applyInvoiceToSalesOrders(doc, tenantId, tx);
+	                    await this.updateInvoiceOutstandingStatus('Invoice', doc.name, tenantId, 0, tx);
+	                });
 	            },
 	            onCancel: async (doc, user) => {
 	                const tenantId = user?.tenantId;
@@ -1323,9 +1330,9 @@ export class BusinessLogicService {
 
 	    private registerPurchaseOrderHooks() {
 	        this.hookService.register('Purchase Order', {
-	            beforeSave: async (doc) => {
+	            beforeSave: async (doc, user) => {
 	                if (!doc.name) {
-	                    doc.name = `PO-${Date.now().toString().slice(-6)}`;
+	                    doc.name = await this.generateDocName('PO', 'Purchase Order', user?.tenantId);
 	                }
 	                await this.calculateTaxes(doc);
 	                return doc;
@@ -1338,15 +1345,16 @@ export class BusinessLogicService {
             onCancel: async (doc, user) => {
                 const tenantId = user?.tenantId;
                 if (!tenantId) throw new Error('Missing tenantId in user context');
+                await this.updateDocStatus('Purchase Order', doc.name, 'Cancelled', tenantId);
             },
 	        });
 	    }
 
 	    private registerPurchaseInvoiceHooks() {
 	        this.hookService.register('Purchase Invoice', {
-	            beforeSave: async (doc) => {
+	            beforeSave: async (doc, user) => {
 	                if (!doc.name) {
-	                    doc.name = `PINV-${Date.now().toString().slice(-6)}`;
+	                    doc.name = await this.generateDocName('PINV', 'Purchase Invoice', user?.tenantId);
 	                }
 	                await this.calculateTaxes(doc);
 	                return doc;
@@ -1354,19 +1362,31 @@ export class BusinessLogicService {
 	            onSubmit: async (doc, user) => {
 	                const tenantId = user?.tenantId;
 	                if (!tenantId) throw new Error('Missing tenantId in user context');
-	                await this.postPurchaseInvoiceToGL(doc, user);
-                    await this.applyPurchaseInvoiceToPurchaseOrders(doc, tenantId);
-                    await this.updateInvoiceOutstandingStatus('Purchase Invoice', doc.name, tenantId);
+	                await this.withTenant(tenantId, async (tx) => {
+	                    await this.postPurchaseInvoiceToGL(doc, user, tx);
+	                    await this.applyPurchaseInvoiceToPurchaseOrders(doc, tenantId, tx);
+	                    await this.updateInvoiceOutstandingStatus('Purchase Invoice', doc.name, tenantId, 0, tx);
+	                });
+	            },
+	            onCancel: async (doc, user) => {
+	                const tenantId = user?.tenantId;
+	                if (!tenantId) throw new Error('Missing tenantId in user context');
+	                // Reverse GL entries
+	                await this.reverseGlEntries(tenantId, 'Purchase Invoice', doc.name);
+	                // Reverse billed_qty on linked Purchase Orders
+	                await this.reversePurchaseInvoiceFromPurchaseOrders(doc, tenantId);
+	                // Recalculate outstanding status
+	                await this.updateInvoiceOutstandingStatus('Purchase Invoice', doc.name, tenantId);
 	            },
 	        });
 	    }
 
 	    private registerPurchaseReceiptHooks() {
 	        this.hookService.register('Purchase Receipt', {
-	            beforeSave: (doc, user) => {
+	            beforeSave: async (doc, user) => {
                 // Auto-Name
                 if (!doc.name) {
-                    doc.name = `PR-${Date.now().toString().slice(-6)}`;
+                    doc.name = await this.generateDocName('PR', 'Purchase Receipt', user?.tenantId);
                 }
 
                 // Calculate Totals
@@ -1423,16 +1443,20 @@ export class BusinessLogicService {
                     voucherNo: doc.name,
                     cancelTs: new Date(),
                 });
+                // Fix #6: Reverse GL entries on PR cancellation
+                await this.reverseGlEntries(tenantId, 'Purchase Receipt', doc.name);
+                // Fix #6: Reverse received_qty on linked Purchase Orders
+                await this.reversePurchaseReceiptFromPurchaseOrders(doc, tenantId);
             },
         });
     }
 
 	    private registerDeliveryNoteHooks() {
 	        this.hookService.register('Delivery Note', {
-            beforeSave: (doc, user) => {
+            beforeSave: async (doc, user) => {
                 // Auto-Name
                 if (!doc.name) {
-                    doc.name = `DN-${Date.now().toString().slice(-6)}`;
+                    doc.name = await this.generateDocName('DN', 'Delivery Note', user?.tenantId);
                 }
 
                 // Calculate Total Qty
@@ -1496,15 +1520,19 @@ export class BusinessLogicService {
                     voucherNo: doc.name,
                     cancelTs: new Date(),
                 });
+                // Fix #5: Reverse COGS GL entries on DN cancellation
+                await this.reverseGlEntries(tenantId, 'Delivery Note', doc.name);
+                // Fix #5: Reverse delivered_qty on linked Sales Orders
+                await this.reverseDeliveryNoteFromSalesOrders(doc, tenantId);
             },
         });
     }
 
 	    private registerStockTransferHooks() {
 	        this.hookService.register('Stock Transfer', {
-	            beforeSave: (doc) => {
+	            beforeSave: async (doc, user) => {
 	                if (!doc.name) {
-	                    doc.name = `ST-${Date.now().toString().slice(-6)}`;
+	                    doc.name = await this.generateDocName('ST', 'Stock Transfer', user?.tenantId);
 	                }
 	                return doc;
 	            },
@@ -1550,9 +1578,9 @@ export class BusinessLogicService {
 
 	    private registerStockReconciliationHooks() {
 	        this.hookService.register('Stock Reconciliation', {
-	            beforeSave: (doc) => {
+	            beforeSave: async (doc, user) => {
 	                if (!doc.name) {
-	                    doc.name = `SR-${Date.now().toString().slice(-6)}`;
+	                    doc.name = await this.generateDocName('SR', 'Stock Reconciliation', user?.tenantId);
 	                }
 	                return doc;
 	            },
@@ -1587,9 +1615,9 @@ export class BusinessLogicService {
 
 	    private registerStockReservationHooks() {
 	        this.hookService.register('Stock Reservation', {
-	            beforeSave: (doc) => {
+	            beforeSave: async (doc, user) => {
 	                if (!doc.name) {
-	                    doc.name = `SRV-${Date.now().toString().slice(-6)}`;
+	                    doc.name = await this.generateDocName('SRV', 'Stock Reservation', user?.tenantId);
 	                }
 	                return doc;
 	            },
@@ -1696,16 +1724,18 @@ export class BusinessLogicService {
         return `tab${compact}`;
     }
 
-    private async updateDocStatus(docType: string, docName: string, status: string, tenantId: string) {
+    private async updateDocStatus(docType: string, docName: string, status: string, tenantId: string, txClient?: Prisma.TransactionClient) {
         if (!docName) return;
         const tableName = this.toTableName(docType);
-        await this.withTenant(tenantId, async (tx) => {
+        const run = async (tx: Prisma.TransactionClient) => {
             await tx.$executeRawUnsafe(
                 `UPDATE "${tableName}" SET status = $1 WHERE name = $2`,
                 status,
                 docName,
             );
-        });
+        };
+        if (txClient) return run(txClient);
+        await this.withTenant(tenantId, run);
     }
 
     private async incrementSalesOrderItemQty(
@@ -1714,19 +1744,23 @@ export class BusinessLogicService {
         field: 'delivered_qty' | 'billed_qty',
         qty: number,
         tenantId: string,
+        txClient?: Prisma.TransactionClient,
     ) {
         if (!salesOrder || !itemCode || !qty) return;
         const itemTable = this.toTableName('Sales Order Item');
         const safeField = field === 'delivered_qty' ? 'delivered_qty' : 'billed_qty';
-        await this.withTenant(tenantId, async (tx) => {
+        const run = async (tx: Prisma.TransactionClient) => {
+            // Bounds check: prevent the field from going negative after the update
             await tx.$executeRawUnsafe(
-                `UPDATE "${itemTable}" SET ${safeField} = COALESCE(${safeField}, 0) + $1
+                `UPDATE "${itemTable}" SET ${safeField} = GREATEST(COALESCE(${safeField}, 0) + $1, 0)
                  WHERE parent = $2 AND parenttype = 'Sales Order' AND item_code = $3`,
                 qty,
                 salesOrder,
                 itemCode,
             );
-        });
+        };
+        if (txClient) return run(txClient);
+        await this.withTenant(tenantId, run);
     }
 
     private async incrementPurchaseOrderItemQty(
@@ -1735,31 +1769,36 @@ export class BusinessLogicService {
         field: 'received_qty' | 'billed_qty',
         qty: number,
         tenantId: string,
+        txClient?: Prisma.TransactionClient,
     ) {
         if (!purchaseOrder || !itemCode || !qty) return;
         const itemTable = this.toTableName('Purchase Order Item');
         const safeField = field === 'received_qty' ? 'received_qty' : 'billed_qty';
-        await this.withTenant(tenantId, async (tx) => {
+        const run = async (tx: Prisma.TransactionClient) => {
+            // Bounds check: prevent the field from going negative after the update
             await tx.$executeRawUnsafe(
-                `UPDATE "${itemTable}" SET ${safeField} = COALESCE(${safeField}, 0) + $1
+                `UPDATE "${itemTable}" SET ${safeField} = GREATEST(COALESCE(${safeField}, 0) + $1, 0)
                  WHERE parent = $2 AND parenttype = 'Purchase Order' AND item_code = $3`,
                 qty,
                 purchaseOrder,
                 itemCode,
             );
-        });
+        };
+        if (txClient) return run(txClient);
+        await this.withTenant(tenantId, run);
     }
 
-    private async updateSalesOrderStatus(salesOrder: string, tenantId: string) {
+    private async updateSalesOrderStatus(salesOrder: string, tenantId: string, txClient?: Prisma.TransactionClient) {
         if (!salesOrder) return;
         const itemTable = this.toTableName('Sales Order Item');
-        const rows = await this.withTenant(tenantId, async (tx) => {
+        const queryFn = async (tx: Prisma.TransactionClient) => {
             return tx.$queryRawUnsafe(
                 `SELECT qty, delivered_qty, billed_qty FROM "${itemTable}"
                  WHERE parent = $1 AND parenttype = 'Sales Order'`,
                 salesOrder,
             );
-        });
+        };
+        const rows = txClient ? await queryFn(txClient) : await this.withTenant(tenantId, queryFn);
         const items = rows as Array<{ qty: any; delivered_qty: any; billed_qty: any }>;
         if (!items.length) return;
 
@@ -1783,19 +1822,20 @@ export class BusinessLogicService {
             status = 'To Bill';
         }
 
-        await this.updateDocStatus('Sales Order', salesOrder, status, tenantId);
+        await this.updateDocStatus('Sales Order', salesOrder, status, tenantId, txClient);
     }
 
-    private async updatePurchaseOrderStatus(purchaseOrder: string, tenantId: string) {
+    private async updatePurchaseOrderStatus(purchaseOrder: string, tenantId: string, txClient?: Prisma.TransactionClient) {
         if (!purchaseOrder) return;
         const itemTable = this.toTableName('Purchase Order Item');
-        const rows = await this.withTenant(tenantId, async (tx) => {
+        const queryFn = async (tx: Prisma.TransactionClient) => {
             return tx.$queryRawUnsafe(
                 `SELECT qty, received_qty, billed_qty FROM "${itemTable}"
                  WHERE parent = $1 AND parenttype = 'Purchase Order'`,
                 purchaseOrder,
             );
-        });
+        };
+        const rows = txClient ? await queryFn(txClient) : await this.withTenant(tenantId, queryFn);
         const items = rows as Array<{ qty: any; received_qty: any; billed_qty: any }>;
         if (!items.length) return;
 
@@ -1819,7 +1859,7 @@ export class BusinessLogicService {
             status = 'To Bill';
         }
 
-        await this.updateDocStatus('Purchase Order', purchaseOrder, status, tenantId);
+        await this.updateDocStatus('Purchase Order', purchaseOrder, status, tenantId, txClient);
     }
 
     private async applyDeliveryNoteToSalesOrders(doc: any, tenantId: string) {
@@ -1838,7 +1878,7 @@ export class BusinessLogicService {
         }
     }
 
-    private async applyInvoiceToSalesOrders(doc: any, tenantId: string) {
+    private async reverseDeliveryNoteFromSalesOrders(doc: any, tenantId: string) {
         const items = Array.isArray(doc.items) ? doc.items : [];
         const salesOrders = new Set<string>();
         for (const item of items) {
@@ -1846,11 +1886,27 @@ export class BusinessLogicService {
             if (!salesOrder) continue;
             const qty = Number(item.qty || 0);
             if (!qty) continue;
-            await this.incrementSalesOrderItemQty(salesOrder, item.item_code, 'billed_qty', qty, tenantId);
+            await this.incrementSalesOrderItemQty(salesOrder, item.item_code, 'delivered_qty', -qty, tenantId);
             salesOrders.add(salesOrder);
         }
         for (const salesOrder of salesOrders) {
             await this.updateSalesOrderStatus(salesOrder, tenantId);
+        }
+    }
+
+    private async applyInvoiceToSalesOrders(doc: any, tenantId: string, txClient?: Prisma.TransactionClient) {
+        const items = Array.isArray(doc.items) ? doc.items : [];
+        const salesOrders = new Set<string>();
+        for (const item of items) {
+            const salesOrder = item.sales_order ?? doc.sales_order;
+            if (!salesOrder) continue;
+            const qty = Number(item.qty || 0);
+            if (!qty) continue;
+            await this.incrementSalesOrderItemQty(salesOrder, item.item_code, 'billed_qty', qty, tenantId, txClient);
+            salesOrders.add(salesOrder);
+        }
+        for (const salesOrder of salesOrders) {
+            await this.updateSalesOrderStatus(salesOrder, tenantId, txClient);
         }
     }
 
@@ -1870,7 +1926,7 @@ export class BusinessLogicService {
         }
     }
 
-    private async applyPurchaseInvoiceToPurchaseOrders(doc: any, tenantId: string) {
+    private async reversePurchaseReceiptFromPurchaseOrders(doc: any, tenantId: string) {
         const items = Array.isArray(doc.items) ? doc.items : [];
         const purchaseOrders = new Set<string>();
         for (const item of items) {
@@ -1878,11 +1934,43 @@ export class BusinessLogicService {
             if (!purchaseOrder) continue;
             const qty = Number(item.qty || 0);
             if (!qty) continue;
-            await this.incrementPurchaseOrderItemQty(purchaseOrder, item.item_code, 'billed_qty', qty, tenantId);
+            await this.incrementPurchaseOrderItemQty(purchaseOrder, item.item_code, 'received_qty', -qty, tenantId);
             purchaseOrders.add(purchaseOrder);
         }
         for (const purchaseOrder of purchaseOrders) {
             await this.updatePurchaseOrderStatus(purchaseOrder, tenantId);
+        }
+    }
+
+    private async reversePurchaseInvoiceFromPurchaseOrders(doc: any, tenantId: string) {
+        const items = Array.isArray(doc.items) ? doc.items : [];
+        const purchaseOrders = new Set<string>();
+        for (const item of items) {
+            const purchaseOrder = item.purchase_order ?? doc.purchase_order;
+            if (!purchaseOrder) continue;
+            const qty = Number(item.qty || 0);
+            if (!qty) continue;
+            await this.incrementPurchaseOrderItemQty(purchaseOrder, item.item_code, 'billed_qty', -qty, tenantId);
+            purchaseOrders.add(purchaseOrder);
+        }
+        for (const purchaseOrder of purchaseOrders) {
+            await this.updatePurchaseOrderStatus(purchaseOrder, tenantId);
+        }
+    }
+
+    private async applyPurchaseInvoiceToPurchaseOrders(doc: any, tenantId: string, txClient?: Prisma.TransactionClient) {
+        const items = Array.isArray(doc.items) ? doc.items : [];
+        const purchaseOrders = new Set<string>();
+        for (const item of items) {
+            const purchaseOrder = item.purchase_order ?? doc.purchase_order;
+            if (!purchaseOrder) continue;
+            const qty = Number(item.qty || 0);
+            if (!qty) continue;
+            await this.incrementPurchaseOrderItemQty(purchaseOrder, item.item_code, 'billed_qty', qty, tenantId, txClient);
+            purchaseOrders.add(purchaseOrder);
+        }
+        for (const purchaseOrder of purchaseOrders) {
+            await this.updatePurchaseOrderStatus(purchaseOrder, tenantId, txClient);
         }
     }
 
@@ -1913,31 +2001,41 @@ export class BusinessLogicService {
         docName: string,
         tenantId: string,
         delta = 0,
+        txClient?: Prisma.TransactionClient,
     ) {
         if (!docName) return;
         const tableName = this.toTableName(docType);
-        const rows = await this.withTenant(tenantId, async (tx) => {
+        const queryFn = async (tx: Prisma.TransactionClient) => {
             return tx.$queryRawUnsafe(
                 `SELECT outstanding_amount, grand_total, due_date FROM "${tableName}" WHERE name = $1`,
                 docName,
             );
-        });
+        };
+        const rows = txClient ? await queryFn(txClient) : await this.withTenant(tenantId, queryFn);
         const doc = (rows as Array<{ outstanding_amount: any; grand_total: any; due_date: any }>)[0];
         if (!doc) return;
 
         const currentOutstanding = Number(doc.outstanding_amount || 0);
         const grandTotal = Number(doc.grand_total || 0);
-        const nextOutstanding = Math.max(0, currentOutstanding + delta);
+        const rawOutstanding = currentOutstanding + delta;
+        if (rawOutstanding < -0.01) {
+            throw new Error(
+                `Overpayment detected on ${docType} ${docName}: outstanding would be ${rawOutstanding.toFixed(2)}`
+            );
+        }
+        const nextOutstanding = Math.max(0, rawOutstanding);
         const status = this.resolveOutstandingStatus(nextOutstanding, grandTotal, doc.due_date);
 
-        await this.withTenant(tenantId, async (tx) => {
+        const updateFn = async (tx: Prisma.TransactionClient) => {
             await tx.$executeRawUnsafe(
                 `UPDATE "${tableName}" SET outstanding_amount = $1, status = $2 WHERE name = $3`,
                 nextOutstanding,
                 status,
                 docName,
             );
-        });
+        };
+        if (txClient) return updateFn(txClient);
+        await this.withTenant(tenantId, updateFn);
     }
 
     private async withTenant<T>(
@@ -1948,6 +2046,34 @@ export class BusinessLogicService {
             await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
             return fn(tx);
         });
+    }
+
+    /**
+     * Generate a unique document name using a DB sequence query.
+     * Format: PREFIX-YYYYMM-NNNNN (e.g., SO-202603-00001)
+     */
+    private async generateDocName(prefix: string, docType: string, tenantId: string): Promise<string> {
+        const now = new Date();
+        const ym = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const pattern = `${prefix}-${ym}-%`;
+        const tableName = this.toTableName(docType);
+
+        const rows = await this.withTenant(tenantId, async (tx) => {
+            return tx.$queryRawUnsafe<Array<{ max_name: string | null }>>(
+                `SELECT MAX(name) as max_name FROM "${tableName}" WHERE name LIKE $1`,
+                pattern,
+            );
+        });
+
+        const maxName = (rows as Array<{ max_name: string | null }>)?.[0]?.max_name;
+        let nextSeq = 1;
+        if (maxName) {
+            const parts = maxName.split('-');
+            const lastSeq = parseInt(parts[parts.length - 1], 10);
+            if (!isNaN(lastSeq)) nextSeq = lastSeq + 1;
+        }
+
+        return `${prefix}-${ym}-${String(nextSeq).padStart(5, '0')}`;
     }
 
     private resolveAccountDefaults(code: string) {
@@ -2063,34 +2189,21 @@ export class BusinessLogicService {
      * Reverse invoice applications from sales orders
      */
     private async reverseInvoiceFromSalesOrders(doc: any, tenantId: string) {
-        // This reverses the billing status updates made during invoice submission
-        // Implementation depends on how sales order billing is tracked
-        // For now, we just log the reversal - implement based on your SO tracking logic
-        await this.prisma.$transaction(async (tx) => {
-            await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
-            
-            // If invoice items have sales_order references, reverse the billing
-            const items = doc.items || [];
-            for (const item of items) {
-                if (item.sales_order) {
-                    // Update sales order billing status
-                    // This is a simplified version - adjust based on actual SO billing tracking
-                    await tx.auditLog.create({
-                        data: {
-                            tenantId,
-                            action: 'INVOICE_CANCEL_REVERSE_SO',
-                            docType: 'Invoice',
-                            docName: doc.name,
-                            meta: {
-                                salesOrder: item.sales_order,
-                                itemCode: item.item_code,
-                                qty: item.qty,
-                            },
-                        },
-                    });
-                }
-            }
-        });
+        const items = Array.isArray(doc.items) ? doc.items : [];
+        const salesOrders = new Set<string>();
+        for (const item of items) {
+            const salesOrder = item.sales_order ?? doc.sales_order;
+            if (!salesOrder) continue;
+            const qty = Number(item.qty || 0);
+            if (!qty) continue;
+            // Decrement billed_qty by passing negative qty
+            await this.incrementSalesOrderItemQty(salesOrder, item.item_code, 'billed_qty', -qty, tenantId);
+            salesOrders.add(salesOrder);
+        }
+        // Recalculate SO status after reversals
+        for (const salesOrder of salesOrders) {
+            await this.updateSalesOrderStatus(salesOrder, tenantId);
+        }
     }
 
     private async createGlEntries(
@@ -2100,6 +2213,7 @@ export class BusinessLogicService {
         entries: Array<{ accountCode: string; debit: number; credit: number; remarks?: string }>,
         voucherType: string,
         voucherNo: string,
+        txClient?: Prisma.TransactionClient,
     ) {
         // Validate double-entry: total debits must equal total credits
         let totalDebit = new Prisma.Decimal(0);
@@ -2109,7 +2223,7 @@ export class BusinessLogicService {
             totalCredit = totalCredit.add(new Prisma.Decimal(entry.credit || 0));
         }
         const difference = totalDebit.sub(totalCredit).abs();
-        if (difference.gt(new Prisma.Decimal('0.01'))) {
+        if (difference.gt(new Prisma.Decimal('0'))) {
             throw new Error(
                 `GL entries for ${voucherType} ${voucherNo} are not balanced. ` +
                 `Total Debit: ${totalDebit.toString()}, Total Credit: ${totalCredit.toString()}, ` +
@@ -2117,8 +2231,7 @@ export class BusinessLogicService {
             );
         }
 
-        await this.prisma.$transaction(async (tx) => {
-            await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+        const run = async (tx: Prisma.TransactionClient) => {
             const tenant = await tx.tenant.findUnique({
                 where: { id: tenantId },
                 select: { baseCurrency: true },
@@ -2155,6 +2268,11 @@ export class BusinessLogicService {
                     },
                 });
             }
+        };
+        if (txClient) return run(txClient);
+        await this.prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+            return run(tx);
         });
     }
 
@@ -2162,10 +2280,10 @@ export class BusinessLogicService {
 
     private registerJournalEntryHooks() {
         this.hookService.register('Journal Entry', {
-            beforeSave: (doc, user) => {
+            beforeSave: async (doc, user) => {
                 // Auto-Name
                 if (!doc.name) {
-                    doc.name = `JE-${Date.now().toString().slice(-6)}`;
+                    doc.name = await this.generateDocName('JE', 'Journal Entry', user?.tenantId);
                 }
 
                 // Calculate totals
@@ -2200,9 +2318,9 @@ export class BusinessLogicService {
 
     private registerPickListHooks() {
         this.hookService.register('Pick List', {
-            beforeSave: (doc) => {
+            beforeSave: async (doc, user) => {
                 if (!doc.name) {
-                    doc.name = `PL-${Date.now().toString().slice(-6)}`;
+                    doc.name = await this.generateDocName('PL', 'Pick List', user?.tenantId);
                 }
                 return doc;
             },
@@ -2252,9 +2370,9 @@ export class BusinessLogicService {
 
     private registerPackListHooks() {
         this.hookService.register('Pack List', {
-            beforeSave: (doc) => {
+            beforeSave: async (doc, user) => {
                 if (!doc.name) {
-                    doc.name = `PK-${Date.now().toString().slice(-6)}`;
+                    doc.name = await this.generateDocName('PK', 'Pack List', user?.tenantId);
                 }
                 return doc;
             },
@@ -2303,10 +2421,10 @@ export class BusinessLogicService {
 
     private registerPaymentEntryHooks() {
         this.hookService.register('Payment Entry', {
-            beforeSave: (doc, user) => {
+            beforeSave: async (doc, user) => {
                 // Auto-Name
                 if (!doc.name) {
-                    doc.name = `PE-${Date.now().toString().slice(-6)}`;
+                    doc.name = await this.generateDocName('PE', 'Payment Entry', user?.tenantId);
                 }
 
                 // Set received amount = paid amount by default
@@ -2456,7 +2574,7 @@ export class BusinessLogicService {
         doc.outstanding_amount = doc.grand_total; // For invoices
     }
 
-    private async postInvoiceToGL(doc: any, user: any) {
+    private async postInvoiceToGL(doc: any, user: any, txClient?: Prisma.TransactionClient) {
         const tenantId = user?.tenantId ?? doc.tenant_id ?? doc.tenantId;
         if (!tenantId) throw new Error('Missing tenantId for GL posting');
         const voucherType = 'Invoice';
@@ -2476,9 +2594,7 @@ export class BusinessLogicService {
             remarks: `Invoice ${voucherNo}`,
         });
 
-        await this.prisma.$transaction(async (tx) => {
-            await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
-
+        const buildEntries = async (tx: Prisma.TransactionClient) => {
             for (const item of items) {
                 let incomeAccount = 'Sales';
                 if (item?.item_code) {
@@ -2514,12 +2630,21 @@ export class BusinessLogicService {
                     });
                 }
             }
-        });
+        };
 
-        await this.createGlEntries(tenantId, postingDate, postingTs, entries, voucherType, voucherNo);
+        if (txClient) {
+            await buildEntries(txClient);
+        } else {
+            await this.prisma.$transaction(async (tx) => {
+                await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+                await buildEntries(tx);
+            });
+        }
+
+        await this.createGlEntries(tenantId, postingDate, postingTs, entries, voucherType, voucherNo, txClient);
     }
 
-    private async postPurchaseInvoiceToGL(doc: any, user: any) {
+    private async postPurchaseInvoiceToGL(doc: any, user: any, txClient?: Prisma.TransactionClient) {
         const tenantId = user?.tenantId ?? doc.tenant_id ?? doc.tenantId;
         if (!tenantId) throw new Error('Missing tenantId for GL posting');
         const voucherType = 'Purchase Invoice';
@@ -2531,8 +2656,7 @@ export class BusinessLogicService {
         const itemAccountCache = new Map<string, { expenseAccount?: string | null; stockAccount?: string | null; isStockItem?: boolean }>();
         const entries: Array<{ accountCode: string; debit: number; credit: number; remarks?: string }> = [];
 
-        await this.prisma.$transaction(async (tx) => {
-            await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+        const buildEntries = async (tx: Prisma.TransactionClient) => {
             for (const item of items) {
                 let debitAccount = 'Expenses';
                 if (item?.item_code) {
@@ -2567,7 +2691,16 @@ export class BusinessLogicService {
                     remarks: `Purchase Invoice ${voucherNo}`,
                 });
             }
-        });
+        };
+
+        if (txClient) {
+            await buildEntries(txClient);
+        } else {
+            await this.prisma.$transaction(async (tx) => {
+                await tx.$executeRaw`SELECT set_config('app.tenant', ${tenantId}, true)`;
+                await buildEntries(tx);
+            });
+        }
 
         const creditTo = doc.credit_to || 'Accounts Payable';
         entries.push({
@@ -2590,7 +2723,7 @@ export class BusinessLogicService {
             }
         }
 
-        await this.createGlEntries(tenantId, postingDate, postingTs, entries, voucherType, voucherNo);
+        await this.createGlEntries(tenantId, postingDate, postingTs, entries, voucherType, voucherNo, txClient);
     }
 
     private async postPurchaseReceiptToGL(doc: any, user: any) {

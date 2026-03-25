@@ -126,8 +126,8 @@ export class CheckoutService {
         throw new BadRequestException('Cart is empty');
       }
 
-      // Validate order total is positive
-      if (Number(cart.grandTotal) <= 0) {
+      // Validate order total is positive (allow $0 when gift card is applied)
+      if (Number(cart.grandTotal) <= 0 && !dto.giftCardCode) {
         throw new BadRequestException('Order total must be greater than $0');
       }
 
@@ -207,15 +207,24 @@ export class CheckoutService {
         const newSubtotal = cart.items.reduce(
           (sum, i) => sum + Number((i as any).price) * i.quantity, 0
         );
-        const newGrandTotal = newSubtotal + Number(cart.shippingTotal) + Number(cart.taxTotal) - Number(cart.discountAmount);
+        // Fix #24: Recalculate tax when prices change
+        const priceTenant = await tx.tenant.findUnique({
+          where: { id: tenantId },
+          select: { defaultTaxRate: true },
+        });
+        const taxRate = priceTenant?.defaultTaxRate ? Number(priceTenant.defaultTaxRate) : 0;
+        const newTaxTotal = newSubtotal * taxRate;
+        const newGrandTotal = newSubtotal + Number(cart.shippingTotal) + newTaxTotal - Number(cart.discountAmount);
         await tx.cart.update({
           where: { id: cart.id },
           data: {
             subtotal: newSubtotal,
+            taxTotal: newTaxTotal,
             grandTotal: newGrandTotal,
           },
         });
         (cart as any).subtotal = new Prisma.Decimal(newSubtotal);
+        (cart as any).taxTotal = new Prisma.Decimal(newTaxTotal);
         (cart as any).grandTotal = new Prisma.Decimal(newGrandTotal);
       }
 
@@ -834,6 +843,11 @@ export class CheckoutService {
                   item: true,
                 },
               },
+              variant: {
+                include: {
+                  item: true,
+                },
+              },
             },
           },
         },
@@ -862,10 +876,12 @@ export class CheckoutService {
       });
 
       // PAY-10: Release stock reservations for each order item with advisory locks
+      // Fix #1: Use variant's inventory item ID when available (variants have their own stock)
       for (const item of order.items) {
-        if (item.product?.item?.id) {
+        const stockItemId = (item as any).variant?.item?.id || item.product?.item?.id;
+        if (stockItemId) {
           // Acquire advisory lock to prevent concurrent stock modifications
-          const itemKey = `${tenantId}:${item.product.item.id}`;
+          const itemKey = `${tenantId}:${stockItemId}`;
           await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${itemKey}))`;
 
           // Safe decrement: only release if reservedQty >= quantity to prevent negative values
@@ -873,7 +889,7 @@ export class CheckoutService {
             UPDATE warehouse_item_balances
             SET "reservedQty" = "reservedQty" - ${item.quantity}
             WHERE "tenantId" = ${tenantId}
-              AND "itemId" = ${item.product.item.id}
+              AND "itemId" = ${stockItemId}
               AND "reservedQty" >= ${item.quantity}
           `;
         }

@@ -50,9 +50,8 @@ export class DistributedLockService implements OnModuleDestroy {
       const result = await redis.set(lockKey, Date.now().toString(), 'EX', ttlSeconds, 'NX');
       return result === 'OK';
     } catch (error) {
-      // If Redis is unavailable, fall through (allow sync to proceed)
-      this.logger.warn(`Failed to acquire lock ${key}: ${error?.message}. Proceeding without lock.`);
-      return true;
+      this.logger.warn(`Failed to acquire lock ${key}: ${error?.message}. Skipping operation.`);
+      return false; // Fail closed: don't proceed without lock
     }
   }
 

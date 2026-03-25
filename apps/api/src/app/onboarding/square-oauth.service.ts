@@ -178,17 +178,27 @@ export class SquareOAuthService {
       ? new Date(data.expires_at)
       : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
-    await this.prisma.tenant.update({
-      where: { id: tenantId },
-      data: {
-        squareAccessToken: encryptedToken,
-        squareAccessTokenExpiry: expiresAt,
-        // Refresh token may also be rotated
-        ...(data.refresh_token
-          ? { squareRefreshToken: this.encryption.encrypt(data.refresh_token) }
-          : {}),
-      },
-    });
+    let dbRetries = 3;
+    while (dbRetries > 0) {
+      try {
+        await this.prisma.tenant.update({
+          where: { id: tenantId },
+          data: {
+            squareAccessToken: encryptedToken,
+            squareAccessTokenExpiry: expiresAt,
+            // Refresh token may also be rotated
+            ...(data.refresh_token
+              ? { squareRefreshToken: this.encryption.encrypt(data.refresh_token) }
+              : {}),
+          },
+        });
+        break;
+      } catch (dbError) {
+        dbRetries--;
+        if (dbRetries === 0) throw dbError;
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
 
     this.logger.log(`Refreshed Square token for tenant ${tenantId}`);
     return newAccessToken;

@@ -9,6 +9,13 @@ export class ShippingService {
   // ── Zone CRUD ──
 
   async createZone(tenantId: string, dto: CreateZoneDto) {
+    if (dto.isDefault) {
+      await this.prisma.shippingZone.updateMany({
+        where: { tenantId, isDefault: true },
+        data: { isDefault: false },
+      });
+    }
+
     return this.prisma.shippingZone.create({
       data: {
         tenantId,
@@ -40,6 +47,13 @@ export class ShippingService {
       where: { id: zoneId, tenantId },
     });
     if (!zone) throw new NotFoundException('Shipping zone not found');
+
+    if (dto.isDefault) {
+      await this.prisma.shippingZone.updateMany({
+        where: { tenantId, isDefault: true },
+        data: { isDefault: false },
+      });
+    }
 
     return this.prisma.shippingZone.update({
       where: { id: zoneId },

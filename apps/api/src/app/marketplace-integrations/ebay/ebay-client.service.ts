@@ -1,5 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import eBayApi from 'ebay-api';
+import Redis from 'ioredis';
 import type {
   EbayOrder,
   EbayInventoryItem,
@@ -45,14 +46,20 @@ export class EbayApiError extends Error {
  * Classifies errors per eBay's error spec (REQUEST/BUSINESS/APPLICATION).
  */
 @Injectable()
-export class EbayClientService {
+export class EbayClientService implements OnModuleDestroy {
   private readonly logger = new Logger(EbayClientService.name);
   private readonly MAX_RETRIES = 3;
   private readonly BASE_DELAY_MS = 1000;
   private readonly mockMode = process.env.MOCK_EXTERNAL_SERVICES === 'true';
 
-  // Per-API daily call tracking for proactive rate limiting (M7)
-  private readonly dailyCallCounts = new Map<string, { count: number; resetAt: number }>();
+  // Redis-backed distributed rate limiting for multi-instance deployments
+  private redis: Redis | null = null;
+  private redisAvailable = true;
+
+  // In-memory fallback Maps (used only when Redis is unavailable)
+  private readonly dailyCallCountsFallback = new Map<string, { count: number; resetAt: number }>();
+  private readonly revisionCountsFallback = new Map<string, { count: number; resetAt: number }>();
+
   private readonly API_DAILY_LIMITS: Record<string, number> = {
     'sell.inventory': 2_000_000,
     'sell.account': 25_000,
@@ -66,8 +73,141 @@ export class EbayClientService {
   };
 
   // Revision tracking per listing per day (H4)
-  private readonly revisionCounts = new Map<string, { count: number; resetAt: number }>();
   private readonly MAX_REVISIONS_PER_DAY = 250;
+
+  private getRedis(): Redis {
+    if (!this.redis) {
+      this.redis = new Redis({
+        host: process.env.REDIS_HOST || 'localhost',
+        port: parseInt(process.env.REDIS_PORT || '6379', 10),
+        password: process.env.REDIS_PASSWORD || undefined,
+        maxRetriesPerRequest: 1,
+        connectTimeout: 2000,
+        lazyConnect: true,
+        enableOfflineQueue: false,
+      });
+      this.redis.on('error', (err) => {
+        if (this.redisAvailable) {
+          this.logger.warn(`Redis rate-limit connection error: ${err.message}. Falling back to in-memory.`);
+          this.redisAvailable = false;
+        }
+      });
+      this.redis.on('connect', () => {
+        this.redisAvailable = true;
+      });
+    }
+    return this.redis;
+  }
+
+  async onModuleDestroy() {
+    if (this.redis) {
+      await this.redis.quit().catch(() => {});
+      this.redis = null;
+    }
+  }
+
+  /**
+   * Calculate seconds remaining until end of current UTC day.
+   */
+  private getEndOfDayTtl(): number {
+    const now = new Date();
+    const endOfDay = new Date(now);
+    endOfDay.setUTCHours(23, 59, 59, 999);
+    return Math.max(Math.ceil((endOfDay.getTime() - now.getTime()) / 1000), 1);
+  }
+
+  /**
+   * Atomically increment a Redis counter with end-of-day TTL.
+   * Returns the new count, or null if Redis is unavailable.
+   */
+  private async redisIncr(key: string): Promise<number | null> {
+    try {
+      const redis = this.getRedis();
+      const count = await redis.incr(key);
+      if (count === 1) {
+        // First increment — set TTL to end of day
+        await redis.expire(key, this.getEndOfDayTtl());
+      }
+      return count;
+    } catch (error) {
+      this.logger.warn(`Redis INCR failed for ${key}: ${error?.message}. Falling back to in-memory.`);
+      this.redisAvailable = false;
+      return null;
+    }
+  }
+
+  /**
+   * Get current value of a Redis counter.
+   * Returns null if Redis is unavailable.
+   */
+  private async redisGet(key: string): Promise<number | null> {
+    try {
+      const redis = this.getRedis();
+      const val = await redis.get(key);
+      return val !== null ? parseInt(val, 10) : 0;
+    } catch (error) {
+      this.logger.warn(`Redis GET failed for ${key}: ${error?.message}. Falling back to in-memory.`);
+      this.redisAvailable = false;
+      return null;
+    }
+  }
+
+  /**
+   * Increment daily API call count in Redis.
+   */
+  private async incrementDailyCount(apiCategory: string): Promise<number> {
+    const today = new Date().toISOString().split('T')[0];
+    const key = `ebay:rate:daily:${apiCategory}:${today}`;
+    const count = await this.redisIncr(key);
+    if (count !== null) return count;
+
+    // Fallback to in-memory
+    const now = Date.now();
+    const entry = this.dailyCallCountsFallback.get(apiCategory);
+    if (!entry || now >= entry.resetAt) {
+      this.dailyCallCountsFallback.set(apiCategory, { count: 1, resetAt: now + 24 * 60 * 60 * 1000 });
+      return 1;
+    }
+    entry.count++;
+    return entry.count;
+  }
+
+  /**
+   * Get current daily API call count.
+   */
+  private async getDailyCount(apiCategory: string): Promise<number> {
+    const today = new Date().toISOString().split('T')[0];
+    const key = `ebay:rate:daily:${apiCategory}:${today}`;
+    const count = await this.redisGet(key);
+    if (count !== null) return count;
+
+    // Fallback to in-memory
+    const entry = this.dailyCallCountsFallback.get(apiCategory);
+    if (!entry || Date.now() >= entry.resetAt) return 0;
+    return entry.count;
+  }
+
+  /**
+   * Increment revision count for a listing in Redis.
+   */
+  private async incrementRevisionCount(listingId: string): Promise<number> {
+    const today = new Date().toISOString().split('T')[0];
+    const key = `ebay:rate:revision:${listingId}:${today}`;
+    const count = await this.redisIncr(key);
+    if (count !== null) return count;
+
+    // Fallback to in-memory
+    const now = Date.now();
+    const entry = this.revisionCountsFallback.get(listingId);
+    if (!entry || now >= entry.resetAt) {
+      const tomorrow = new Date();
+      tomorrow.setHours(24, 0, 0, 0);
+      this.revisionCountsFallback.set(listingId, { count: 1, resetAt: tomorrow.getTime() });
+      return 1;
+    }
+    entry.count++;
+    return entry.count;
+  }
 
   /**
    * Classify an eBay API error based on status code and error body.
@@ -102,58 +242,70 @@ export class EbayClientService {
 
   /**
    * Track API call count for proactive rate limiting.
+   * Uses Redis for distributed counting across instances, with in-memory fallback.
    * Returns true if the call should proceed, false if limit would be exceeded.
    */
-  trackApiCall(apiGroup: string): boolean {
-    const now = Date.now();
-    const entry = this.dailyCallCounts.get(apiGroup);
-    if (!entry || now >= entry.resetAt) {
-      // New day - reset counter
-      this.dailyCallCounts.set(apiGroup, {
-        count: 1,
-        resetAt: now + 24 * 60 * 60 * 1000,
-      });
-      return true;
-    }
-
+  async trackApiCall(apiGroup: string): Promise<boolean> {
     const limit = this.API_DAILY_LIMITS[apiGroup] || 100_000;
-    if (entry.count >= limit * 0.95) {
-      this.logger.warn(
-        `eBay API daily limit warning: ${apiGroup} at ${entry.count}/${limit} (95% threshold)`
-      );
-    }
-    if (entry.count >= limit) {
-      this.logger.error(`eBay API daily limit EXCEEDED for ${apiGroup}: ${entry.count}/${limit}`);
+
+    // Check current count before incrementing
+    const currentCount = await this.getDailyCount(apiGroup);
+    if (currentCount >= limit) {
+      this.logger.error(`eBay API daily limit EXCEEDED for ${apiGroup}: ${currentCount}/${limit}`);
       return false;
     }
 
-    entry.count++;
+    const newCount = await this.incrementDailyCount(apiGroup);
+
+    if (newCount >= limit * 0.95) {
+      this.logger.warn(
+        `eBay API daily limit warning: ${apiGroup} at ${newCount}/${limit} (95% threshold)`
+      );
+    }
+    if (newCount > limit) {
+      this.logger.error(`eBay API daily limit EXCEEDED for ${apiGroup}: ${newCount}/${limit}`);
+      return false;
+    }
+
     return true;
   }
 
   /**
-   * Track listing revisions. Returns true if revision is allowed.
+   * Track listing revisions. Uses Redis for distributed counting, with in-memory fallback.
+   * Returns true if revision is allowed.
    */
-  checkRevisionLimit(listingId: string): boolean {
-    const now = Date.now();
-    const entry = this.revisionCounts.get(listingId);
+  async checkRevisionLimit(listingId: string): Promise<boolean> {
+    const today = new Date().toISOString().split('T')[0];
+    const key = `ebay:rate:revision:${listingId}:${today}`;
 
-    if (!entry || now >= entry.resetAt) {
-      // Start of new calendar day
-      const tomorrow = new Date();
-      tomorrow.setHours(24, 0, 0, 0);
-      this.revisionCounts.set(listingId, { count: 1, resetAt: tomorrow.getTime() });
-      return true;
-    }
-
-    if (entry.count >= this.MAX_REVISIONS_PER_DAY) {
+    // Check current count before incrementing
+    const currentCount = await this.redisGet(key);
+    if (currentCount !== null && currentCount >= this.MAX_REVISIONS_PER_DAY) {
       this.logger.warn(
         `Listing ${listingId} has reached ${this.MAX_REVISIONS_PER_DAY} revisions today. Blocked.`
       );
       return false;
     }
 
-    entry.count++;
+    // Fallback check for in-memory
+    if (currentCount === null) {
+      const entry = this.revisionCountsFallback.get(listingId);
+      if (entry && Date.now() < entry.resetAt && entry.count >= this.MAX_REVISIONS_PER_DAY) {
+        this.logger.warn(
+          `Listing ${listingId} has reached ${this.MAX_REVISIONS_PER_DAY} revisions today. Blocked.`
+        );
+        return false;
+      }
+    }
+
+    const newCount = await this.incrementRevisionCount(listingId);
+    if (newCount > this.MAX_REVISIONS_PER_DAY) {
+      this.logger.warn(
+        `Listing ${listingId} has reached ${this.MAX_REVISIONS_PER_DAY} revisions today. Blocked.`
+      );
+      return false;
+    }
+
     return true;
   }
 
@@ -164,7 +316,7 @@ export class EbayClientService {
    * Classifies errors per eBay's spec and detects revoked tokens.
    */
   private async withRetry<T>(operation: () => Promise<T>, apiGroup?: string): Promise<T> {
-    if (apiGroup && !this.trackApiCall(apiGroup)) {
+    if (apiGroup && !(await this.trackApiCall(apiGroup))) {
       throw new EbayApiError(
         `eBay API daily limit exceeded for ${apiGroup}. Try again tomorrow.`,
         429, 'APPLICATION'

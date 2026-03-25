@@ -258,7 +258,7 @@ export class StockMovementService {
               );
             }
 
-            // Bin-level negative stock check
+            // Bin-level negative stock check (subtract reserved qty)
             if (fromLocation) {
               const binBalance = await tx.binBalance.findFirst({
                 where: {
@@ -269,13 +269,13 @@ export class StockMovementService {
                 },
               });
 
-              const binQty = binBalance
-                ? new Prisma.Decimal(binBalance.actualQty)
-                : new Prisma.Decimal(0);
+              const binActual = binBalance ? new Prisma.Decimal(binBalance.actualQty) : new Prisma.Decimal(0);
+              const binReserved = binBalance ? new Prisma.Decimal(binBalance.reservedQty || 0) : new Prisma.Decimal(0);
+              const binAvailable = binActual.sub(binReserved);
 
-              if (binQty.add(qty).lessThan(0)) {
+              if (binAvailable.add(qty).lessThan(0)) {
                 throw new BadRequestException(
-                  `Insufficient bin stock for ${item.code} at location ${itemDto.locationCode}. Bin available: ${binQty}, Required: ${qty.abs()}`
+                  `Insufficient bin stock for ${item.code} at location ${itemDto.locationCode}. Bin available: ${binAvailable}, Required: ${qty.abs()}`
                 );
               }
             }
@@ -306,6 +306,7 @@ export class StockMovementService {
         // ── FIFO / FEFO layer management ──
         const isPositive = qty.greaterThan(0);
         const isNegative = qty.lessThan(0);
+        let issueConsumption: { legs: Array<{ layerId: string; locationId: string; batchId: string | null; qty: Prisma.Decimal; rate: Prisma.Decimal }>; totalCost: Prisma.Decimal } | null = null;
 
         if (dto.movementType === MovementType.RECEIPT || (dto.movementType === MovementType.ADJUSTMENT && isPositive)) {
           // RECEIPT or positive ADJUSTMENT → create a new layer
@@ -354,6 +355,7 @@ export class StockMovementService {
             qty: qty.abs(),
             strategy,
           });
+          issueConsumption = consumption;
 
           // For ISSUE movements, derive the rate from consumed FIFO layers
           // instead of using user-supplied rate
@@ -458,8 +460,12 @@ export class StockMovementService {
         await this.updateWarehouseBalance(tx, ctx.tenantId, item.id, warehouse.id, qty);
 
         // Update bin (location) balance if location specified
-        // For non-transfer movements, only update one location to avoid double-counting
-        if (dto.movementType !== MovementType.TRANSFER) {
+        // For ISSUE/negative-ADJUSTMENT with FIFO consumption, iterate per-leg to update each location's bin balance
+        if (issueConsumption && issueConsumption.legs.length > 0 && dto.movementType !== MovementType.TRANSFER) {
+          for (const leg of issueConsumption.legs) {
+            await this.updateBinBalance(tx, ctx.tenantId, item.id, warehouse.id, leg.locationId, leg.qty.neg(), leg.batchId);
+          }
+        } else if (dto.movementType !== MovementType.TRANSFER) {
           const locationForBin = fromLocation || toLocation;
           if (locationForBin) {
             await this.updateBinBalance(tx, ctx.tenantId, item.id, warehouse.id, locationForBin.id, qty, batch?.id ?? null);
@@ -880,22 +886,23 @@ export class StockMovementService {
 
     // Use posting markers to prevent duplicate sequence numbers
     const maxRetries = 5;
+
+    // Find the highest sequence number once, then increment locally on conflict
+    const lastEntry = await tx.stockLedgerEntry.findFirst({
+      where: {
+        tenantId,
+        voucherType,
+        voucherNo: { startsWith: `${prefix}-${year}${month}` },
+      },
+      orderBy: { voucherNo: 'desc' },
+      select: { voucherNo: true },
+    });
+
+    let nextSeq = lastEntry
+      ? parseInt(lastEntry.voucherNo.split('-').pop() || '0') + 1
+      : 1;
+
     for (let attempt = 0; attempt < maxRetries; attempt++) {
-      // Find the highest sequence number
-      const lastEntry = await tx.stockLedgerEntry.findFirst({
-        where: {
-          tenantId,
-          voucherType,
-          voucherNo: { startsWith: `${prefix}-${year}${month}` },
-        },
-        orderBy: { voucherNo: 'desc' },
-        select: { voucherNo: true },
-      });
-
-      const nextSeq = lastEntry
-        ? parseInt(lastEntry.voucherNo.split('-').pop() || '0') + 1
-        : 1;
-
       const voucherNo = `${prefix}-${year}${month}-${String(nextSeq).padStart(5, '0')}`;
 
       // Try to create a posting marker to claim this voucher number
@@ -910,9 +917,10 @@ export class StockMovementService {
         });
         return voucherNo;
       } catch (error: unknown) {
-        // If unique constraint violated, retry with next number
+        // If unique constraint violated, increment and retry with next number
         const prismaError = error as { code?: string };
         if (prismaError.code === 'P2002' && attempt < maxRetries - 1) {
+          nextSeq++;
           continue;
         }
         throw error;
@@ -993,7 +1001,7 @@ export class StockMovementService {
           itemId,
           warehouseId,
           locationId,
-          batchId: batchId ?? null,
+          batchId: batchId ?? '__NO_BATCH__',
         },
       },
       update: {
@@ -1004,7 +1012,7 @@ export class StockMovementService {
         itemId,
         warehouseId,
         locationId,
-        batchId: batchId ?? null,
+        batchId: batchId ?? '__NO_BATCH__',
         actualQty: qty,
         reservedQty: 0,
       },

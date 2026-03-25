@@ -654,6 +654,12 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
 
     // Generate order number and create the order atomically
     const order = await this.prisma.$transaction(async (tx) => {
+      // Lock the marketplace order row to prevent concurrent order creation
+      const [locked] = await tx.$queryRaw<any[]>`
+        SELECT * FROM marketplace_orders WHERE id = ${marketplaceOrderId} FOR UPDATE
+      `;
+      if (locked.orderId) return; // Already has an order
+
       // Atomic order number generation (same pattern as checkout service)
       const date = new Date();
       const prefix = `MKT-${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -746,6 +752,19 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
 
       return newOrder;
     });
+
+    if (!order) {
+      // Race condition: another transaction already created the order
+      // Look up the marketplace order to get the orderId that was set by the other transaction
+      const mpOrder = await this.prisma.marketplaceOrder.findUnique({
+        where: { id: marketplaceOrderId },
+        select: { orderId: true },
+      });
+      if (mpOrder?.orderId) {
+        return this.prisma.order.findUnique({ where: { id: mpOrder.orderId } });
+      }
+      return null;
+    }
 
     this.logger.log(
       `Created NoSlag order ${order.orderNumber} from marketplace order ${mpOrder.externalOrderId}`

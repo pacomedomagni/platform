@@ -3,8 +3,10 @@ import { Injectable, Logger, NotFoundException, BadRequestException, Inject, Opt
 import { PrismaService } from '@platform/db';
 import { EmailService } from '@platform/email';
 import { StockMovementService } from '../../inventory-management/stock-movement.service';
+import { FailedOperationsService } from '../../workers/failed-operations.service';
 import { WebhookService } from '../../operations/webhook.service';
 import { MovementType } from '../../inventory-management/inventory-management.dto';
+import { OperationType } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import { ListOrdersDto } from './dto';
 
@@ -12,13 +14,25 @@ type OrderWithItems = Prisma.OrderGetPayload<{
   include: { items: true };
 }>;
 
-// PAY-13: Valid order status transitions
+// PAY-13: Valid order status transitions (admin)
 const VALID_ORDER_TRANSITIONS: Record<string, string[]> = {
   PENDING: ['CONFIRMED', 'CANCELLED'],
   CONFIRMED: ['PROCESSING', 'SHIPPED', 'CANCELLED'],
   PROCESSING: ['SHIPPED', 'CANCELLED'],
   SHIPPED: ['DELIVERED', 'PROCESSING', 'CANCELLED'], // Allow reverting or cancelling if shipment issue
   DELIVERED: ['REFUNDED'],
+  CANCELLED: [],
+  REFUNDED: [],
+};
+
+// Fix #32: Customer-facing transitions — more restrictive than admin.
+// Customers cannot cancel shipped orders (must contact support for returns).
+const CUSTOMER_ORDER_TRANSITIONS: Record<string, string[]> = {
+  PENDING: ['CANCELLED'],
+  CONFIRMED: ['CANCELLED'],
+  PROCESSING: ['CANCELLED'],
+  SHIPPED: ['DELIVERED'], // No CANCELLED — customer cannot cancel after shipment
+  DELIVERED: [],
   CANCELLED: [],
   REFUNDED: [],
 };
@@ -30,6 +44,7 @@ export class OrdersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly stockMovementService: StockMovementService,
+    private readonly failedOperationsService: FailedOperationsService,
     private readonly webhookService: WebhookService,
     @Optional() @Inject(EmailService) private readonly emailService?: EmailService,
   ) {}
@@ -290,7 +305,8 @@ export class OrdersService {
     tenantId: string,
     orderId: string,
     status: string,
-    trackingInfo?: { carrier?: string; trackingNumber?: string; adminNotes?: string }
+    trackingInfo?: { carrier?: string; trackingNumber?: string; adminNotes?: string },
+    options?: { isCustomer?: boolean }
   ) {
     const order = await this.prisma.order.findFirst({
       where: { id: orderId, tenantId },
@@ -307,7 +323,9 @@ export class OrdersService {
 
     if (!isNotesOnlyUpdate) {
       // PAY-13: Validate status transition
-      const allowedTransitions = VALID_ORDER_TRANSITIONS[order.status] || [];
+      // Fix #32: Use customer-restricted transitions when request is from customer
+      const transitionMap = options?.isCustomer ? CUSTOMER_ORDER_TRANSITIONS : VALID_ORDER_TRANSITIONS;
+      const allowedTransitions = transitionMap[order.status] || [];
       if (!allowedTransitions.includes(status)) {
         throw new BadRequestException(
           `Invalid status transition: ${order.status} → ${status}. Allowed: ${allowedTransitions.join(', ') || 'none'}`
@@ -457,6 +475,17 @@ export class OrdersService {
       }
     } catch (error) {
       this.logger.error(`Failed to return stock for order ${orderId}:`, error);
+
+      // Fix #23: Record failed operation for automatic retry
+      await this.failedOperationsService.recordFailedOperation({
+        tenantId,
+        operationType: OperationType.STOCK_RETURN,
+        referenceId: orderId,
+        referenceType: 'order',
+        payload: { orderId, tenantId, reason: 'Stock return failed during order cancellation' },
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+      }).catch(err => this.logger.error(`Failed to record failed stock return operation for order ${orderId}:`, err));
     }
   }
 
@@ -511,6 +540,17 @@ export class OrdersService {
       this.logger.log(`Stock reservations released for cancelled unpaid order: ${order.orderNumber}`);
     } catch (error) {
       this.logger.error(`Failed to release stock reservations for order ${orderId}:`, error);
+
+      // Fix #23: Record failed operation for automatic retry
+      await this.failedOperationsService.recordFailedOperation({
+        tenantId,
+        operationType: OperationType.STOCK_RETURN,
+        referenceId: orderId,
+        referenceType: 'order',
+        payload: { orderId, tenantId, reason: 'Stock reservation release failed during order cancellation' },
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+      }).catch(err => this.logger.error(`Failed to record failed stock release operation for order ${orderId}:`, err));
     }
   }
 
@@ -566,6 +606,19 @@ export class OrdersService {
       this.logger.log(`Gift card ${gcTransaction.giftCardId} balance restored by ${refundAmount} for cancelled order ${orderId}`);
     } catch (error) {
       this.logger.error(`Failed to reverse gift card for order ${orderId}:`, error);
+
+      // Fix #23: Record failed operation for automatic retry
+      // Note: Using STOCK_RETURN as there is no GIFT_CARD_REVERSAL operation type in the schema.
+      // Consider adding a dedicated OperationType for gift card reversals.
+      await this.failedOperationsService.recordFailedOperation({
+        tenantId,
+        operationType: OperationType.STOCK_RETURN,
+        referenceId: orderId,
+        referenceType: 'order',
+        payload: { orderId, tenantId, reason: 'Gift card reversal failed during order cancellation' },
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+      }).catch(err => this.logger.error(`Failed to record failed gift card reversal operation for order ${orderId}:`, err));
     }
   }
 

@@ -248,12 +248,19 @@ export class EcommerceController {
   }
 
   @Post('reviews/upload-images')
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   @UseInterceptors(FilesInterceptor('images', 5, { limits: { fileSize: 5 * 1024 * 1024 } }))
   async uploadReviewImages(
     @Tenant() tenantId: string,
+    @Headers('authorization') authHeader: string,
     @UploadedFiles() files: Express.Multer.File[],
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
+    // Fix #31: Require authentication to prevent anonymous abuse of image uploads
+    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
+    if (!customerId) {
+      throw new BadRequestException('Authentication required to upload review images');
+    }
     if (!files || files.length === 0) throw new BadRequestException('No files provided');
 
     const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];

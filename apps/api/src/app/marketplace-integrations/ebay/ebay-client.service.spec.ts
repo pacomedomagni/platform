@@ -19,36 +19,36 @@ describe('EbayClientService', () => {
   });
 
   describe('trackApiCall', () => {
-    it('should allow calls under the limit', () => {
-      expect(service.trackApiCall('sell.inventory')).toBe(true);
+    it('should allow calls under the limit', async () => {
+      expect(await service.trackApiCall('sell.inventory')).toBe(true);
     });
 
-    it('should track calls per API group', () => {
+    it('should track calls per API group', async () => {
       // First call creates the counter
-      service.trackApiCall('sell.inventory');
-      service.trackApiCall('sell.inventory');
-      service.trackApiCall('sell.account');
+      await service.trackApiCall('sell.inventory');
+      await service.trackApiCall('sell.inventory');
+      await service.trackApiCall('sell.account');
 
       // All should pass - we're well under limits
-      expect(service.trackApiCall('sell.inventory')).toBe(true);
-      expect(service.trackApiCall('sell.account')).toBe(true);
+      expect(await service.trackApiCall('sell.inventory')).toBe(true);
+      expect(await service.trackApiCall('sell.account')).toBe(true);
     });
 
-    it('should use default limit for unknown API groups', () => {
-      expect(service.trackApiCall('unknown.api')).toBe(true);
+    it('should use default limit for unknown API groups', async () => {
+      expect(await service.trackApiCall('unknown.api')).toBe(true);
     });
   });
 
   describe('checkRevisionLimit', () => {
-    it('should allow first revision', () => {
-      expect(service.checkRevisionLimit('listing-1')).toBe(true);
+    it('should allow first revision', async () => {
+      expect(await service.checkRevisionLimit('listing-1')).toBe(true);
     });
 
-    it('should track revisions per listing', () => {
-      service.checkRevisionLimit('listing-1');
-      service.checkRevisionLimit('listing-2');
-      expect(service.checkRevisionLimit('listing-1')).toBe(true);
-      expect(service.checkRevisionLimit('listing-2')).toBe(true);
+    it('should track revisions per listing', async () => {
+      await service.checkRevisionLimit('listing-1');
+      await service.checkRevisionLimit('listing-2');
+      expect(await service.checkRevisionLimit('listing-1')).toBe(true);
+      expect(await service.checkRevisionLimit('listing-2')).toBe(true);
     });
   });
 

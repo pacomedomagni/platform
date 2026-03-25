@@ -132,7 +132,8 @@ export class FailedOperationsService {
           const errorMessage = error instanceof Error ? error.message : String(error);
           const errorStack = error instanceof Error ? error.stack : undefined;
 
-          const newAttemptCount = operation.attemptCount + 1;
+          // attemptCount was already incremented by the claiming UPDATE...RETURNING query above
+          const newAttemptCount = operation.attemptCount;
           const maxed = newAttemptCount >= operation.maxAttempts;
 
           if (maxed) {
@@ -204,6 +205,10 @@ export class FailedOperationsService {
         await this.retryWebhookDelivery(operation);
         break;
 
+      case OperationType.STOCK_RETURN:
+        await this.retryStockReturn(operation);
+        break;
+
       default:
         throw new Error(`Unknown operation type: ${operation.operationType}`);
     }
@@ -250,6 +255,72 @@ export class FailedOperationsService {
     );
 
     this.logger.log(`Successfully deducted stock for order ${payload.orderNumber}`);
+  }
+
+  /**
+   * Retry stock return for a refunded order
+   */
+  private async retryStockReturn(operation: FailedOperation): Promise<void> {
+    const payload = operation.payload as any;
+    const { orderId, orderNumber } = payload;
+
+    // Idempotency: check if a RECEIPT posting already exists for this refund
+    const existingPosting = await this.prisma.stockPosting.findFirst({
+      where: {
+        tenantId: operation.tenantId,
+        voucherNo: { contains: `Refund for Order ${orderNumber}` },
+      },
+    });
+    if (existingPosting) {
+      this.logger.log(`Stock return already exists for order ${orderNumber}, skipping retry`);
+      return;
+    }
+
+    // Load full order with items
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        items: {
+          include: {
+            product: { include: { item: true } },
+            variant: { include: { item: true } },
+          },
+        },
+      },
+    });
+
+    if (!order || !order.items.length) {
+      throw new Error(`Order ${orderId} not found or has no items`);
+    }
+
+    const warehouse = await this.prisma.warehouse.findFirst({
+      where: { tenantId: operation.tenantId, isActive: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    if (!warehouse) {
+      throw new Error(`No active warehouse found for tenant ${operation.tenantId}`);
+    }
+
+    const items = order.items.map((orderItem: any) => ({
+      itemCode: orderItem.variant?.item?.code || orderItem.product.item.code,
+      quantity: orderItem.quantity,
+      rate: Number(orderItem.unitPrice),
+    }));
+
+    await this.stockMovementService.createMovement(
+      { tenantId: operation.tenantId },
+      {
+        movementType: 'RECEIPT' as any,
+        postingDate: new Date().toISOString().split('T')[0],
+        warehouseCode: warehouse.code,
+        items,
+        reference: `Refund for Order ${orderNumber} (Retry)`,
+        remarks: `Stock return retry for refunded order ${orderNumber}`,
+      }
+    );
+
+    this.logger.log(`Successfully returned stock for refunded order ${orderNumber}`);
   }
 
   /**

@@ -17,7 +17,7 @@ export class StorePublishedGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
-    const tenantId = request.headers['x-tenant-id'];
+    const tenantId = request['resolvedTenantId'] || request.headers['x-tenant-id'];
 
     if (!tenantId) {
       return true; // Let other guards handle missing tenant

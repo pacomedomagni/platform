@@ -137,7 +137,7 @@ export class SquarePaymentService {
     }
 
     const body: any = {
-      idempotency_key: `refund_${paymentId}`,
+      idempotency_key: `refund_${paymentId}_${amount || 'full'}_${Date.now()}`,
       payment_id: paymentId,
       reason,
       amount_money: {

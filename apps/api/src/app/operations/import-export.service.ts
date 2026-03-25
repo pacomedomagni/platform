@@ -446,42 +446,45 @@ export class ImportExportService {
       endDate?: Date;
     } = {}
   ): Promise<void> {
-    const data = await this.getExportData(ctx, entityType, filters);
+    const generator = this.getExportDataGenerator(ctx, entityType, filters);
     const filename = `${entityType}-export-${new Date().toISOString().split('T')[0]}.csv`;
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
-    if (data.length === 0) {
-      res.end('');
-      return;
-    }
+    let isFirst = true;
+    let headers: string[] = [];
 
-    const headers = Object.keys(data[0]);
+    for await (const chunk of generator) {
+      if (chunk.length === 0) continue;
 
-    // M-3: Stream rows via res.write() instead of accumulating in memory
-    const canContinueHeader = res.write(headers.map(h => `"${h}"`).join(',') + '\n');
-    if (!canContinueHeader) {
-      await new Promise<void>((resolve) => res.once('drain', resolve));
-    }
-
-    for (const row of data) {
-      const values = headers.map(h => {
-        const val = row[h];
-        if (val === null || val === undefined) return '""';
-        if (typeof val === 'string') {
-          // Sanitize against CSV formula injection
-          let sanitized = val.replace(/"/g, '""');
-          if (/^[=+\-@\t\r]/.test(sanitized)) {
-            sanitized = `'${sanitized}`;
-          }
-          return `"${sanitized}"`;
+      if (isFirst) {
+        headers = Object.keys(chunk[0]);
+        const canContinueHeader = res.write(headers.map(h => `"${h}"`).join(',') + '\n');
+        if (!canContinueHeader) {
+          await new Promise<void>((resolve) => res.once('drain', resolve));
         }
-        return `"${val}"`;
-      });
-      const canContinue = res.write(values.join(',') + '\n');
-      if (!canContinue) {
-        await new Promise<void>((resolve) => res.once('drain', resolve));
+        isFirst = false;
+      }
+
+      for (const row of chunk) {
+        const values = headers.map(h => {
+          const val = row[h];
+          if (val === null || val === undefined) return '""';
+          if (typeof val === 'string') {
+            // Sanitize against CSV formula injection
+            let sanitized = val.replace(/"/g, '""');
+            if (/^[=+\-@\t\r]/.test(sanitized)) {
+              sanitized = `'${sanitized}`;
+            }
+            return `"${sanitized}"`;
+          }
+          return `"${val}"`;
+        });
+        const canContinue = res.write(values.join(',') + '\n');
+        if (!canContinue) {
+          await new Promise<void>((resolve) => res.once('drain', resolve));
+        }
       }
     }
 
@@ -500,19 +503,37 @@ export class ImportExportService {
       endDate?: Date;
     } = {}
   ): Promise<void> {
-    const data = await this.getExportData(ctx, entityType, filters);
+    const generator = this.getExportDataGenerator(ctx, entityType, filters);
     const filename = `${entityType}-export-${new Date().toISOString().split('T')[0]}.json`;
 
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.send(JSON.stringify(data, null, 2));
+
+    let isFirst = true;
+    res.write('[\n');
+
+    for await (const chunk of generator) {
+      for (const row of chunk) {
+        if (!isFirst) {
+          res.write(',\n');
+        }
+        const canContinue = res.write(JSON.stringify(row, null, 2));
+        if (!canContinue) {
+          await new Promise<void>((resolve) => res.once('drain', resolve));
+        }
+        isFirst = false;
+      }
+    }
+
+    res.write('\n]');
+    res.end();
   }
 
-  private async getExportData(
+  private getExportDataGenerator(
     ctx: TenantContext,
     entityType: ExportEntityType,
     filters: { startDate?: Date; endDate?: Date }
-  ): Promise<Record<string, unknown>[]> {
+  ): AsyncGenerator<Record<string, unknown>[]> {
     switch (entityType) {
       case 'products':
         return this.exportProducts(ctx);
@@ -531,10 +552,8 @@ export class ImportExportService {
     }
   }
 
-  private async exportProducts(ctx: TenantContext): Promise<Record<string, unknown>[]> {
-    // M-IE-3: Stream in chunks of 1000 to avoid loading all records into memory
+  private async *exportProducts(ctx: TenantContext): AsyncGenerator<Record<string, unknown>[]> {
     const CHUNK_SIZE = 1000;
-    const results: Record<string, unknown>[] = [];
     let skip = 0;
 
     while (true) {
@@ -548,28 +567,22 @@ export class ImportExportService {
 
       if (items.length === 0) break;
 
-      for (const i of items) {
-        results.push({
-          code: i.code,
-          name: i.name,
-          price: i.productListing ? Number(i.productListing.price) : 0,
-          cost: i.productListing?.costPrice ? Number(i.productListing.costPrice) : 0,
-          reorderLevel: i.reorderLevel ? Number(i.reorderLevel) : 0,
-          createdAt: i.createdAt.toISOString(),
-        });
-      }
+      yield items.map(i => ({
+        code: i.code,
+        name: i.name,
+        price: i.productListing ? Number(i.productListing.price) : 0,
+        cost: i.productListing?.costPrice ? Number(i.productListing.costPrice) : 0,
+        reorderLevel: i.reorderLevel ? Number(i.reorderLevel) : 0,
+        createdAt: i.createdAt.toISOString(),
+      }));
 
       skip += CHUNK_SIZE;
       if (items.length < CHUNK_SIZE) break;
     }
-
-    return results;
   }
 
-  private async exportCustomers(ctx: TenantContext): Promise<Record<string, unknown>[]> {
-    // M-IE-3: Stream in chunks of 1000 to avoid loading all records into memory
+  private async *exportCustomers(ctx: TenantContext): AsyncGenerator<Record<string, unknown>[]> {
     const CHUNK_SIZE = 1000;
-    const results: Record<string, unknown>[] = [];
     let skip = 0;
 
     while (true) {
@@ -582,58 +595,64 @@ export class ImportExportService {
 
       if (customers.length === 0) break;
 
-      for (const c of customers) {
-        results.push({
-          email: c.email,
-          firstName: c.firstName || '',
-          lastName: c.lastName || '',
-          phone: c.phone || '',
-          createdAt: c.createdAt.toISOString(),
-        });
-      }
+      yield customers.map(c => ({
+        email: c.email,
+        firstName: c.firstName || '',
+        lastName: c.lastName || '',
+        phone: c.phone || '',
+        createdAt: c.createdAt.toISOString(),
+      }));
 
       skip += CHUNK_SIZE;
       if (customers.length < CHUNK_SIZE) break;
     }
-
-    return results;
   }
 
-  private async exportInventory(ctx: TenantContext): Promise<Record<string, unknown>[]> {
-    // Use raw query to get inventory with warehouse balances
-    const items = await this.prisma.$queryRaw<Array<{
-      code: string;
-      name: string;
-      qty_on_hand: number;
-      cost_price: number;
-    }>>`
-      SELECT 
-        i.code,
-        i.name,
-        COALESCE(SUM(wb."actualQty")::float, 0) as qty_on_hand,
-        COALESCE(pl."costPrice"::float, 0) as cost_price
-      FROM items i
-      LEFT JOIN warehouse_item_balances wb ON wb."itemId" = i.id
-      LEFT JOIN product_listings pl ON pl."itemId" = i.id
-      WHERE i."tenantId" = ${ctx.tenantId}
-        AND i."isActive" = true
-      GROUP BY i.id, i.code, i.name, pl."costPrice"
-      ORDER BY i.code ASC
-    `;
+  private async *exportInventory(ctx: TenantContext): AsyncGenerator<Record<string, unknown>[]> {
+    const CHUNK_SIZE = 1000;
+    let offset = 0;
 
-    return items.map(i => ({
-      code: i.code,
-      name: i.name,
-      qtyOnHand: Number(i.qty_on_hand),
-      costPrice: Number(i.cost_price),
-      stockValue: Number(i.qty_on_hand) * Number(i.cost_price),
-    }));
+    while (true) {
+      const items = await this.prisma.$queryRaw<Array<{
+        code: string;
+        name: string;
+        qty_on_hand: number;
+        cost_price: number;
+      }>>`
+        SELECT
+          i.code,
+          i.name,
+          COALESCE(SUM(wb."actualQty")::float, 0) as qty_on_hand,
+          COALESCE(pl."costPrice"::float, 0) as cost_price
+        FROM items i
+        LEFT JOIN warehouse_item_balances wb ON wb."itemId" = i.id
+        LEFT JOIN product_listings pl ON pl."itemId" = i.id
+        WHERE i."tenantId" = ${ctx.tenantId}
+          AND i."isActive" = true
+        GROUP BY i.id, i.code, i.name, pl."costPrice"
+        ORDER BY i.code ASC
+        LIMIT ${CHUNK_SIZE} OFFSET ${offset}
+      `;
+
+      if (items.length === 0) break;
+
+      yield items.map(i => ({
+        code: i.code,
+        name: i.name,
+        qtyOnHand: Number(i.qty_on_hand),
+        costPrice: Number(i.cost_price),
+        stockValue: Number(i.qty_on_hand) * Number(i.cost_price),
+      }));
+
+      offset += CHUNK_SIZE;
+      if (items.length < CHUNK_SIZE) break;
+    }
   }
 
-  private async exportOrders(
+  private async *exportOrders(
     ctx: TenantContext,
     filters: { startDate?: Date; endDate?: Date }
-  ): Promise<Record<string, unknown>[]> {
+  ): AsyncGenerator<Record<string, unknown>[]> {
     const where: Prisma.OrderWhereInput = { tenantId: ctx.tenantId };
     if (filters.startDate || filters.endDate) {
       where.createdAt = {};
@@ -641,9 +660,7 @@ export class ImportExportService {
       if (filters.endDate) (where.createdAt as any).lte = filters.endDate;
     }
 
-    // H-1: Chunked iteration with take: 1000 to avoid loading all records into memory
     const CHUNK_SIZE = 1000;
-    const results: Record<string, unknown>[] = [];
     let skip = 0;
 
     while (true) {
@@ -657,27 +674,23 @@ export class ImportExportService {
 
       if (orders.length === 0) break;
 
-      for (const o of orders) {
-        results.push({
-          orderNumber: o.orderNumber,
-          customerEmail: o.email,
-          status: o.status,
-          paymentStatus: o.paymentStatus,
-          subtotal: Number(o.subtotal),
-          tax: Number(o.taxTotal),
-          shipping: Number(o.shippingTotal),
-          discount: Number(o.discountTotal),
-          total: Number(o.grandTotal),
-          itemCount: o.items.length,
-          createdAt: o.createdAt.toISOString(),
-        });
-      }
+      yield orders.map(o => ({
+        orderNumber: o.orderNumber,
+        customerEmail: o.email,
+        status: o.status,
+        paymentStatus: o.paymentStatus,
+        subtotal: Number(o.subtotal),
+        tax: Number(o.taxTotal),
+        shipping: Number(o.shippingTotal),
+        discount: Number(o.discountTotal),
+        total: Number(o.grandTotal),
+        itemCount: o.items.length,
+        createdAt: o.createdAt.toISOString(),
+      }));
 
       skip += CHUNK_SIZE;
       if (orders.length < CHUNK_SIZE) break;
     }
-
-    return results;
   }
 
   // ==========================================

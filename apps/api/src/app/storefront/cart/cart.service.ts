@@ -514,6 +514,29 @@ export class CartService {
         }
       }
 
+      // Fix #29: Per-customer coupon limit for guest users
+      // Note: The couponUsage table does not have a sessionToken column, so we cannot
+      // directly track guest coupon usage by session. Instead, we count orders placed
+      // with this coupon code from the same session token (via the cart's sessionToken).
+      // Limitation: This only works if orders retain a reference to the cart/session.
+      // A more robust solution would require adding sessionToken to the couponUsage table.
+      if (!cart.customerId && selectedCoupon.usageLimitPerCustomer && cart.sessionToken) {
+        const guestOrderUsage = await tx.order.count({
+          where: {
+            tenantId,
+            couponCode: selectedCoupon.code,
+            cart: { sessionToken: cart.sessionToken },
+            status: { not: 'CANCELLED' },
+          },
+        });
+
+        if (guestOrderUsage >= selectedCoupon.usageLimitPerCustomer) {
+          throw new BadRequestException(
+            'You have already reached the usage limit for this coupon'
+          );
+        }
+      }
+
       // Check minimum order amount
       if (selectedCoupon.minimumOrderAmount && Number(cart.subtotal) < Number(selectedCoupon.minimumOrderAmount)) {
         throw new BadRequestException(
@@ -652,6 +675,20 @@ export class CartService {
         // Validate stock and refresh prices during merge
         const mergeNotices: Array<{ productName: string; reason: string }> = [];
 
+        // Fix #26: Track old customer cart quantities before merge for reservation adjustments
+        const oldCustomerQtys = new Map<string, number>();
+        for (const item of anonymousCart.items) {
+          const key = `${item.productId}:${item.variantId || ''}`;
+          const existing = await tx.cartItem.findFirst({
+            where: {
+              cartId: customerCart.id,
+              productId: item.productId,
+              variantId: item.variantId || null,
+            },
+          });
+          oldCustomerQtys.set(key, existing?.quantity || 0);
+        }
+
         for (const item of anonymousCart.items) {
           // Refresh current price from product listing
           const product = await tx.productListing.findFirst({
@@ -737,6 +774,38 @@ export class CartService {
               price: currentPrice,
             },
           });
+        }
+
+        // Fix #26: Update stock reservations during cart merge.
+        // Release reservations from anonymous cart, then reserve for any
+        // quantity increases in the customer cart.
+        for (const item of anonymousCart.items) {
+          const product = await tx.productListing.findFirst({
+            where: { id: item.productId, tenantId },
+            include: { item: { select: { id: true } } },
+          });
+          if (!product?.item?.id) continue;
+
+          const stockItemId = product.item.id;
+
+          // Release the anonymous cart's reservation for this item
+          await this.releaseReservation(tx, tenantId, stockItemId, item.quantity);
+
+          // Reserve the delta (new customer cart qty - old customer cart qty)
+          const key = `${item.productId}:${item.variantId || ''}`;
+          const oldQty = oldCustomerQtys.get(key) || 0;
+          const mergedItem = await tx.cartItem.findFirst({
+            where: {
+              cartId: customerCart.id,
+              productId: item.productId,
+              variantId: item.variantId || null,
+            },
+          });
+          const newQty = mergedItem?.quantity || 0;
+          const deltaQty = newQty - oldQty;
+          if (deltaQty > 0) {
+            await this.reserveStock(tx, tenantId, stockItemId, deltaQty);
+          }
         }
 
         // Delete anonymous cart

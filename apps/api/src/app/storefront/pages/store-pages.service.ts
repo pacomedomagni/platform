@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { UpsertStorePageDto } from './store-pages.dto';
+import sanitize = require('sanitize-html');
 
 @Injectable()
 export class StorePagesService {
@@ -41,6 +42,7 @@ export class StorePagesService {
 
   async upsertPage(tenantId: string, slug: string, dto: UpsertStorePageDto) {
     const normalizedSlug = slug.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    const sanitizedContent = this.sanitizeHtml(dto.content);
 
     return this.prisma.storePage.upsert({
       where: { tenantId_slug: { tenantId, slug: normalizedSlug } },
@@ -48,14 +50,28 @@ export class StorePagesService {
         tenantId,
         slug: normalizedSlug,
         title: dto.title,
-        content: dto.content,
+        content: sanitizedContent,
         isPublished: dto.isPublished ?? true,
       },
       update: {
         title: dto.title,
-        content: dto.content,
+        content: sanitizedContent,
         ...(dto.isPublished !== undefined && { isPublished: dto.isPublished }),
       },
+    });
+  }
+
+  private sanitizeHtml(html: string): string {
+    return sanitize(html, {
+      allowedTags: sanitize.defaults.allowedTags.concat(['img', 'h1', 'h2', 'details', 'summary']),
+      allowedAttributes: {
+        ...sanitize.defaults.allowedAttributes,
+        img: ['src', 'alt', 'width', 'height', 'loading'],
+        a: ['href', 'target', 'rel'],
+        '*': ['class', 'id', 'style'],
+      },
+      allowedSchemes: ['http', 'https', 'mailto'],
+      disallowedTagsMode: 'discard',
     });
   }
 

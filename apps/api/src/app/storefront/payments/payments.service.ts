@@ -222,7 +222,7 @@ export class PaymentsService {
         data: {
           tenantId: order.tenantId,
           orderId: order.id,
-          amount: Number(order.grandTotal),
+          amount: paymentIntent.amount / 100,
           currency: order.currency,
           method: 'card',
           status: 'CAPTURED',
@@ -364,6 +364,19 @@ export class PaymentsService {
       return;
     }
 
+    // Idempotency: skip if stock movement already exists for this order
+    const existingPosting = await this.prisma.stockPosting.findFirst({
+      where: {
+        tenantId: order.tenantId,
+        voucherNo: { contains: order.orderNumber },
+        voucherType: { contains: 'Order' },
+      },
+    });
+    if (existingPosting) {
+      this.logger.log(`Stock already deducted for order ${order.orderNumber}, skipping`);
+      return;
+    }
+
     // Get default warehouse (in production, this would be based on shipping location)
     const warehouse = await this.prisma.warehouse.findFirst({
       where: {
@@ -412,7 +425,7 @@ export class PaymentsService {
   private async releaseStockReservations(order: any, warehouseId: string) {
     await this.prisma.$transaction(async (tx) => {
       for (const orderItem of order.items) {
-        const itemId = orderItem.product.item.id;
+        const itemId = orderItem.variant?.item?.id || orderItem.product.item.id;
         const tenantId = order.tenantId;
         const qty = orderItem.quantity;
 
@@ -615,7 +628,7 @@ export class PaymentsService {
         data: {
           tenantId: order.tenantId,
           orderId: order.id,
-          amount: Number(order.grandTotal),
+          amount: paymentIntent.amount / 100,
           currency: order.currency,
           method: 'card',
           status: 'FAILED',
@@ -751,7 +764,22 @@ export class PaymentsService {
       try {
         await this.returnStockForRefund(order);
       } catch (error) {
-        this.logger.error(`Failed to return stock for refund on order ${order.orderNumber}: ${error}`);
+        this.logger.error(`CRITICAL: Stock return failed for refund on order ${order.orderNumber}:`, error);
+
+        // Record failed operation for automatic retry (same pattern as stock deduction)
+        await this.failedOperationsService.recordFailedOperation({
+          tenantId: order.tenantId,
+          operationType: OperationType.STOCK_RETURN,
+          referenceId: order.id,
+          referenceType: 'order',
+          payload: {
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            type: 'refund_stock_return',
+          },
+          errorMessage: error instanceof Error ? error.message : String(error),
+          errorStack: error instanceof Error ? error.stack : undefined,
+        });
       }
     }
 

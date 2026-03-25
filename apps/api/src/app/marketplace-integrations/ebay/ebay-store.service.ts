@@ -1,7 +1,8 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { ClsService } from 'nestjs-cls';
 import eBayApi from 'ebay-api';
+import Redis from 'ioredis';
 import { EncryptionService } from '../shared/encryption.service';
 import { EbayTokenResponse } from '../shared/marketplace.types';
 
@@ -10,16 +11,19 @@ import { EbayTokenResponse } from '../shared/marketplace.types';
  * Handles multi-store connections, OAuth tokens, and authenticated clients
  */
 @Injectable()
-export class EbayStoreService {
+export class EbayStoreService implements OnModuleDestroy {
   private readonly logger = new Logger(EbayStoreService.name);
   private readonly clientCache = new Map<string, { client: eBayApi; expiry: number }>();
   private readonly refreshLocks = new Map<string, Promise<any>>();
   private readonly TOKEN_BUFFER_MS = 60000; // Refresh 1 min before expiry
   private readonly mockMode = process.env.MOCK_EXTERNAL_SERVICES === 'true';
 
-  // M5: OAuth token rate limit tracking per grant type per day
-  // eBay limits: 1K client credentials, 10K auth code, 50K refresh per day
-  private readonly tokenRateLimits = new Map<string, { count: number; resetAt: number }>();
+  // Redis-backed distributed token rate limiting for multi-instance deployments
+  private redis: Redis | null = null;
+  private redisAvailable = true;
+
+  // In-memory fallback (used only when Redis is unavailable)
+  private readonly tokenRateLimitsFallback = new Map<string, { count: number; resetAt: number }>();
   private readonly TOKEN_DAILY_LIMITS: Record<string, number> = {
     'client_credentials': 1_000,
     'authorization_code': 10_000,
@@ -31,6 +35,47 @@ export class EbayStoreService {
     private cls: ClsService,
     private encryption: EncryptionService
   ) {}
+
+  private getRedis(): Redis {
+    if (!this.redis) {
+      this.redis = new Redis({
+        host: process.env.REDIS_HOST || 'localhost',
+        port: parseInt(process.env.REDIS_PORT || '6379', 10),
+        password: process.env.REDIS_PASSWORD || undefined,
+        maxRetriesPerRequest: 1,
+        connectTimeout: 2000,
+        lazyConnect: true,
+        enableOfflineQueue: false,
+      });
+      this.redis.on('error', (err) => {
+        if (this.redisAvailable) {
+          this.logger.warn(`Redis rate-limit connection error: ${err.message}. Falling back to in-memory.`);
+          this.redisAvailable = false;
+        }
+      });
+      this.redis.on('connect', () => {
+        this.redisAvailable = true;
+      });
+    }
+    return this.redis;
+  }
+
+  async onModuleDestroy() {
+    if (this.redis) {
+      await this.redis.quit().catch(() => {});
+      this.redis = null;
+    }
+  }
+
+  /**
+   * Calculate seconds remaining until end of current UTC day.
+   */
+  private getEndOfDayTtl(): number {
+    const now = new Date();
+    const endOfDay = new Date(now);
+    endOfDay.setUTCHours(23, 59, 59, 999);
+    return Math.max(Math.ceil((endOfDay.getTime() - now.getTime()) / 1000), 1);
+  }
 
   /**
    * Get eBay API credentials from environment
@@ -301,7 +346,7 @@ export class EbayStoreService {
     }
 
     // M5: Check OAuth token rate limit before making the request
-    if (!this.checkTokenRateLimit('refresh_token')) {
+    if (!(await this.checkTokenRateLimit('refresh_token'))) {
       throw new Error('eBay OAuth refresh_token daily rate limit reached. Try again tomorrow.');
     }
 
@@ -353,33 +398,71 @@ export class EbayStoreService {
 
   /**
    * M5: Track OAuth token request counts per grant type per day.
+   * Uses Redis for distributed counting across instances, with in-memory fallback.
    * Returns true if the request should proceed, false if limit would be exceeded.
    */
-  private checkTokenRateLimit(grantType: string): boolean {
-    const now = Date.now();
-    const entry = this.tokenRateLimits.get(grantType);
+  private async checkTokenRateLimit(grantType: string): Promise<boolean> {
+    const limit = this.TOKEN_DAILY_LIMITS[grantType] || 10_000;
+    const today = new Date().toISOString().split('T')[0];
+    const key = `ebay:rate:token:${grantType}:${today}`;
 
-    if (!entry || now >= entry.resetAt) {
-      this.tokenRateLimits.set(grantType, {
-        count: 1,
-        resetAt: now + 24 * 60 * 60 * 1000,
-      });
+    try {
+      const redis = this.getRedis();
+
+      // Check current count before incrementing
+      const currentVal = await redis.get(key);
+      const currentCount = currentVal !== null ? parseInt(currentVal, 10) : 0;
+      if (currentCount >= limit) {
+        this.logger.error(`OAuth ${grantType} daily limit EXCEEDED: ${currentCount}/${limit}`);
+        return false;
+      }
+
+      // Atomic increment
+      const newCount = await redis.incr(key);
+      if (newCount === 1) {
+        await redis.expire(key, this.getEndOfDayTtl());
+      }
+
+      if (newCount >= limit * 0.9) {
+        this.logger.warn(
+          `OAuth ${grantType} daily limit warning: ${newCount}/${limit} (90% threshold)`
+        );
+      }
+      if (newCount > limit) {
+        this.logger.error(`OAuth ${grantType} daily limit EXCEEDED: ${newCount}/${limit}`);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      this.logger.warn(`Redis token rate limit failed: ${error?.message}. Falling back to in-memory.`);
+      this.redisAvailable = false;
+
+      // Fallback to in-memory
+      const now = Date.now();
+      const entry = this.tokenRateLimitsFallback.get(grantType);
+
+      if (!entry || now >= entry.resetAt) {
+        this.tokenRateLimitsFallback.set(grantType, {
+          count: 1,
+          resetAt: now + 24 * 60 * 60 * 1000,
+        });
+        return true;
+      }
+
+      if (entry.count >= limit * 0.9) {
+        this.logger.warn(
+          `OAuth ${grantType} daily limit warning: ${entry.count}/${limit} (90% threshold)`
+        );
+      }
+      if (entry.count >= limit) {
+        this.logger.error(`OAuth ${grantType} daily limit EXCEEDED: ${entry.count}/${limit}`);
+        return false;
+      }
+
+      entry.count++;
       return true;
     }
-
-    const limit = this.TOKEN_DAILY_LIMITS[grantType] || 10_000;
-    if (entry.count >= limit * 0.9) {
-      this.logger.warn(
-        `OAuth ${grantType} daily limit warning: ${entry.count}/${limit} (90% threshold)`
-      );
-    }
-    if (entry.count >= limit) {
-      this.logger.error(`OAuth ${grantType} daily limit EXCEEDED: ${entry.count}/${limit}`);
-      return false;
-    }
-
-    entry.count++;
-    return true;
   }
 
   /**

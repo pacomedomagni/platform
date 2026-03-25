@@ -1017,7 +1017,7 @@ export class EbayListingsService {
     }
 
     // H4: Check 250 revision/day limit before updating
-    if (!this.ebayClient.checkRevisionLimit(listingId)) {
+    if (!(await this.ebayClient.checkRevisionLimit(listingId))) {
       throw new BadRequestException(
         'Listing has reached the eBay daily revision limit (250). Try again tomorrow.'
       );
@@ -1099,6 +1099,7 @@ export class EbayListingsService {
     const currency = this.getMarketplaceCurrency(connection.marketplaceId);
 
     // Step 1: Create inventory items for each variant
+    const createdSkus: string[] = [];
     for (const variant of data.variants) {
       await this.ebayClient.createOrReplaceInventoryItem(client, variant.sku, {
         product: {
@@ -1112,6 +1113,7 @@ export class EbayListingsService {
           shipToLocationAvailability: { quantity: variant.quantity },
         },
       });
+      createdSkus.push(variant.sku);
     }
 
     // Step 2: Create inventory item group
@@ -1131,27 +1133,36 @@ export class EbayListingsService {
       },
     });
 
-    // Step 3: Publish via group
-    const publishResult = await this.ebayClient.publishOfferByInventoryItemGroup(client, {
-      inventoryItemGroupKey: data.groupKey,
-      marketplaceId: connection.marketplaceId,
-      offers: data.variants.map((v) => ({
-        sku: v.sku,
+    // Step 3: Publish via group (with rollback on failure)
+    let publishResult;
+    try {
+      publishResult = await this.ebayClient.publishOfferByInventoryItemGroup(client, {
+        inventoryItemGroupKey: data.groupKey,
         marketplaceId: connection.marketplaceId,
-        format: 'FIXED_PRICE',
-        availableQuantity: v.quantity,
-        categoryId: data.categoryId,
-        listingPolicies: {
-          fulfillmentPolicyId: data.fulfillmentPolicyId,
-          paymentPolicyId: data.paymentPolicyId,
-          returnPolicyId: data.returnPolicyId,
-        },
-        pricingSummary: {
-          price: { value: String(v.price), currency },
-        },
-        merchantLocationKey: data.merchantLocationKey,
-      })),
-    });
+        offers: data.variants.map((v) => ({
+          sku: v.sku,
+          marketplaceId: connection.marketplaceId,
+          format: 'FIXED_PRICE',
+          availableQuantity: v.quantity,
+          categoryId: data.categoryId,
+          listingPolicies: {
+            fulfillmentPolicyId: data.fulfillmentPolicyId,
+            paymentPolicyId: data.paymentPolicyId,
+            returnPolicyId: data.returnPolicyId,
+          },
+          pricingSummary: {
+            price: { value: String(v.price), currency },
+          },
+          merchantLocationKey: data.merchantLocationKey,
+        })),
+      });
+    } catch (error) {
+      // Cleanup: delete created inventory items on publish failure
+      for (const sku of createdSkus) {
+        try { await this.ebayClient.deleteInventoryItem(client, sku); } catch { /* best effort */ }
+      }
+      throw error;
+    }
 
     // Step 4: Create local listing records for each variant
     const listings = [];

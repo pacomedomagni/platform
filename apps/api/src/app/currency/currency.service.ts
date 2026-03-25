@@ -94,32 +94,35 @@ export class CurrencyService {
       throw new BadRequestException(`Currency ${dto.currencyCode} already exists`);
     }
 
-    // If this is the first currency or marked as base, ensure only one base
-    if (dto.isBaseCurrency) {
-      await this.prisma.storeCurrency.updateMany({
-        where: { tenantId: ctx.tenantId, isBaseCurrency: true },
-        data: { isBaseCurrency: false },
+    // Wrap in transaction to ensure atomicity when setting base currency
+    const currency = await this.prisma.$transaction(async (tx) => {
+      // If this is the first currency or marked as base, ensure only one base
+      if (dto.isBaseCurrency) {
+        await tx.storeCurrency.updateMany({
+          where: { tenantId: ctx.tenantId, isBaseCurrency: true },
+          data: { isBaseCurrency: false },
+        });
+      }
+
+      // Check if this is the first currency
+      const count = await tx.storeCurrency.count({
+        where: { tenantId: ctx.tenantId },
       });
-    }
 
-    // Check if this is the first currency
-    const count = await this.prisma.storeCurrency.count({
-      where: { tenantId: ctx.tenantId },
-    });
-
-    const currency = await this.prisma.storeCurrency.create({
-      data: {
-        tenantId: ctx.tenantId,
-        currencyCode: dto.currencyCode.toUpperCase(),
-        symbol: dto.symbol,
-        symbolPosition: dto.symbolPosition || 'before',
-        decimalPlaces: dto.decimalPlaces ?? 2,
-        decimalSeparator: dto.decimalSeparator || '.',
-        thousandsSeparator: dto.thousandsSeparator || ',',
-        exchangeRate: dto.exchangeRate ?? 1,
-        isBaseCurrency: dto.isBaseCurrency ?? (count === 0),
-        isEnabled: dto.isEnabled ?? true,
-      },
+      return tx.storeCurrency.create({
+        data: {
+          tenantId: ctx.tenantId,
+          currencyCode: dto.currencyCode.toUpperCase(),
+          symbol: dto.symbol,
+          symbolPosition: dto.symbolPosition || 'before',
+          decimalPlaces: dto.decimalPlaces ?? 2,
+          decimalSeparator: dto.decimalSeparator || '.',
+          thousandsSeparator: dto.thousandsSeparator || ',',
+          exchangeRate: dto.exchangeRate ?? 1,
+          isBaseCurrency: dto.isBaseCurrency ?? (count === 0),
+          isEnabled: dto.isEnabled ?? true,
+        },
+      });
     });
 
     return this.formatCurrency(currency);
@@ -184,6 +187,12 @@ export class CurrencyService {
    * Bulk update exchange rates
    */
   async updateExchangeRates(ctx: TenantContext, rates: Record<string, number>) {
+    for (const [code, rate] of Object.entries(rates)) {
+      if (typeof rate !== 'number' || rate <= 0 || !isFinite(rate)) {
+        throw new BadRequestException(`Invalid exchange rate for ${code}: must be a positive number`);
+      }
+    }
+
     const updates = Object.entries(rates).map(([code, rate]) =>
       this.prisma.storeCurrency.updateMany({
         where: { tenantId: ctx.tenantId, currencyCode: code.toUpperCase() },
@@ -254,8 +263,8 @@ export class CurrencyService {
     }
 
     // Convert: amount in FROM -> base -> TO
-    const fromRate = Number(from.exchangeRate) || 1;
-    const toRate = Number(to.exchangeRate) || 1;
+    const fromRate = Number(from.exchangeRate);
+    const toRate = Number(to.exchangeRate);
     if (fromRate === 0) {
       throw new BadRequestException(`Exchange rate for ${fromCurrency} is zero`);
     }

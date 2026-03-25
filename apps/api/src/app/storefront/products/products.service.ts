@@ -79,10 +79,12 @@ export class ProductsService {
         FROM "product_listings" pl
         LEFT JOIN "order_items" oi ON oi."productId" = pl."id"
         WHERE pl."tenantId" = ${tenantId} AND pl."isPublished" = true
+        AND pl."deletedAt" IS NULL
         ${categorySlug ? Prisma.sql`AND EXISTS (SELECT 1 FROM "product_categories" pc WHERE pc."id" = pl."categoryId" AND pc."slug" = ${categorySlug})` : Prisma.empty}
         ${search ? Prisma.sql`AND (pl."displayName" ILIKE ${'%' + search + '%'} OR pl."shortDescription" ILIKE ${'%' + search + '%'})` : Prisma.empty}
         ${minPrice !== undefined ? Prisma.sql`AND pl."price" >= ${minPrice}` : Prisma.empty}
         ${maxPrice !== undefined ? Prisma.sql`AND pl."price" <= ${maxPrice}` : Prisma.empty}
+        ${featured === true ? Prisma.sql`AND pl."isFeatured" = true` : Prisma.empty}
         GROUP BY pl."id"
         ORDER BY COUNT(oi."id") ${sortOrder === 'asc' ? Prisma.sql`ASC` : Prisma.sql`DESC`}
         LIMIT ${limit} OFFSET ${offset}
@@ -831,78 +833,153 @@ export class ProductsService {
    * Create a product with auto-generated ERP Item (merchant-friendly)
    */
   async createSimpleProduct(tenantId: string, dto: CreateSimpleProductDto) {
-    // Auto-generate item code
-    const code = `PRD-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+    // Fix #15: Wrap entire operation in a transaction for atomicity
+    return this.prisma.$transaction(async (tx) => {
+      // Auto-generate item code
+      const code = `PRD-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
 
-    // Ensure "Each" UOM exists
-    await this.prisma.uom.upsert({
-      where: { code: 'EACH' },
-      update: {},
-      create: { code: 'EACH', name: 'Each' },
-    });
+      // Ensure "Each" UOM exists
+      await tx.uom.upsert({
+        where: { code: 'EACH' },
+        update: {},
+        create: { code: 'EACH', name: 'Each' },
+      });
 
-    // Find first active warehouse for this tenant
-    const warehouse = await this.prisma.warehouse.findFirst({
-      where: { tenantId, isActive: true, deletedAt: null },
-    });
+      // Find first active warehouse for this tenant
+      const warehouse = await tx.warehouse.findFirst({
+        where: { tenantId, isActive: true, deletedAt: null },
+      });
 
-    // Create the ERP Item
-    const item = await this.prisma.item.create({
-      data: {
-        tenantId,
-        code,
-        name: dto.name,
-        stockUomCode: 'EACH',
-        isStockItem: true,
-        isActive: true,
-      },
-    });
+      // Create the ERP Item
+      const item = await tx.item.create({
+        data: {
+          tenantId,
+          code,
+          name: dto.name,
+          stockUomCode: 'EACH',
+          isStockItem: true,
+          isActive: true,
+        },
+      });
 
-    // If warehouse exists, create a WarehouseItemBalance so stock tracking works
-    if (warehouse) {
-      await this.prisma.warehouseItemBalance.create({
+      // If warehouse exists, create a WarehouseItemBalance so stock tracking works
+      if (warehouse) {
+        await tx.warehouseItemBalance.create({
+          data: {
+            tenantId,
+            itemId: item.id,
+            warehouseId: warehouse.id,
+            actualQty: 0,
+            reservedQty: 0,
+          },
+        }).catch(() => {
+          // Balance may already exist — ignore
+        });
+      }
+
+      // Generate slug from name
+      const baseSlug = dto.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+        .substring(0, 80);
+
+      // Ensure slug uniqueness
+      let slug = baseSlug;
+      const existingSlug = await tx.productListing.findFirst({
+        where: { tenantId, slug },
+      });
+      if (existingSlug) {
+        slug = `${baseSlug}-${crypto.randomBytes(3).toString('hex')}`;
+      }
+
+      // Check if slug is unique (within transaction)
+      const existingSlugFinal = await tx.productListing.findFirst({
+        where: { tenantId, slug },
+      });
+      if (existingSlugFinal) {
+        throw new ConflictException('Product with this slug already exists');
+      }
+
+      // Check if item already has a listing
+      const existingListing = await tx.productListing.findFirst({
+        where: { tenantId, itemId: item.id },
+      });
+      if (existingListing) {
+        throw new ConflictException('Item already has a product listing');
+      }
+
+      const shouldPublish = dto.isPublished ?? true;
+
+      // Validate required fields before publishing
+      if (shouldPublish) {
+        if (!dto.name || !dto.name.trim()) {
+          throw new BadRequestException('Product must have a display name before publishing');
+        }
+        if (dto.price === undefined || dto.price === null || Number(dto.price) <= 0) {
+          throw new BadRequestException('Product must have a valid price before publishing');
+        }
+        if (!dto.images?.length) {
+          throw new BadRequestException('Product must have at least one image before publishing');
+        }
+        if (!dto.categoryId) {
+          throw new BadRequestException('Product must be assigned to a category before publishing');
+        }
+        const category = await tx.productCategory.findFirst({
+          where: { id: dto.categoryId, tenantId },
+        });
+        if (!category) {
+          throw new BadRequestException('Assigned category does not exist');
+        }
+      }
+
+      const product = await tx.productListing.create({
         data: {
           tenantId,
           itemId: item.id,
-          warehouseId: warehouse.id,
-          actualQty: 0,
-          reservedQty: 0,
+          slug,
+          displayName: dto.name,
+          shortDescription: dto.description,
+          longDescription: dto.longDescription,
+          price: dto.price,
+          compareAtPrice: dto.compareAtPrice,
+          images: dto.images || [],
+          categoryId: dto.categoryId,
+          isFeatured: dto.isFeatured ?? false,
+          isPublished: shouldPublish,
+          publishedAt: shouldPublish ? new Date() : null,
         },
-      }).catch(() => {
-        // Balance may already exist — ignore
+        include: {
+          category: {
+            select: { id: true, name: true, slug: true },
+          },
+          item: {
+            select: {
+              code: true,
+              stockUomCode: true,
+              warehouseItemBalances: {
+                select: { actualQty: true, reservedQty: true },
+              },
+            },
+          },
+        },
       });
-    }
 
-    // Generate slug from name
-    const baseSlug = dto.name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '')
-      .substring(0, 80);
+      // Fire-and-forget: trigger product.created webhook
+      this.webhookService.triggerEvent({ tenantId }, {
+        event: 'product.created',
+        payload: {
+          productId: product.id,
+          slug: product.slug,
+          displayName: product.displayName,
+          price: product.price ? Number(product.price) : null,
+          isPublished: product.isPublished,
+        },
+        timestamp: new Date(),
+      }).catch(() => { /* silent */ });
 
-    // Ensure slug uniqueness
-    let slug = baseSlug;
-    const existingSlug = await this.prisma.productListing.findFirst({
-      where: { tenantId, slug },
+      return this.mapProductToDetailResponse(product);
     });
-    if (existingSlug) {
-      slug = `${baseSlug}-${crypto.randomBytes(3).toString('hex')}`;
-    }
-
-    // Create the ProductListing using existing method, passing all DTO fields
-    return this.createProductListing(tenantId, {
-      itemId: item.id,
-      slug,
-      displayName: dto.name,
-      shortDescription: dto.description,
-      longDescription: dto.longDescription,
-      price: dto.price,
-      compareAtPrice: dto.compareAtPrice,
-      images: dto.images,
-      categoryId: dto.categoryId,
-      isFeatured: dto.isFeatured,
-      isPublished: dto.isPublished ?? true,
-    } as CreateProductListingDto);
   }
 
   /**

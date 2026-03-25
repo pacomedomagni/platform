@@ -399,24 +399,30 @@ export class VariantsService {
   }
 
   async adjustVariantStock(tenantId: string, id: string, adjustment: number) {
-    const existing = await this.prisma.productVariant.findFirst({
-      where: { id, tenantId },
-    });
+    // Fix #16: Wrap in transaction with advisory lock to prevent concurrent stock races
+    return this.prisma.$transaction(async (tx) => {
+      const lockKey = `variant-stock:${id}`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
 
-    if (!existing) {
-      throw new NotFoundException('Variant not found');
-    }
+      const existing = await tx.productVariant.findFirst({
+        where: { id, tenantId },
+      });
 
-    const currentStock = existing.stockQty ?? 0;
-    if (currentStock + adjustment < 0 && !existing.allowBackorder) {
-      throw new BadRequestException(
-        `Insufficient stock: current ${currentStock}, adjustment ${adjustment}`
-      );
-    }
+      if (!existing) {
+        throw new NotFoundException('Variant not found');
+      }
 
-    return this.prisma.productVariant.update({
-      where: { id },
-      data: { stockQty: { increment: adjustment } },
+      const currentStock = existing.stockQty ?? 0;
+      if (currentStock + adjustment < 0 && !existing.allowBackorder) {
+        throw new BadRequestException(
+          `Insufficient stock: current ${currentStock}, adjustment ${adjustment}`
+        );
+      }
+
+      return tx.productVariant.update({
+        where: { id },
+        data: { stockQty: { increment: adjustment } },
+      });
     });
   }
 }

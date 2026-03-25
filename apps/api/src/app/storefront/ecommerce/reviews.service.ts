@@ -111,12 +111,13 @@ export class ReviewsService {
       throw new NotFoundException('Product not found');
     }
 
-    // Check if customer already reviewed this product
+    // Check if customer already reviewed this product (exclude rejected reviews)
     const existingReview = await this.prisma.productReview.findFirst({
       where: {
         tenantId,
         productListingId: dto.productListingId,
         customerId,
+        status: { not: 'rejected' },
       },
     });
 

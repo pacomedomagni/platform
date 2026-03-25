@@ -100,33 +100,23 @@ export class MonitoringService {
    * Get stock reservation metrics and detect anomalies
    */
   private async getStockReservationMetrics() {
-    const balances = await this.prisma.warehouseItemBalance.findMany({
-      select: {
-        actualQty: true,
-        reservedQty: true,
-      },
-    });
+    const [metrics] = await this.prisma.$queryRaw<any[]>`
+      SELECT
+        COUNT(*) FILTER (WHERE "reservedQty" > 0) as reserved_items,
+        COALESCE(SUM("reservedQty"), 0) as total_reserved,
+        COALESCE(SUM("actualQty"), 0) as total_actual,
+        COUNT(*) FILTER (WHERE "actualQty" < 0) as negative_stock_count,
+        COUNT(*) FILTER (WHERE "reservedQty" > "actualQty") as over_reserved_count
+      FROM warehouse_item_balances
+    `;
 
-    let totalReservedQty = 0;
-    let totalActualQty = 0;
-    let negativeStockCount = 0;
-    let overReservedCount = 0;
+    const totalReservedQty = Number(metrics.total_reserved);
+    const totalActualQty = Number(metrics.total_actual);
+    const negativeStockCount = Number(metrics.negative_stock_count);
+    const overReservedCount = Number(metrics.over_reserved_count);
 
-    for (const balance of balances) {
-      const actual = Number(balance.actualQty);
-      const reserved = Number(balance.reservedQty);
-
-      totalReservedQty += reserved;
-      totalActualQty += actual;
-
-      if (actual < 0) {
-        negativeStockCount++;
-      }
-
-      if (reserved > actual) {
-        overReservedCount++;
-        this.logger.warn(`Over-reserved stock detected: actual=${actual}, reserved=${reserved}`);
-      }
+    if (overReservedCount > 0) {
+      this.logger.warn(`Over-reserved stock detected: ${overReservedCount} items have reserved > actual`);
     }
 
     const divergencePercentage =

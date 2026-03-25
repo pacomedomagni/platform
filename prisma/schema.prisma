@@ -2947,6 +2947,7 @@ model FailedOperation {
 
 enum OperationType {
   STOCK_DEDUCTION
+  STOCK_RETURN
   COUPON_TRACKING
   EMAIL_SEND
   WEBHOOK_DELIVERY

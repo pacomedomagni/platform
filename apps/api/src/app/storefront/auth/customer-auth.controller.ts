@@ -6,7 +6,6 @@ import {
   Delete,
   Param,
   Body,
-  Headers,
   Req,
   BadRequestException,
   UnauthorizedException,
@@ -34,18 +33,34 @@ export class CustomerAuthController {
 
   /**
    * Extract tenantId from JWT (request.user) for authenticated endpoints.
-   * Falls back to header only if JWT tenantId is not available.
+   * Falls back to resolved tenant from middleware, then header.
    * Throws if they mismatch.
    */
   private resolveAuthenticatedTenantId(req: Request): string {
     const jwtTenantId = (req as any).user?.tenantId;
+    const resolvedTenantId = (req as any)['resolvedTenantId'] as string | undefined;
     const headerTenantId = req.headers['x-tenant-id'] as string | undefined;
 
-    if (jwtTenantId && headerTenantId && jwtTenantId !== headerTenantId) {
-      throw new UnauthorizedException('Tenant ID mismatch between token and header');
+    if (jwtTenantId && resolvedTenantId && jwtTenantId !== resolvedTenantId) {
+      throw new UnauthorizedException('Tenant ID mismatch between token and resolved tenant');
     }
 
-    const tenantId = jwtTenantId || headerTenantId;
+    const tenantId = jwtTenantId || resolvedTenantId || headerTenantId;
+    if (!tenantId) {
+      throw new BadRequestException('Tenant ID required');
+    }
+    return tenantId;
+  }
+
+  /**
+   * Extract tenantId for unauthenticated endpoints.
+   * Prefers the resolved tenant from middleware over the raw header.
+   */
+  private resolveUnauthenticatedTenantId(req: Request): string {
+    const resolvedTenantId = (req as any)['resolvedTenantId'] as string | undefined;
+    const headerTenantId = req.headers['x-tenant-id'] as string | undefined;
+
+    const tenantId = resolvedTenantId || headerTenantId;
     if (!tenantId) {
       throw new BadRequestException('Tenant ID required');
     }
@@ -59,12 +74,10 @@ export class CustomerAuthController {
   @Post('register')
   @Throttle({ medium: { limit: 5, ttl: 60000 } }) // 5 registrations per minute
   async register(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Body() dto: RegisterCustomerDto
   ) {
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
+    const tenantId = this.resolveUnauthenticatedTenantId(req);
     return this.authService.register(tenantId, dto);
   }
 
@@ -75,12 +88,10 @@ export class CustomerAuthController {
   @Post('login')
   @Throttle({ medium: { limit: 5, ttl: 60000 } }) // 5 login attempts per minute
   async login(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Body() dto: LoginCustomerDto
   ) {
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
+    const tenantId = this.resolveUnauthenticatedTenantId(req);
     return this.authService.login(tenantId, dto);
   }
 
@@ -148,12 +159,10 @@ export class CustomerAuthController {
   @Post('forgot-password')
   @Throttle({ medium: { limit: 3, ttl: 60000 } }) // 3 requests per minute to prevent email spam
   async forgotPassword(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Body() dto: ForgotPasswordDto
   ) {
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
+    const tenantId = this.resolveUnauthenticatedTenantId(req);
     return this.authService.forgotPassword(tenantId, dto.email);
   }
 
@@ -164,12 +173,10 @@ export class CustomerAuthController {
   @Post('reset-password')
   @Throttle({ strict: { limit: 3, ttl: 60000 } }) // 3 attempts per minute
   async resetPassword(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Body() dto: ResetPasswordDto
   ) {
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
+    const tenantId = this.resolveUnauthenticatedTenantId(req);
     return this.authService.resetPassword(tenantId, dto.token, dto.password);
   }
 
@@ -179,12 +186,10 @@ export class CustomerAuthController {
    */
   @Post('verify-email')
   async verifyEmail(
-    @Headers('x-tenant-id') tenantId: string,
+    @Req() req: Request,
     @Body() dto: VerifyEmailDto
   ) {
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
+    const tenantId = this.resolveUnauthenticatedTenantId(req);
     return this.authService.verifyEmail(tenantId, dto.token);
   }
 

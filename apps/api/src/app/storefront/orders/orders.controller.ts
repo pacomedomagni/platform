@@ -99,7 +99,8 @@ export class OrdersController {
     const customerId = await this.getCustomerId(authHeader, tenantId);
     // Verify ownership
     await this.ordersService.getOrder(tenantId, orderId, customerId);
-    return this.ordersService.updateOrderStatus(tenantId, orderId, 'CANCELLED');
+    // Fix #32: Use customer transition map (more restrictive, e.g. no cancel after shipment)
+    return this.ordersService.updateOrderStatus(tenantId, orderId, 'CANCELLED', undefined, { isCustomer: true });
   }
 
   // ============ ADMIN ENDPOINTS ============

@@ -121,15 +121,8 @@ export class CustomerAuthService implements OnModuleInit {
       throw error;
     }
 
-    // Link any guest orders placed with the same email to this new account
-    await this.prisma.order.updateMany({
-      where: {
-        tenantId,
-        email: dto.email.toLowerCase(),
-        customerId: null,
-      },
-      data: { customerId: customer.id },
-    });
+    // Guest order linking is deferred until email verification (Fix #17)
+    // to prevent unverified accounts from claiming orders.
 
     // Send verification email (synchronous - critical)
     await this.sendVerificationEmail(customer.id, tenantId);
@@ -433,7 +426,7 @@ export class CustomerAuthService implements OnModuleInit {
       return { success: true, message: 'Email already verified' };
     }
 
-    // Update customer as verified and delete the token
+    // Update customer as verified, delete the token, and link guest orders
     await this.prisma.$transaction([
       this.prisma.storeCustomer.update({
         where: { id: verificationRecord.customerId },
@@ -444,6 +437,15 @@ export class CustomerAuthService implements OnModuleInit {
       }),
       this.prisma.emailVerificationToken.delete({
         where: { id: verificationRecord.id },
+      }),
+      // Link any guest orders placed with the same email to this verified account (Fix #17)
+      this.prisma.order.updateMany({
+        where: {
+          tenantId,
+          email: verificationRecord.customer.email,
+          customerId: null,
+        },
+        data: { customerId: verificationRecord.customerId },
       }),
     ]);
 
@@ -730,15 +732,33 @@ export class CustomerAuthService implements OnModuleInit {
       throw new UnauthorizedException('Account is deactivated');
     }
 
-    // Revoke old refresh token (rotation)
-    await this.prisma.refreshToken.update({
-      where: { id: tokenRecord.id },
-      data: { revokedAt: new Date() },
-    });
+    // Revoke old refresh token and create new one atomically (Fix #41)
+    const { token, newRefreshToken } = await this.prisma.$transaction(async (tx) => {
+      // Revoke old refresh token (rotation)
+      await tx.refreshToken.update({
+        where: { id: tokenRecord.id },
+        data: { revokedAt: new Date() },
+      });
 
-    // Issue new tokens
-    const token = this.generateToken(customer.id, customer.tenantId, customer.tokenVersion ?? 0);
-    const newRefreshToken = await this.createRefreshToken(customer.id, customer.tenantId);
+      // Create new refresh token
+      const refreshTokenValue = crypto.randomBytes(64).toString('hex');
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_EXPIRY_DAYS);
+
+      await tx.refreshToken.create({
+        data: {
+          token: refreshTokenValue,
+          customerId: customer.id,
+          tenantId: customer.tenantId,
+          expiresAt,
+        },
+      });
+
+      // Issue new access token
+      const accessToken = this.generateToken(customer.id, customer.tenantId, customer.tokenVersion ?? 0);
+
+      return { token: accessToken, newRefreshToken: refreshTokenValue };
+    });
 
     return {
       token,

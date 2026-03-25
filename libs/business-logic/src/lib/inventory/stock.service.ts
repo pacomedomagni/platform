@@ -324,8 +324,8 @@ export class StockService {
                 itemId: item.id,
                 warehouseId: warehouse.id,
                 locationId: preferredLocationId,
-                batchId: batch?.id ?? null,
-              } as any,
+                batchId: batch?.id ?? '__NO_BATCH__',
+              },
             },
           });
           const reservedInBin = new Prisma.Decimal(binBalance?.reservedQty ?? 0);
@@ -459,9 +459,13 @@ export class StockService {
         ),
       ]);
 
-      await this.lockStock(tx, input.tenantId, from.warehouse.id, from.item.id);
-      if (to.warehouse.id !== from.warehouse.id) {
-        await this.lockStock(tx, input.tenantId, to.warehouse.id, to.item.id);
+      // Sort warehouse IDs to prevent deadlock on bidirectional transfers
+      const lockPairs = [
+        { warehouseId: from.warehouse.id, itemId: from.item.id },
+        ...(to.warehouse.id !== from.warehouse.id ? [{ warehouseId: to.warehouse.id, itemId: to.item.id }] : []),
+      ].sort((a, b) => a.warehouseId.localeCompare(b.warehouseId));
+      for (const pair of lockPairs) {
+        await this.lockStock(tx, input.tenantId, pair.warehouseId, pair.itemId);
       }
 
       const fromLocationId = await this.resolvePickingLocationId(
@@ -711,6 +715,16 @@ export class StockService {
         }
       }
 
+      // Acquire locks for all affected items before modifying balances
+      const lockKeys = new Set<string>();
+      for (const layer of layers) {
+        lockKeys.add(`${layer.warehouseId}:${layer.itemId}`);
+      }
+      for (const key of [...lockKeys].sort()) {
+        const [wId, iId] = key.split(':');
+        await this.lockStock(tx, input.tenantId, wId, iId);
+      }
+
       const serialLinks = await tx.stockLedgerEntrySerial.findMany({
         where: {
           tenantId: input.tenantId,
@@ -745,8 +759,8 @@ export class StockService {
               itemId: layer.itemId,
               warehouseId: layer.warehouseId,
               locationId: layer.locationId,
-              batchId: layer.batchId ?? null,
-            } as any,
+              batchId: layer.batchId ?? '__NO_BATCH__',
+            },
           },
         });
         const binActual = new Prisma.Decimal(binBalance?.actualQty ?? 0);
@@ -843,6 +857,16 @@ export class StockService {
             `Cannot cancel Delivery Note ${input.voucherNo}: missing fromLocationId`,
           );
         }
+      }
+
+      // Acquire locks for all affected items before modifying balances
+      const lockKeys = new Set<string>();
+      for (const entry of issueEntries) {
+        lockKeys.add(`${entry.warehouseId}:${entry.itemId}`);
+      }
+      for (const key of [...lockKeys].sort()) {
+        const [wId, iId] = key.split(':');
+        await this.lockStock(tx, input.tenantId, wId, iId);
       }
 
       for (const entry of issueEntries) {
@@ -1014,8 +1038,8 @@ export class StockService {
               itemId: layer.itemId,
               warehouseId: layer.warehouseId,
               locationId: layer.locationId,
-              batchId: layer.batchId ?? null,
-            } as any,
+              batchId: layer.batchId ?? '__NO_BATCH__',
+            },
           },
         });
         const destBinActual = new Prisma.Decimal(destBinBalance?.actualQty ?? 0);
@@ -1137,8 +1161,8 @@ export class StockService {
     });
   }
 
-  async reserveStock(input: ReserveStockInput) {
-    return this.prisma.$transaction(async (tx) => {
+  async reserveStock(input: ReserveStockInput, txClient?: TransactionClient) {
+    const run = async (tx: TransactionClient) => {
       await this.setTenant(tx, input.tenantId);
       const alreadyPosted = await this.createPostingMarker(tx, {
         tenantId: input.tenantId,
@@ -1236,11 +1260,13 @@ export class StockService {
         warehouseCode: input.warehouseCode,
         qty: qty.toString(),
       });
-    });
+    };
+    if (txClient) return run(txClient);
+    return this.prisma.$transaction(run);
   }
 
-  async unreserveStock(input: ReserveStockInput) {
-    return this.prisma.$transaction(async (tx) => {
+  async unreserveStock(input: ReserveStockInput, txClient?: TransactionClient) {
+    const run = async (tx: TransactionClient) => {
       await this.setTenant(tx, input.tenantId);
       const alreadyPosted = await this.createPostingMarker(tx, {
         tenantId: input.tenantId,
@@ -1307,8 +1333,8 @@ export class StockService {
               itemId: item.id,
               warehouseId: warehouse.id,
               locationId,
-              batchId: batch?.id ?? null,
-            } as any,
+              batchId: batch?.id ?? '__NO_BATCH__',
+            },
           },
         });
         const reservedInBin = new Prisma.Decimal(binBalance?.reservedQty ?? 0);
@@ -1340,7 +1366,9 @@ export class StockService {
         warehouseCode: input.warehouseCode,
         qty: qty.toString(),
       });
-    });
+    };
+    if (txClient) return run(txClient);
+    return this.prisma.$transaction(run);
   }
 
   async reconcileStock(input: VoucherRef & {
@@ -1413,8 +1441,8 @@ export class StockService {
             itemId: item.id,
             warehouseId: warehouse.id,
             locationId: location.id,
-            batchId: batch?.id ?? null,
-          } as any,
+            batchId: batch?.id ?? '__NO_BATCH__',
+          },
         },
       });
       const currentQty = new Prisma.Decimal(current?.actualQty ?? 0);
@@ -2014,8 +2042,8 @@ export class StockService {
           itemId,
           warehouseId,
           locationId,
-          batchId: batchId ?? null,
-        } as any,
+          batchId: batchId ?? '__NO_BATCH__',
+        },
       },
       update: { actualQty: { increment: deltaQty } },
       create: {
@@ -2023,7 +2051,7 @@ export class StockService {
         itemId,
         warehouseId,
         locationId,
-        batchId: batchId ?? null,
+        batchId: batchId ?? '__NO_BATCH__',
         actualQty: deltaQty,
         reservedQty: 0,
       },
@@ -2048,8 +2076,8 @@ export class StockService {
           itemId: input.itemId,
           warehouseId: input.warehouseId,
           locationId: input.locationId,
-          batchId: input.batchId ?? null,
-        } as any,
+          batchId: input.batchId ?? '__NO_BATCH__',
+        },
       },
       update: { reservedQty: { increment: input.deltaQty } },
       create: {
@@ -2057,7 +2085,7 @@ export class StockService {
         itemId: input.itemId,
         warehouseId: input.warehouseId,
         locationId: input.locationId,
-        batchId: input.batchId,
+        batchId: input.batchId ?? '__NO_BATCH__',
         actualQty: 0,
         reservedQty: input.deltaQty,
       },
