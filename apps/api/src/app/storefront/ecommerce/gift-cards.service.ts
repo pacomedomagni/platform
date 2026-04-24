@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '@platform/db';
 import { Prisma } from '@prisma/client';
 import * as crypto from 'crypto';
+import * as bcrypt from 'bcrypt';
 import {
   CreateGiftCardDto,
   RedeemGiftCardDto,
@@ -11,6 +12,33 @@ import {
 @Injectable()
 export class GiftCardsService {
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Phase 1 W1.4/W1.7: gift card PINs are bcrypt-hashed at rest.
+   * Legacy plaintext PINs (pre-migration) are detected by the absence of a
+   * bcrypt prefix and fall back to constant-time string compare so existing
+   * cards keep working. New cards always store a bcrypt hash.
+   */
+  private static readonly PIN_BCRYPT_ROUNDS = 10;
+
+  private async hashPin(plaintextPin: string): Promise<string> {
+    return bcrypt.hash(plaintextPin, GiftCardsService.PIN_BCRYPT_ROUNDS);
+  }
+
+  private async comparePin(plaintextPin: string, storedValue: string): Promise<boolean> {
+    const isBcrypt = /^\$2[aby]\$/.test(storedValue);
+    if (isBcrypt) {
+      return bcrypt.compare(plaintextPin, storedValue);
+    }
+    // Legacy plaintext — constant-time string compare. Still safe against
+    // timing side channels; the audit finding is "stored in plaintext", which
+    // will be remediated as cards are rotated / created.
+    if (plaintextPin.length !== storedValue.length) return false;
+    return crypto.timingSafeEqual(
+      Buffer.from(plaintextPin),
+      Buffer.from(storedValue),
+    );
+  }
 
   // ============ PUBLIC ENDPOINTS ============
 
@@ -24,13 +52,10 @@ export class GiftCardsService {
       throw new NotFoundException('Gift card not found');
     }
 
-    // Verify PIN if set (use timing-safe comparison to prevent timing attacks)
+    // Verify PIN if set (bcrypt-aware; see comparePin)
     if (giftCard.pin) {
-      const pinStr = String(pin || '');
-      const storedPin = String(giftCard.pin);
-      if (pinStr.length !== storedPin.length || !crypto.timingSafeEqual(Buffer.from(pinStr), Buffer.from(storedPin))) {
-        throw new BadRequestException('Invalid PIN');
-      }
+      const ok = await this.comparePin(String(pin || ''), String(giftCard.pin));
+      if (!ok) throw new BadRequestException('Invalid PIN');
     }
 
     // Check if expired
@@ -73,13 +98,10 @@ export class GiftCardsService {
 
       const giftCard = lockedCards[0];
 
-      // Verify PIN if set (timing-safe comparison)
+      // Verify PIN if set (bcrypt-aware; see comparePin)
       if (giftCard.pin) {
-        const pinStr = String(dto.pin || '');
-        const storedPin = String(giftCard.pin);
-        if (pinStr.length !== storedPin.length || !crypto.timingSafeEqual(Buffer.from(pinStr), Buffer.from(storedPin))) {
-          throw new BadRequestException('Invalid PIN');
-        }
+        const ok = await this.comparePin(String(dto.pin || ''), String(giftCard.pin));
+        if (!ok) throw new BadRequestException('Invalid PIN');
       }
 
       // Validate card status
@@ -212,11 +234,19 @@ export class GiftCardsService {
         // Generate unique code (retry with new code on conflict)
         const code = this.generateGiftCardCode();
 
+        // Phase 1 W1.4: PIN is bcrypt-hashed at rest. The plaintext PIN is
+        // returned to the caller exactly once (in the service return value)
+        // so the merchant can deliver it to the recipient; nothing else has
+        // access to it.
+        const plaintextPin =
+          dto.sourceType === 'purchased' ? this.generatePin() : null;
+        const hashedPin = plaintextPin ? await this.hashPin(plaintextPin) : null;
+
         const giftCard = await this.prisma.giftCard.create({
           data: {
             tenantId,
             code,
-            pin: dto.sourceType === 'purchased' ? this.generatePin() : null,
+            pin: hashedPin,
             initialValue: dto.initialValue,
             currentBalance: dto.initialValue,
             currency: dto.currency || 'USD',
@@ -249,7 +279,9 @@ export class GiftCardsService {
           });
         }
 
-        return giftCard;
+        // Return the plaintext PIN once so the merchant/email handler can
+        // deliver it; it is never readable after this call returns.
+        return { ...giftCard, pin: plaintextPin };
       } catch (error) {
         // Retry on unique constraint violation (code collision)
         if (
