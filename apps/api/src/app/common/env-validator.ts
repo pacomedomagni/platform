@@ -40,6 +40,9 @@ const REQUIRED_IN_PROD: readonly RequiredEnv[] = [
 
 const FORBIDDEN_IN_PROD_WHEN_TRUE: readonly string[] = [
   'ALLOW_TENANT_HEADER',
+  'ENABLE_DEV_PASSWORD_LOGIN',
+  'MOCK_PAYMENTS',
+  'MOCK_EXTERNAL_SERVICES',
 ];
 
 function isProd(): boolean {

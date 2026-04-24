@@ -63,7 +63,10 @@ export class AuthService {
             aud: 'admin',
         };
 
-        const accessToken = jwt.sign(payload, jwtSecret, { expiresIn: '15m' });
+        const accessToken = jwt.sign(payload, jwtSecret, {
+            expiresIn: '15m',
+            algorithm: 'HS256', // Phase 1 W1.5: pin algorithm
+        });
         const refreshToken = await this.createRefreshToken(user.id, user.tenantId);
 
         return {
@@ -81,7 +84,14 @@ export class AuthService {
     }
 
     /**
-     * Refresh access token using a valid refresh token
+     * Refresh access token using a valid refresh token.
+     *
+     * Phase 1 W1.5: atomic rotation. The previous implementation did four
+     * non-atomic steps (read -> validate -> revoke -> create) which let two
+     * concurrent clients that captured the same token both complete the
+     * rotation before either revoke landed. This version wraps the
+     * validate+revoke+create in a Prisma transaction with `SELECT ... FOR
+     * UPDATE` on the refresh-token row so only one rotation wins.
      */
     async refreshAccessToken(refreshTokenValue: string) {
         const jwtSecret = process.env['JWT_SECRET'];
@@ -89,48 +99,71 @@ export class AuthService {
             throw new Error('JWT_SECRET must be set');
         }
 
-        const tokenRecord = await this.db.refreshToken.findUnique({
-            where: { token: refreshTokenValue },
-            include: { user: true },
+        const result = await this.db.$transaction(async (tx) => {
+            // SELECT ... FOR UPDATE serializes concurrent rotations of the
+            // same token. Prisma doesn't expose FOR UPDATE on model-level
+            // calls so we use $queryRaw for the lock.
+            const locked = await tx.$queryRaw<Array<{ id: string; revokedAt: Date | null; expiresAt: Date; userId: string }>>`
+                SELECT id, "revokedAt", "expiresAt", "userId"
+                FROM refresh_tokens
+                WHERE token = ${refreshTokenValue}
+                FOR UPDATE
+            `;
+
+            const tokenRow = locked[0];
+            if (!tokenRow) {
+                throw new UnauthorizedException('Invalid refresh token');
+            }
+            if (tokenRow.revokedAt) {
+                throw new UnauthorizedException('Refresh token has been revoked');
+            }
+            if (tokenRow.expiresAt < new Date()) {
+                throw new UnauthorizedException('Refresh token has expired');
+            }
+
+            await tx.refreshToken.update({
+                where: { id: tokenRow.id },
+                data: { revokedAt: new Date() },
+            });
+
+            const user = await tx.user.findUnique({ where: { id: tokenRow.userId } });
+            if (!user) {
+                throw new UnauthorizedException('Invalid refresh token');
+            }
+
+            const newToken = crypto.randomBytes(64).toString('hex');
+            const expiresAt = new Date();
+            expiresAt.setDate(expiresAt.getDate() + REFRESH_TOKEN_EXPIRY_DAYS);
+            await tx.refreshToken.create({
+                data: {
+                    token: newToken,
+                    userId: user.id,
+                    tenantId: user.tenantId,
+                    expiresAt,
+                },
+            });
+
+            return { user, newRefreshToken: newToken };
         });
 
-        if (!tokenRecord || !tokenRecord.user) {
-            throw new UnauthorizedException('Invalid refresh token');
-        }
-
-        if (tokenRecord.revokedAt) {
-            throw new UnauthorizedException('Refresh token has been revoked');
-        }
-
-        if (tokenRecord.expiresAt < new Date()) {
-            throw new UnauthorizedException('Refresh token has expired');
-        }
-
-        const user = tokenRecord.user;
-
-        // Revoke old refresh token (rotation)
-        await this.db.refreshToken.update({
-            where: { id: tokenRecord.id },
-            data: { revokedAt: new Date() },
-        });
-
-        // Issue new tokens
         const payload = {
-            username: user.email,
-            email: user.email,
-            sub: user.id,
-            tenant_id: user.tenantId,
-            roles: user.roles,
+            username: result.user.email,
+            email: result.user.email,
+            sub: result.user.id,
+            tenant_id: result.user.tenantId,
+            roles: result.user.roles,
             iss: 'admin',
             aud: 'admin',
         };
 
-        const accessToken = jwt.sign(payload, jwtSecret, { expiresIn: '15m' });
-        const newRefreshToken = await this.createRefreshToken(user.id, user.tenantId);
+        const accessToken = jwt.sign(payload, jwtSecret, {
+            expiresIn: '15m',
+            algorithm: 'HS256', // Phase 1 W1.5: pin algorithm
+        });
 
         return {
             access_token: accessToken,
-            refresh_token: newRefreshToken,
+            refresh_token: result.newRefreshToken,
         };
     }
 

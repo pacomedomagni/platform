@@ -143,6 +143,7 @@ export class CustomerAuthController {
    */
   @Post('change-password')
   @UseGuards(CustomerAuthGuard)
+  @Throttle({ medium: { limit: 5, ttl: 60000 } }) // Phase 1 W1.5: cap brute-force attempts on current-password check
   async changePassword(
     @Req() req: Request,
     @CurrentCustomer() customerId: string,
@@ -185,6 +186,7 @@ export class CustomerAuthController {
    * POST /api/v1/store/auth/verify-email
    */
   @Post('verify-email')
+  @Throttle({ medium: { limit: 10, ttl: 60000 } }) // Phase 1 W1.5: cap token-guess attempts
   async verifyEmail(
     @Req() req: Request,
     @Body() dto: VerifyEmailDto
@@ -199,6 +201,7 @@ export class CustomerAuthController {
    */
   @Post('resend-verification')
   @UseGuards(CustomerAuthGuard)
+  @Throttle({ medium: { limit: 3, ttl: 60000 } }) // Phase 1 W1.5: prevent email-spam / inbox flooding
   async resendVerification(
     @Req() req: Request,
     @CurrentCustomer() customerId: string
