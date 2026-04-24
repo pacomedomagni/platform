@@ -34,6 +34,31 @@ const DEFAULT_TAX_RATE = 0.0825; // 8.25%
 const DEFAULT_SHIPPING_RATE = 9.99;
 const FREE_SHIPPING_THRESHOLD = 100;
 
+// Phase 2 W2.6: cart lifetime is two-tiered.
+//   - `CART_ACTIVITY_TTL_MS`: rolling window extended on every mutation. If
+//     the customer is active, the cart remains valid; otherwise it abandons
+//     and its stock reservations are freed.
+//   - `CART_ABSOLUTE_MAX_MS`: hard cap measured from createdAt. Even an
+//     always-active cart cannot hold reservations past this point, so a bot
+//     that refreshes a cart indefinitely cannot indefinitely hoard stock.
+// Both are overridable via env for staging/test.
+const CART_ACTIVITY_TTL_MS = parseInt(
+  process.env['CART_ACTIVITY_TTL_MS'] ?? `${2 * 60 * 60 * 1000}`, // 2 hours
+  10,
+);
+const CART_ABSOLUTE_MAX_MS = parseInt(
+  process.env['CART_ABSOLUTE_MAX_MS'] ?? `${7 * 24 * 60 * 60 * 1000}`, // 7 days
+  10,
+);
+
+function computeCartExpiry(createdAt: Date | null | undefined): Date {
+  const now = Date.now();
+  const rolling = now + CART_ACTIVITY_TTL_MS;
+  if (!createdAt) return new Date(rolling);
+  const absoluteCap = createdAt.getTime() + CART_ABSOLUTE_MAX_MS;
+  return new Date(Math.min(rolling, absoluteCap));
+}
+
 @Injectable()
 export class CartService {
   constructor(
@@ -94,7 +119,8 @@ export class CartService {
         sessionToken: customerId ? null : newSessionToken,
         status: 'active',
         lastActivityAt: new Date(),
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+        // Phase 2 W2.6: rolling TTL, capped by absolute max (see top of file)
+        expiresAt: computeCartExpiry(new Date()),
       },
       include: this.cartInclude,
     });
@@ -643,7 +669,7 @@ export class CartService {
               customerId,
               status: 'active',
               lastActivityAt: new Date(),
-              expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+              expiresAt: computeCartExpiry(new Date()),
             },
             include: this.cartInclude,
           });
@@ -1134,8 +1160,9 @@ export class CartService {
         discountAmount: discountCents / 100,
         grandTotal: grandTotalCents / 100,
         lastActivityAt: new Date(),
-        // PAY-14: Extend expiry on activity
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        // Phase 2 W2.6: extend expiry on activity, but never past the
+        // absolute-max cap computed from cart.createdAt.
+        expiresAt: computeCartExpiry(cart.createdAt),
       },
     });
   }
