@@ -184,10 +184,13 @@ export class PaymentsService {
       return;
     }
 
-    // PAY-6: Verify payment amount matches order total (accounting for gift card discount)
+    // PAY-6 (Phase 1 W1.6): Verify payment amount matches order total exactly.
+    // The previous ±$0.01 tolerance let an attacker mint value systematically
+    // by rounding in their favor across thousands of orders. Rounding on the
+    // DB/service layer should be exact; any drift indicates a real mismatch.
     const giftCardApplied = Number(order.giftCardDiscount || 0);
     const expectedAmountCents = Math.round((Number(order.grandTotal) - giftCardApplied) * 100);
-    if (Math.abs(paymentIntent.amount - expectedAmountCents) > 1) {
+    if (paymentIntent.amount !== expectedAmountCents) {
       this.logger.error(
         `Payment amount mismatch for order ${order.orderNumber}: ` +
         `expected ${expectedAmountCents} cents, got ${paymentIntent.amount} cents`

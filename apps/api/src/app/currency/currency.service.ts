@@ -162,7 +162,13 @@ export class CurrencyService {
   }
 
   /**
-   * Set a currency as the base currency
+   * Set a currency as the base currency.
+   *
+   * Phase 1 W1.6: refuse the change if any product has a stored price, because
+   * prices are stored in the current base currency. Flipping the base without
+   * converting existing prices would silently reinterpret every listed price
+   * as the new currency (e.g., 100 USD becoming 100 EUR). Phase 2 will add an
+   * explicit conversion path; until then this is a block.
    */
   async setBaseCurrency(ctx: TenantContext, currencyCode: string) {
     const currency = await this.prisma.storeCurrency.findFirst({
@@ -171,6 +177,22 @@ export class CurrencyService {
 
     if (!currency) {
       throw new NotFoundException(`Currency ${currencyCode} not found`);
+    }
+
+    const existingBase = await this.prisma.storeCurrency.findFirst({
+      where: { tenantId: ctx.tenantId, isBaseCurrency: true },
+    });
+
+    if (existingBase && existingBase.id !== currency.id) {
+      const productsWithPrices = await this.prisma.productListing.count({
+        where: { tenantId: ctx.tenantId, price: { gt: 0 } },
+      });
+      if (productsWithPrices > 0) {
+        throw new BadRequestException(
+          `Cannot change base currency while ${productsWithPrices} product(s) have prices set. ` +
+          `Re-price every product into the new currency first, or clear prices before switching.`,
+        );
+      }
     }
 
     await this.prisma.$transaction([

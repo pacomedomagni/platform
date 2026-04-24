@@ -135,21 +135,57 @@ export class OrdersService {
   }
 
   /**
-   * Get order by order number (for guest checkout)
+   * Get order by order number (for guest checkout).
+   *
+   * Phase 1 W1.6 hardening: the previous implementation accepted any email
+   * alongside the order number. Rate limiting (5/min at controller) helped
+   * but still permitted ~7k probes/day per IP. This version:
+   *   1. requires the email match to be case-insensitive and whitespace-trimmed
+   *   2. uses a constant-time comparison to avoid email-existence timing oracles
+   *   3. rejects lookups for orders older than GUEST_LOOKUP_MAX_AGE_DAYS so old
+   *      order numbers cannot be enumerated indefinitely
+   *   4. returns the same `NotFoundException` for every failure reason (wrong
+   *      number, wrong email, too old) so callers cannot distinguish
+   *
+   * A proper signed lookup token (delivered in the order-confirmation email)
+   * is Phase 2 work — tracked in REMEDIATION_PLAN.md.
    */
+  private static readonly GUEST_LOOKUP_MAX_AGE_DAYS = 14;
+
   async getOrderByNumber(tenantId: string, orderNumber: string, email: string) {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail.includes('@')) {
+      throw new NotFoundException('Order not found');
+    }
+
     const order = await this.prisma.order.findFirst({
       where: {
         tenantId,
         orderNumber,
-        email: email.toLowerCase(),
       },
       include: {
         items: true,
       },
     });
 
+    // Single NotFound return path for all failure reasons.
     if (!order) {
+      throw new NotFoundException('Order not found');
+    }
+
+    const maxAgeMs = OrdersService.GUEST_LOOKUP_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
+    if (Date.now() - order.createdAt.getTime() > maxAgeMs) {
+      throw new NotFoundException('Order not found');
+    }
+
+    // Constant-time email compare to avoid timing oracles.
+    const orderEmail = (order.email ?? '').toLowerCase();
+    const a = Buffer.from(orderEmail);
+    const b = Buffer.from(normalizedEmail);
+    const emailsMatch =
+      a.length === b.length &&
+      require('crypto').timingSafeEqual(a, b);
+    if (!emailsMatch) {
       throw new NotFoundException('Order not found');
     }
 

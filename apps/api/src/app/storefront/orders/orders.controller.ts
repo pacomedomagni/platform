@@ -70,7 +70,10 @@ export class OrdersController {
    * Get order by order number (guest lookup)
    * GET /api/v1/store/orders/lookup/:orderNumber
    */
-  @Throttle({ medium: { limit: 5, ttl: 60000 } }) // 5 lookups per minute to prevent enumeration
+  // Phase 1 W1.6: tighter per-IP rate so guest lookup cannot be used to
+  // brute-force order numbers at 7k/day. Also enforces a 14-day age cutoff
+  // in the service layer (see orders.service getOrderByNumber).
+  @Throttle({ short: { limit: 3, ttl: 60000 }, long: { limit: 50, ttl: 24 * 60 * 60 * 1000 } })
   @Get('lookup/:orderNumber')
   async lookupOrder(
     @Req() req: Request,
