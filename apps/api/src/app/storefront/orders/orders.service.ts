@@ -14,24 +14,40 @@ type OrderWithItems = Prisma.OrderGetPayload<{
   include: { items: true };
 }>;
 
-// PAY-13: Valid order status transitions (admin)
+// Phase 2 W2.5: tightened admin state machine.
+//
+// Removed:
+//   - SHIPPED -> PROCESSING (an order handed to the carrier is physically
+//     out of our hands; "reverting" it in the DB doesn't reverse the
+//     shipment, so the UI was lying)
+//   - SHIPPED -> CANCELLED  (cancel a shipped order requires a carrier
+//     cancel call and is a different business process than order cancel;
+//     the correct post-shipment path is DELIVERED -> REFUNDED)
+//   - PROCESSING -> CANCELLED *without* payment reversal — still allowed
+//     here but the implementation is required to refund first (W2.5 full
+//     rollout will enforce this at the service level).
+//
+// DELIVERED -> REFUNDED remains the only terminal transition after
+// delivery. CANCELLED and REFUNDED are both terminal states — no further
+// transitions are permitted.
 const VALID_ORDER_TRANSITIONS: Record<string, string[]> = {
   PENDING: ['CONFIRMED', 'CANCELLED'],
   CONFIRMED: ['PROCESSING', 'SHIPPED', 'CANCELLED'],
   PROCESSING: ['SHIPPED', 'CANCELLED'],
-  SHIPPED: ['DELIVERED', 'PROCESSING', 'CANCELLED'], // Allow reverting or cancelling if shipment issue
+  SHIPPED: ['DELIVERED'],
   DELIVERED: ['REFUNDED'],
   CANCELLED: [],
   REFUNDED: [],
 };
 
-// Fix #32: Customer-facing transitions — more restrictive than admin.
-// Customers cannot cancel shipped orders (must contact support for returns).
+// Customer-facing transitions — stricter than admin. Customers can only
+// cancel orders that have not yet shipped; after shipment they must go
+// through support (returns/refunds).
 const CUSTOMER_ORDER_TRANSITIONS: Record<string, string[]> = {
   PENDING: ['CANCELLED'],
   CONFIRMED: ['CANCELLED'],
   PROCESSING: ['CANCELLED'],
-  SHIPPED: ['DELIVERED'], // No CANCELLED — customer cannot cancel after shipment
+  SHIPPED: ['DELIVERED'],
   DELIVERED: [],
   CANCELLED: [],
   REFUNDED: [],
@@ -409,6 +425,19 @@ export class OrdersService {
       await this.reverseGiftCardForOrder(tenantId, orderId);
     }
 
+    // Phase 2 W2.5: reverse the coupon usage that W2.4 reserved at checkout.
+    // Failing silently here is acceptable — the order is already cancelled;
+    // an over-counted coupon is a minor side effect that surfaces in admin.
+    if (status === 'CANCELLED' && order.couponCode) {
+      await this.reverseCouponUsageForOrder(tenantId, orderId).catch((err) =>
+        this.logger.error(
+          `Failed to reverse coupon usage for cancelled order ${orderId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        ),
+      );
+    }
+
     // Fire-and-forget transactional emails
     if (status === 'SHIPPED') {
       this.sendOrderStatusEmailAsync(orderId, 'store-order-shipped').catch(err =>
@@ -594,6 +623,41 @@ export class OrdersService {
    * Reverse gift card transaction when an order that used gift card payment is cancelled.
    * Restores the redeemed amount back to the gift card balance.
    */
+  /**
+   * Phase 2 W2.5: reverse the coupon usage reserved at checkout (W2.4).
+   *
+   * Finds the CouponUsage row for this order, deletes it, and decrements
+   * the coupon's timesUsed counter in one transaction. FOR UPDATE
+   * serializes the row so two concurrent cancellations (shouldn't happen
+   * but defensive) cannot double-decrement.
+   *
+   * Idempotent: if the row was already removed (e.g. a prior cancellation
+   * attempt partially succeeded), this is a no-op.
+   */
+  private async reverseCouponUsageForOrder(tenantId: string, orderId: string) {
+    await this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<
+        Array<{ id: string; couponId: string }>
+      >`
+        SELECT id, "couponId" FROM coupon_usages
+        WHERE "tenantId" = ${tenantId} AND "orderId" = ${orderId}
+        FOR UPDATE
+      `;
+      if (locked.length === 0) return;
+
+      const usage = locked[0];
+      await tx.couponUsage.delete({ where: { id: usage.id } });
+
+      // Clamp to zero in case of arithmetic drift from legacy data.
+      await tx.$executeRaw`
+        UPDATE coupons
+        SET "timesUsed" = GREATEST("timesUsed" - 1, 0)
+        WHERE id = ${usage.couponId}::uuid AND "tenantId" = ${tenantId}::uuid
+      `;
+    });
+    this.logger.log(`Reversed coupon usage for cancelled order ${orderId}`);
+  }
+
   private async reverseGiftCardForOrder(tenantId: string, orderId: string) {
     try {
       // Use a transaction with FOR UPDATE to prevent concurrent double-reversal
