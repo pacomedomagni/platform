@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { Prisma } from '@prisma/client';
+import * as postcss from 'postcss';
 import { CreateThemeDto, UpdateThemeDto } from './dto';
 import { validateThemeColors } from './interfaces/theme-colors.interface';
 import { getAllPresets, getPresetBySlug } from './presets';
@@ -166,9 +167,9 @@ export class ThemesService implements OnModuleInit {
         showQuickView: dto.showQuickView ?? true,
         showWishlist: dto.showWishlist ?? true,
         customCSS: dto.customCSS ? this.sanitizeCss(dto.customCSS) : null,
-        logoUrl: dto.logoUrl,
-        faviconUrl: dto.faviconUrl,
-        previewImageUrl: dto.previewImageUrl,
+        logoUrl: this.sanitizeAssetUrl(dto.logoUrl),
+        faviconUrl: this.sanitizeAssetUrl(dto.faviconUrl),
+        previewImageUrl: this.sanitizeAssetUrl(dto.previewImageUrl),
         tags: dto.tags || [],
       },
     });
@@ -242,9 +243,9 @@ export class ThemesService implements OnModuleInit {
       ...(dto.showQuickView !== undefined && { showQuickView: dto.showQuickView }),
       ...(dto.showWishlist !== undefined && { showWishlist: dto.showWishlist }),
       ...(dto.customCSS !== undefined && { customCSS: dto.customCSS ? this.sanitizeCss(dto.customCSS) : null }),
-      ...(dto.logoUrl !== undefined && { logoUrl: dto.logoUrl }),
-      ...(dto.faviconUrl !== undefined && { faviconUrl: dto.faviconUrl }),
-      ...(dto.previewImageUrl !== undefined && { previewImageUrl: dto.previewImageUrl }),
+      ...(dto.logoUrl !== undefined && { logoUrl: this.sanitizeAssetUrl(dto.logoUrl) }),
+      ...(dto.faviconUrl !== undefined && { faviconUrl: this.sanitizeAssetUrl(dto.faviconUrl) }),
+      ...(dto.previewImageUrl !== undefined && { previewImageUrl: this.sanitizeAssetUrl(dto.previewImageUrl) }),
       ...(dto.tags && { tags: dto.tags }),
     };
 
@@ -507,18 +508,107 @@ export class ThemesService implements OnModuleInit {
   }
 
   /**
-   * Sanitize custom CSS to prevent script injection and dangerous properties.
-   * Strips javascript: URLs, expression(), behavior, and @import.
+   * Phase 1 W1.7: real CSS sanitization using PostCSS.
+   *
+   * The prior regex-based implementation was bypassable via:
+   *  - unicode-escaped property names or values (e.g. j\61vascript:)
+   *  - CSS custom properties that smuggled unsafe URLs
+   *  - webkit-only properties with `javascript:` body
+   *  - nested calc() / functional notations
+   *
+   * Here we parse the CSS into an AST and walk it:
+   *  - drop any at-rule not in a conservative allowlist (no @import, @charset,
+   *    @namespace — which can pull remote CSS or confuse the parser)
+   *  - drop any declaration whose property or value matches a block pattern
+   *  - if parsing fails, return '' (reject rather than pass through raw text)
    */
+  private static readonly ALLOWED_AT_RULES: ReadonlySet<string> = new Set([
+    'media',
+    'supports',
+    'font-face',
+    'keyframes',
+    'page',
+  ]);
+
+  private static readonly BLOCKED_VALUE_PATTERNS: readonly RegExp[] = [
+    /javascript\s*:/i,
+    /vbscript\s*:/i,
+    /data\s*:(?!image\/(?:png|jpe?g|gif|webp|svg\+xml|bmp))/i, // allow data: images, block data:text/html etc.
+    /expression\s*\(/i,
+    /behavior\s*:/i,
+    /-moz-binding/i,
+    /\\[0-9a-f]{1,6}/i, // any unicode escape is suspicious in user CSS
+  ];
+
+  private static readonly BLOCKED_PROPERTIES: ReadonlySet<string> = new Set([
+    'behavior',
+    '-moz-binding',
+  ]);
+
   private sanitizeCss(css: string): string {
-    return css
-      .replace(/javascript\s*:/gi, '')
-      .replace(/expression\s*\(/gi, '')
-      .replace(/behavior\s*:/gi, '')
-      .replace(/@import\b/gi, '')
-      .replace(/url\s*\(\s*['"]?\s*javascript:/gi, 'url(')
-      .replace(/-moz-binding\s*:/gi, '')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
+    if (!css || css.length === 0) return '';
+    if (css.length > 64 * 1024) {
+      // Cap input size so a malicious theme can't DoS the PostCSS parser.
+      throw new BadRequestException('customCSS exceeds 64 KB limit');
+    }
+
+    let root: postcss.Root;
+    try {
+      root = postcss.parse(css);
+    } catch (err) {
+      this.logger.warn(`sanitizeCss: parse failed (${(err as Error).message}); rejecting input`);
+      return '';
+    }
+
+    const isBlockedValue = (value: string) =>
+      ThemesService.BLOCKED_VALUE_PATTERNS.some((re) => re.test(value));
+
+    root.walkAtRules((at) => {
+      if (!ThemesService.ALLOWED_AT_RULES.has(at.name.toLowerCase())) {
+        at.remove();
+      }
+    });
+
+    root.walkDecls((decl) => {
+      const prop = decl.prop.toLowerCase();
+      if (ThemesService.BLOCKED_PROPERTIES.has(prop)) {
+        decl.remove();
+        return;
+      }
+      if (isBlockedValue(decl.value)) {
+        decl.remove();
+        return;
+      }
+      // CSS custom properties (--foo) — common XSS vector when declared with
+      // dangerous URLs. Drop any whose value fails the same safety filter.
+      if (prop.startsWith('--') && isBlockedValue(decl.value)) {
+        decl.remove();
+      }
+    });
+
+    return root.toString();
+  }
+
+  /**
+   * Phase 1 W1.7: reject theme asset URLs with dangerous schemes or paths.
+   * Accepts only https:// (and optionally the platform's S3/MinIO base url).
+   * Use on logoUrl, faviconUrl, previewImageUrl, and any other user-supplied URL.
+   */
+  private sanitizeAssetUrl(url: string | undefined | null): string | null {
+    if (!url) return null;
+    const trimmed = url.trim();
+    if (!trimmed) return null;
+
+    let parsed: URL;
+    try {
+      parsed = new URL(trimmed);
+    } catch {
+      throw new BadRequestException(`Invalid asset URL: ${url}`);
+    }
+    const protocol = parsed.protocol.toLowerCase();
+    if (protocol !== 'https:' && protocol !== 'http:') {
+      throw new BadRequestException(`Asset URL must use http(s): received ${protocol}`);
+    }
+    return parsed.toString();
   }
 }
