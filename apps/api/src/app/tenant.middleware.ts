@@ -1,4 +1,11 @@
-import { Injectable, Logger, NestMiddleware, createParamDecorator, ExecutionContext } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NestMiddleware,
+  createParamDecorator,
+  ExecutionContext,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
 import { Request, Response, NextFunction } from 'express';
 import { DomainResolverService } from './storefront/domain-resolver/domain-resolver.service';
@@ -7,26 +14,57 @@ const isUuid = (val: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
 /**
- * Parameter decorator to extract tenantId from the request
+ * Resolve the tenant id from the request. Shared between @Tenant and @OptionalTenant.
+ */
+function resolveTenantIdFromRequest(request: any): string | undefined {
+  // Priority 1: authenticated user
+  if (request.user?.tenantId && isUuid(request.user.tenantId)) {
+    return request.user.tenantId;
+  }
+  // Priority 2: TenantMiddleware's host-resolved tenant (CLS-bound)
+  const clsTenantId = request['resolvedTenantId'];
+  if (clsTenantId && isUuid(clsTenantId)) {
+    return clsTenantId;
+  }
+  // Priority 3: development-only escape hatch via x-tenant-id header.
+  // Env-validator.ts rejects ALLOW_TENANT_HEADER=true in production.
+  if (process.env['ALLOW_TENANT_HEADER'] === 'true') {
+    const headerTenantId = request.headers?.['x-tenant-id'];
+    if (headerTenantId && isUuid(headerTenantId)) {
+      return headerTenantId;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Parameter decorator that injects the resolved tenant id.
+ *
+ * Throws 401 UnauthorizedException if no tenant can be resolved — services
+ * guarding on `if (tenantId)` were silently skipping filtering and leaking
+ * data cross-tenant. Use @OptionalTenant() for endpoints that legitimately
+ * accept an anonymous / unresolved caller (public landing pages, health, etc.).
  */
 export const Tenant = createParamDecorator(
-  (data: unknown, ctx: ExecutionContext): string => {
+  (_data: unknown, ctx: ExecutionContext): string => {
     const request = ctx.switchToHttp().getRequest();
-    // First try to get from user (set by AuthGuard/JWT)
-    if (request.user?.tenantId) {
-      return request.user.tenantId;
+    const tenantId = resolveTenantIdFromRequest(request);
+    if (!tenantId) {
+      throw new UnauthorizedException('Missing tenant context');
     }
-    // Try CLS context (set by TenantMiddleware — resolves Host header to UUID)
-    const clsTenantId = request['resolvedTenantId'];
-    if (clsTenantId && isUuid(clsTenantId)) {
-      return clsTenantId;
-    }
-    // Fallback to header for dev mode
-    if (process.env.ALLOW_TENANT_HEADER === 'true') {
-      const headerTenantId = request.headers['x-tenant-id'];
-      if (headerTenantId && isUuid(headerTenantId as string)) return headerTenantId as string;
-    }
-    return '';
+    return tenantId;
+  },
+);
+
+/**
+ * Variant for endpoints that must work without a tenant (public landing pages,
+ * health probes, domain-resolver itself, etc.). Returns `undefined` when none
+ * is present; the handler must NOT feed undefined into a tenantId filter.
+ */
+export const OptionalTenant = createParamDecorator(
+  (_data: unknown, ctx: ExecutionContext): string | undefined => {
+    const request = ctx.switchToHttp().getRequest();
+    return resolveTenantIdFromRequest(request);
   },
 );
 
