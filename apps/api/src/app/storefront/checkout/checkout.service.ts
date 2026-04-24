@@ -190,31 +190,53 @@ export class CheckoutService {
         }
       }
 
-      // Fix #12: Refresh cart prices at checkout time
+      // Phase 2 W2.1: unconditionally refresh every cart-item price from its
+      // authoritative source (variant override > product price). The previous
+      // implementation only hit the DB when Number(oldPrice) !== Number(newPrice),
+      // which missed Decimal rounding differences. Now we always compare as
+      // Decimal and commit the live price on every checkout entry so a stale
+      // cart can never charge the customer the old price.
       let pricesChanged = false;
+      const priceDeltas: Array<{ sku: string; old: string; now: string }> = [];
       for (const item of cart.items) {
-        const currentPrice = (item as any).variant?.price ?? item.product.price;
-        if (Number(item.price) !== Number(currentPrice)) {
+        const currentPrice: Prisma.Decimal = (item as any).variant?.price
+          ?? item.product.price;
+        const oldPrice = new Prisma.Decimal(item.price as any);
+        if (!oldPrice.eq(currentPrice)) {
           await tx.cartItem.update({
             where: { id: item.id },
             data: { price: currentPrice },
           });
           (item as any).price = currentPrice;
           pricesChanged = true;
+          priceDeltas.push({
+            sku: item.product.displayName,
+            old: oldPrice.toString(),
+            now: new Prisma.Decimal(currentPrice).toString(),
+          });
         }
       }
       if (pricesChanged) {
+        this.logger.info(
+          { cartId: cart.id, priceDeltas },
+          'Cart re-priced at checkout',
+        );
         const newSubtotal = cart.items.reduce(
-          (sum, i) => sum + Number((i as any).price) * i.quantity, 0
+          (sum, i) => sum.add(new Prisma.Decimal(i.price as any).mul(i.quantity)),
+          new Prisma.Decimal(0),
         );
         // Fix #24: Recalculate tax when prices change
         const priceTenant = await tx.tenant.findUnique({
           where: { id: tenantId },
           select: { defaultTaxRate: true },
         });
-        const taxRate = priceTenant?.defaultTaxRate ? Number(priceTenant.defaultTaxRate) : 0;
-        const newTaxTotal = newSubtotal * taxRate;
-        const newGrandTotal = newSubtotal + Number(cart.shippingTotal) + newTaxTotal - Number(cart.discountAmount);
+        const taxRate = priceTenant?.defaultTaxRate
+          ? new Prisma.Decimal(priceTenant.defaultTaxRate)
+          : new Prisma.Decimal(0);
+        const discount = new Prisma.Decimal(cart.discountAmount as any);
+        const shippingPre = new Prisma.Decimal(cart.shippingTotal as any);
+        const newTaxTotal = newSubtotal.sub(discount).mul(taxRate);
+        const newGrandTotal = newSubtotal.add(shippingPre).add(newTaxTotal).sub(discount);
         await tx.cart.update({
           where: { id: cart.id },
           data: {
@@ -223,9 +245,9 @@ export class CheckoutService {
             grandTotal: newGrandTotal,
           },
         });
-        (cart as any).subtotal = new Prisma.Decimal(newSubtotal);
-        (cart as any).taxTotal = new Prisma.Decimal(newTaxTotal);
-        (cart as any).grandTotal = new Prisma.Decimal(newGrandTotal);
+        (cart as any).subtotal = newSubtotal;
+        (cart as any).taxTotal = newTaxTotal;
+        (cart as any).grandTotal = newGrandTotal;
       }
 
       // PAY-4: Acquire advisory locks per item to prevent concurrent stock modifications
@@ -291,26 +313,36 @@ export class CheckoutService {
 
         shippingMethodName = selectedRate.name;
       } else {
-        // Issue #6: Even without a specific rate ID, try zone-based calculation
-        // using the actual shipping address from checkout for more accurate rates
-        try {
-          const shippingResult = await this.shippingService.calculateShipping(tenantId, {
+        // Phase 2 W2.1: always recompute shipping at checkout using the full
+        // submitted address, so the cart-level estimate (which may have used
+        // only the tenant's default country) cannot ride through to the
+        // charge. Failures propagate — we would rather show an error and
+        // have the customer retry than silently use a stale cart value.
+        const shippingResult = await this.shippingService.calculateShipping(
+          tenantId,
+          {
             country: dto.shippingAddress.country,
             state: dto.shippingAddress.state,
             zipCode: dto.shippingAddress.postalCode,
             cartTotal: Number(cart.subtotal),
-          });
+          },
+        );
 
-          if (shippingResult.rates.length > 0) {
-            const cheapestRate = shippingResult.rates[0];
-            const oldShipping = Number(cart.shippingTotal);
-            const shippingDelta = cheapestRate.price - oldShipping;
-            finalShippingTotal = new Prisma.Decimal(cheapestRate.price);
-            finalGrandTotal = new Prisma.Decimal(Number(cart.grandTotal) + shippingDelta);
-            shippingMethodName = cheapestRate.name;
-          }
-        } catch {
-          // If shipping calculation fails, use cart's pre-calculated shipping
+        if (shippingResult.rates.length > 0) {
+          const cheapestRate = shippingResult.rates[0];
+          const oldShipping = new Prisma.Decimal(cart.shippingTotal as any);
+          const newShipping = new Prisma.Decimal(cheapestRate.price);
+          const shippingDelta = newShipping.sub(oldShipping);
+          finalShippingTotal = newShipping;
+          finalGrandTotal = new Prisma.Decimal(cart.grandTotal as any).add(shippingDelta);
+          shippingMethodName = cheapestRate.name;
+        } else {
+          // Zones exist but no rate matched the exact address — reject instead
+          // of silently using cart's estimate (which may have matched a
+          // broader, cheaper zone).
+          throw new BadRequestException(
+            'No shipping rate available for the provided address. Please review your shipping address.',
+          );
         }
       }
 
