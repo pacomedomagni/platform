@@ -14,17 +14,20 @@ export class EncryptionService {
   private readonly saltLength = 64;
 
   /**
-   * Get encryption key from environment, derived with the given salt
+   * Get encryption key from environment, derived with the given salt.
+   *
+   * Production: ENCRYPTION_KEY is required (validated at boot — see env-validator.ts).
+   * Dev/test: falls back to JWT_SECRET so we don't maintain yet another local secret.
+   * There is no hardcoded literal fallback — missing key throws.
    */
   private getKey(salt: Buffer): Buffer {
-    const secret = process.env['ENCRYPTION_KEY'] || process.env['JWT_SECRET'] || 'default-dev-key-change-in-production';
-
-    const nodeEnv = (process.env.NODE_ENV || '').toLowerCase();
-    if ((nodeEnv === 'production' || nodeEnv === 'prod') && secret === 'default-dev-key-change-in-production') {
-      throw new Error('ENCRYPTION_KEY must be set in production');
+    const secret = process.env['ENCRYPTION_KEY'] || process.env['JWT_SECRET'];
+    if (!secret) {
+      throw new Error(
+        'ENCRYPTION_KEY is required for encryption/decryption. ' +
+        'Dev/test may set JWT_SECRET instead. Production enforces this at boot.'
+      );
     }
-
-    // Derive a key using scrypt with per-encryption random salt
     return scryptSync(secret, salt, this.keyLength);
   }
 

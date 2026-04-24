@@ -7,36 +7,7 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import { AppModule } from './app/app.module';
-
-/**
- * Validate required environment variables
- * Exits with error code 1 if any required variables are missing
- */
-function validateEnvironment(): void {
-  const required = [
-    'DATABASE_URL',
-    'REDIS_HOST',
-    'REDIS_PORT',
-    'KEYCLOAK_ISSUER',
-    'KEYCLOAK_JWKS_URI',
-  ];
-
-  const missing = required.filter((key) => !process.env[key]);
-
-  if (missing.length > 0) {
-    Logger.error(
-      `❌ Missing required environment variables: ${missing.join(', ')}`,
-      'Bootstrap'
-    );
-    Logger.error(
-      '💡 Tip: Copy .env.example to .env and fill in the values',
-      'Bootstrap'
-    );
-    process.exit(1);
-  }
-
-  Logger.log('✅ Environment validation passed', 'Bootstrap');
-}
+import { validateEnvironment } from './app/common/env-validator';
 
 async function bootstrap() {
   // Validate environment variables before starting the application

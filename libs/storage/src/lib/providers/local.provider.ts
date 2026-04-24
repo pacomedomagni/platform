@@ -29,6 +29,23 @@ export class LocalStorageProvider implements StorageProvider {
     this.logger.log(`Local storage provider initialized at: ${this.basePath}`);
   }
 
+  /**
+   * HMAC key for presigned URLs. Production must set LOCAL_STORAGE_SECRET — the
+   * boot-time env validator rejects a missing or default value before we reach
+   * this code. Throws if called without one so URLs are never signed with a
+   * hardcoded literal.
+   */
+  private signingKey(): string {
+    const key = process.env['LOCAL_STORAGE_SECRET'];
+    if (!key) {
+      throw new Error(
+        'LOCAL_STORAGE_SECRET is required to sign presigned URLs. ' +
+        'The boot-time env validator enforces this in production.'
+      );
+    }
+    return key;
+  }
+
   private async ensureDirectoryExists(dirPath: string): Promise<void> {
     try {
       await fs.mkdir(dirPath, { recursive: true });
@@ -240,7 +257,7 @@ export class LocalStorageProvider implements StorageProvider {
     // Return the public URL with an optional expiry parameter that the server should validate
     const expiry = Math.floor(Date.now() / 1000) + (options?.expiresIn || 3600);
     const signature = crypto
-      .createHmac('sha256', process.env['LOCAL_STORAGE_SECRET'] || 'default-secret')
+      .createHmac('sha256', this.signingKey())
       .update(`${key}:${expiry}`)
       .digest('hex');
 
@@ -251,7 +268,7 @@ export class LocalStorageProvider implements StorageProvider {
     // Similar to download, create a signed URL
     const expiry = Math.floor(Date.now() / 1000) + (options?.expiresIn || 3600);
     const signature = crypto
-      .createHmac('sha256', process.env['LOCAL_STORAGE_SECRET'] || 'default-secret')
+      .createHmac('sha256', this.signingKey())
       .update(`upload:${key}:${expiry}`)
       .digest('hex');
 

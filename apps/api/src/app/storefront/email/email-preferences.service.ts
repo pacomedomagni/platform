@@ -22,6 +22,23 @@ export class EmailPreferencesService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
+   * HMAC key for unsubscribe link signing. Production must set JWT_SECRET —
+   * the boot-time env validator rejects missing/default values. We throw
+   * loudly here rather than fall back to a hardcoded literal so a leaked
+   * secret cannot mask a misconfiguration.
+   */
+  private unsubscribeSigningKey(): string {
+    const key = process.env['JWT_SECRET'];
+    if (!key) {
+      throw new Error(
+        'JWT_SECRET is required to sign unsubscribe tokens. ' +
+        'The boot-time env validator enforces this in production.'
+      );
+    }
+    return key;
+  }
+
+  /**
    * Get customer email preferences
    */
   async getPreferences(tenantId: string, customerId: string) {
@@ -179,7 +196,7 @@ export class EmailPreferencesService {
     const exp = Date.now() + 30 * 24 * 60 * 60 * 1000;
     const data = JSON.stringify({ tenantId, customerId, email, exp });
     const signature = crypto
-      .createHmac('sha256', process.env['JWT_SECRET'] || 'dev-secret')
+      .createHmac('sha256', this.unsubscribeSigningKey())
       .update(data)
       .digest('hex');
 
@@ -206,7 +223,7 @@ export class EmailPreferencesService {
 
       // Verify signature using timing-safe comparison
       const expectedSignature = crypto
-        .createHmac('sha256', process.env['JWT_SECRET'] || 'dev-secret')
+        .createHmac('sha256', this.unsubscribeSigningKey())
         .update(data)
         .digest('hex');
 

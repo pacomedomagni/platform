@@ -24,18 +24,20 @@ import {
 } from './dto';
 import { WebhookService } from '../../operations/webhook.service';
 
-// Use a separate secret for customer tokens to prevent cross-auth confusion.
-// Falls back to JWT_SECRET for backward compatibility.
+// Storefront customer JWTs are signed with a dedicated secret so a compromised
+// merchant token cannot be reused as a customer token (and vice versa).
+//
+// Production: CUSTOMER_JWT_SECRET is required (validated at boot — see env-validator.ts).
+// Dev/test: falls back to JWT_SECRET. If neither is set the module fails to load,
+// which is the correct outcome — every test/dev setup must set at least JWT_SECRET.
 const CUSTOMER_SECRET = process.env['CUSTOMER_JWT_SECRET'] || process.env['JWT_SECRET'];
-const NODE_ENV = process.env['NODE_ENV'];
-const ALLOW_FALLBACK_SECRET = NODE_ENV === 'development' || NODE_ENV === 'test';
-
-if (!CUSTOMER_SECRET && !ALLOW_FALLBACK_SECRET) {
+if (!CUSTOMER_SECRET) {
   throw new Error(
-    'CUSTOMER_JWT_SECRET or JWT_SECRET environment variable is required in all environments except development and test'
+    'CUSTOMER_JWT_SECRET (or JWT_SECRET as a dev fallback) must be set. ' +
+    'The boot-time env validator would have rejected this in production.'
   );
 }
-const EFFECTIVE_JWT_SECRET = CUSTOMER_SECRET || 'dev-only-secret-change-in-production';
+const EFFECTIVE_JWT_SECRET = CUSTOMER_SECRET;
 
 const JWT_EXPIRES_IN = '15m';
 const REFRESH_TOKEN_EXPIRY_DAYS = 30;
@@ -54,9 +56,8 @@ export class CustomerAuthService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
-    if (!CUSTOMER_SECRET && ALLOW_FALLBACK_SECRET) {
-      this.logger.warn('JWT_SECRET not set - using development default. DO NOT USE IN PRODUCTION!');
-    }
+    // Secrets are validated at boot by env-validator.ts; module-load would have
+    // thrown already if CUSTOMER_SECRET were missing. Nothing to do here.
   }
 
   /**
