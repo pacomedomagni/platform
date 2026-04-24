@@ -103,9 +103,17 @@ export class PaymentsService {
       return { received: true, duplicate: false };
     }
 
-    // PAY-8: Atomic webhook deduplication using upsert to prevent race conditions.
-    // Dedup is now tenant-scoped (see Phase 1 migration 20260424000000) so a
-    // Stripe event ID replayed by a different tenant cannot block processing.
+    // Phase 2 W2.3: operation-level idempotency. The previous
+    // INSERT ... ON CONFLICT DO NOTHING used the Stripe event id as the sole
+    // dedup key: a successful insert followed by a crash in the handler would
+    // leave the marker in place, so the retry returned {duplicate:true}
+    // and the order never got its stock deducted / status updated.
+    //
+    // New logic: we still insert the marker (tenant-scoped), but on conflict
+    // we consult the downstream state to decide whether the previous attempt
+    // actually completed. If not, we re-run the handler. The handlers
+    // themselves already assert idempotency on order.paymentStatus, so re-runs
+    // after a partial success are safe.
     const dedupeResult = await this.prisma.$queryRaw<{ already_processed: boolean }[]>`
       INSERT INTO processed_webhook_events (id, "tenantId", "eventId", "eventType", "processedAt")
       VALUES (gen_random_uuid(), ${tenantId}::uuid, ${event.id}, ${event.type}, NOW())
@@ -113,10 +121,16 @@ export class PaymentsService {
       RETURNING FALSE as already_processed
     `;
 
-    // If no rows returned, the event was already processed (conflict occurred)
-    if (!dedupeResult || dedupeResult.length === 0) {
-      this.logger.log(`Duplicate webhook event skipped: ${event.id}`);
-      return { received: true, duplicate: true };
+    const alreadySeen = !dedupeResult || dedupeResult.length === 0;
+    if (alreadySeen) {
+      const safeToSkip = await this.isWebhookOutcomePersisted(event);
+      if (safeToSkip) {
+        this.logger.log(`Duplicate webhook event skipped (outcome persisted): ${event.id}`);
+        return { received: true, duplicate: true };
+      }
+      this.logger.warn(
+        `Duplicate webhook event ${event.id} but downstream state is incomplete — re-running handler`,
+      );
     }
 
     this.logger.log(`Processing webhook event: ${event.type}`);
@@ -139,6 +153,43 @@ export class PaymentsService {
     }
 
     return { received: true };
+  }
+
+  /**
+   * Phase 2 W2.3: did the downstream effect of `event` actually get persisted?
+   * If yes, a duplicate delivery is safely skipped. If no (e.g. the handler
+   * crashed mid-run the first time), we must re-run.
+   */
+  private async isWebhookOutcomePersisted(event: Stripe.Event): Promise<boolean> {
+    const obj = event.data.object as {
+      metadata?: Record<string, string>;
+      id?: string;
+    };
+    const orderId = obj?.metadata?.['orderId'];
+    if (!orderId) {
+      // No order reference — assume idempotent at the Stripe layer.
+      return true;
+    }
+
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { paymentStatus: true, status: true },
+    });
+    if (!order) return true;
+
+    switch (event.type) {
+      case 'payment_intent.succeeded':
+        return order.paymentStatus === 'CAPTURED' || order.status === 'CONFIRMED';
+      case 'payment_intent.payment_failed':
+        return order.paymentStatus === 'FAILED';
+      case 'charge.refunded':
+        return (
+          order.paymentStatus === 'REFUNDED' ||
+          order.paymentStatus === 'PARTIALLY_REFUNDED'
+        );
+      default:
+        return true;
+    }
   }
 
   /**
@@ -965,9 +1016,14 @@ export class PaymentsService {
       throw new BadRequestException('Order has no Stripe payment intent');
     }
 
-    // PAY-9: Generate unique idempotency key including refund count to prevent collisions
-    const existingRefundCount = existingRefunds.length;
-    const idempotencyKey = `refund_${tenantId}_${orderId}_${amount || 'full'}_${existingRefundCount + 1}`;
+    // Phase 2 W2.3: stable idempotency key — NOT a per-attempt counter.
+    // The prior formula `..._${existingRefundCount + 1}` meant that if the
+    // first call succeeded at Stripe but the response was lost to the network,
+    // a retry would compute a NEW key (count+1 after the committed first row)
+    // and Stripe would create a second, duplicate refund. Keying on
+    // (orderId + amount) makes Stripe return the original refund on replay.
+    const amountCents = Math.round((amount ?? Number(order.grandTotal)) * 100);
+    const idempotencyKey = `refund_${orderId}_${amountCents}`;
 
     // Check if tenant uses Stripe Connect (has a connected account)
     const tenant = await this.prisma.tenant.findUnique({
