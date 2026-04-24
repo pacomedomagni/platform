@@ -87,15 +87,32 @@ export class PaymentsService {
       throw new BadRequestException('Webhook signature verification failed');
     }
 
-    // PAY-8: Atomic webhook deduplication using upsert to prevent race conditions
-    // If two webhook deliveries arrive simultaneously, only one will process
+    // Every PaymentIntent we create embeds tenantId in metadata
+    // (see checkout.service.ts createPaymentIntent). Derive it here so the
+    // dedup table is tenant-scoped.
+    const tenantId =
+      (event.data.object as { metadata?: Record<string, string> } | undefined)
+        ?.metadata?.['tenantId'];
+
+    if (!tenantId) {
+      // Event types we don't own (or can't map to a tenant) are acknowledged
+      // but not deduped. We never process them downstream.
+      this.logger.warn(
+        `Webhook event ${event.id} (${event.type}) has no tenantId metadata — acknowledging without dedup`,
+      );
+      return { received: true, duplicate: false };
+    }
+
+    // PAY-8: Atomic webhook deduplication using upsert to prevent race conditions.
+    // Dedup is now tenant-scoped (see Phase 1 migration 20260424000000) so a
+    // Stripe event ID replayed by a different tenant cannot block processing.
     const dedupeResult = await this.prisma.$queryRaw<{ already_processed: boolean }[]>`
-      INSERT INTO processed_webhook_events (id, "eventId", "eventType", "processedAt")
-      VALUES (gen_random_uuid(), ${event.id}, ${event.type}, NOW())
-      ON CONFLICT ("eventId") DO NOTHING
+      INSERT INTO processed_webhook_events (id, "tenantId", "eventId", "eventType", "processedAt")
+      VALUES (gen_random_uuid(), ${tenantId}::uuid, ${event.id}, ${event.type}, NOW())
+      ON CONFLICT ("tenantId", "eventId") DO NOTHING
       RETURNING FALSE as already_processed
     `;
-    
+
     // If no rows returned, the event was already processed (conflict occurred)
     if (!dedupeResult || dedupeResult.length === 0) {
       this.logger.log(`Duplicate webhook event skipped: ${event.id}`);

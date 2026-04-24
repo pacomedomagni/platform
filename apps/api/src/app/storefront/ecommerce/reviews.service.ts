@@ -192,6 +192,7 @@ export class ReviewsService {
         // Attempt to create the vote; unique constraint will reject duplicates
         await tx.reviewVote.create({
           data: {
+            tenantId,
             reviewId,
             customerId,
             sessionToken,

@@ -426,6 +426,7 @@ export class WebhookService {
     // Record delivery in database
     await this.prisma.webhookDelivery.create({
       data: {
+        tenantId: webhook.tenantId,
         webhookId: webhook.id,
         event: event.event,
         payload,

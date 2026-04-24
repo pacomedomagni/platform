@@ -260,6 +260,7 @@ export class WishlistService {
 
     return this.prisma.wishlistItem.create({
       data: {
+        tenantId,
         wishlistId: wishlist.id,
         productListingId: dto.productListingId,
         variantId: dto.variantId,
@@ -321,6 +322,7 @@ export class WishlistService {
 
     return this.prisma.wishlistItem.create({
       data: {
+        tenantId,
         wishlistId,
         productListingId: dto.productListingId,
         variantId: dto.variantId,

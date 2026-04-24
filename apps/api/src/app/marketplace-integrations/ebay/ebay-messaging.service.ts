@@ -298,14 +298,17 @@ export class EbayMessagingService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
-    // Upsert the individual message
+    // Upsert the individual message (scoped by tenantId)
     const existingMessage = await this.prisma.marketplaceMessage.findUnique({
-      where: { externalMessageId },
+      where: {
+        tenantId_externalMessageId: { tenantId, externalMessageId },
+      },
     });
 
     if (!existingMessage) {
       await this.prisma.marketplaceMessage.create({
         data: {
+          tenantId,
           threadId: thread.id,
           externalMessageId,
           sender: senderType,
@@ -454,6 +457,7 @@ export class EbayMessagingService implements OnModuleInit, OnModuleDestroy {
     const externalMessageId = `reply_${thread.id}_${Date.now()}`;
     await this.prisma.marketplaceMessage.create({
       data: {
+        tenantId,
         threadId: thread.id,
         externalMessageId,
         sender: MessageSender.SELLER,

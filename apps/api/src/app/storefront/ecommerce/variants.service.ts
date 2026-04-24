@@ -218,6 +218,7 @@ export class VariantsService {
         allowBackorder: dto.allowBackorder ?? false,
         attributes: {
           create: dto.attributes.map((attr) => ({
+            tenantId,
             attributeTypeId: attr.attributeTypeId,
             attributeValueId: attr.attributeValueId,
           })),
@@ -365,6 +366,7 @@ export class VariantsService {
             allowBackorder: variant.allowBackorder ?? false,
             attributes: {
               create: variant.attributes.map((attr) => ({
+                tenantId,
                 attributeTypeId: attr.attributeTypeId,
                 attributeValueId: attr.attributeValueId,
               })),

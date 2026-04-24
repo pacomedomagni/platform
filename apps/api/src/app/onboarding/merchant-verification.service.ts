@@ -37,7 +37,7 @@ export class MerchantVerificationService {
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
     await this.prisma.merchantEmailVerificationToken.create({
-      data: { userId, token, expiresAt },
+      data: { tenantId: user.tenantId, userId, token, expiresAt },
     });
 
     if (!this.emailService) {
@@ -69,7 +69,9 @@ export class MerchantVerificationService {
   }
 
   async verifyEmail(token: string): Promise<{ success: boolean; email: string }> {
-    const record = await this.prisma.merchantEmailVerificationToken.findUnique({
+    // Token is 32 random bytes — collision is not a concern — so findFirst is
+    // appropriate since the unique is now (tenantId, token) after Phase 1.
+    const record = await this.prisma.merchantEmailVerificationToken.findFirst({
       where: { token },
       include: { user: true },
     });

@@ -54,11 +54,30 @@ export class StripeConnectWebhookController {
 
     this.logger.log(`Received Stripe Connect webhook: ${event.type}`);
 
+    // Map the event's connected account id back to our tenant so the dedup
+    // table is tenant-scoped (Phase 1 migration 20260424000000).
+    const accountId = (event.account ?? (event.data.object as Stripe.Account)?.id) as
+      | string
+      | undefined;
+    const tenant = accountId
+      ? await this.prisma.tenant.findFirst({
+          where: { stripeConnectAccountId: accountId },
+          select: { id: true },
+        })
+      : null;
+
+    if (!tenant) {
+      this.logger.warn(
+        `Stripe Connect webhook ${event.id} (${event.type}) has no matching tenant for account ${accountId} — acknowledging without dedup`,
+      );
+      return { received: true, duplicate: false };
+    }
+
     // Webhook deduplication: prevent processing the same event twice
     const dedupeResult = await this.prisma.$queryRaw<{ already_processed: boolean }[]>`
-      INSERT INTO processed_webhook_events (id, "eventId", "eventType", "processedAt")
-      VALUES (gen_random_uuid(), ${event.id}, ${event.type}, NOW())
-      ON CONFLICT ("eventId") DO NOTHING
+      INSERT INTO processed_webhook_events (id, "tenantId", "eventId", "eventType", "processedAt")
+      VALUES (gen_random_uuid(), ${tenant.id}::uuid, ${event.id}, ${event.type}, NOW())
+      ON CONFLICT ("tenantId", "eventId") DO NOTHING
       RETURNING FALSE as already_processed
     `;
 
