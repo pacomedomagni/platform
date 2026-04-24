@@ -89,6 +89,24 @@ export class StorageService {
   }
 
   /**
+   * Phase 1 W1.3: verify `key` is within `tenantId`'s namespace.
+   * Keys generated via generateKey() always start with `${tenantId}/`. An
+   * attacker who knows Tenant B's key structure could otherwise pass it to
+   * download() from a session authenticated as Tenant A.
+   */
+  private assertTenantOwnsKey(tenantId: string, key: string): void {
+    if (!tenantId) {
+      throw new Error('Storage access requires a tenantId');
+    }
+    const prefix = `${tenantId}/`;
+    if (!key.startsWith(prefix)) {
+      throw new Error(
+        `Storage access denied: key does not belong to tenant ${tenantId}`,
+      );
+    }
+  }
+
+  /**
    * Generate a unique storage key for a file
    */
   generateKey(tenantId: string, filename: string, prefix?: string): string {
@@ -202,82 +220,119 @@ export class StorageService {
   }
 
   /**
-   * Download a file as a buffer
+   * Download a file as a buffer. `tenantId` is required so a caller from one
+   * tenant cannot pass another tenant's key (W1.3).
    */
-  async download(key: string): Promise<Buffer> {
+  async download(tenantId: string, key: string): Promise<Buffer> {
     key = this.sanitizeKey(key);
+    this.assertTenantOwnsKey(tenantId, key);
     return this.provider.download(key);
   }
 
   /**
-   * Download a file as a stream
+   * Download a file as a stream (tenant-scoped, W1.3).
    */
-  async downloadStream(key: string): Promise<Readable> {
+  async downloadStream(tenantId: string, key: string): Promise<Readable> {
+    key = this.sanitizeKey(key);
+    this.assertTenantOwnsKey(tenantId, key);
     return this.provider.downloadStream(key);
   }
 
   /**
-   * Delete a file
+   * Delete a single file owned by the given tenant (W1.3).
    */
-  async delete(key: string): Promise<void> {
+  async delete(tenantId: string, key: string): Promise<void> {
     key = this.sanitizeKey(key);
+    this.assertTenantOwnsKey(tenantId, key);
     return this.provider.delete(key);
   }
 
   /**
-   * Delete multiple files
+   * Delete multiple files. All keys must belong to the same tenant (W1.3).
    */
-  async deleteMany(keys: string[]): Promise<void> {
+  async deleteMany(tenantId: string, keys: string[]): Promise<void> {
+    for (const k of keys) {
+      const sanitized = this.sanitizeKey(k);
+      this.assertTenantOwnsKey(tenantId, sanitized);
+    }
     return this.provider.deleteMany(keys);
   }
 
   /**
-   * Check if a file exists
+   * Check if a file exists (tenant-scoped, W1.3).
    */
-  async exists(key: string): Promise<boolean> {
+  async exists(tenantId: string, key: string): Promise<boolean> {
     key = this.sanitizeKey(key);
+    this.assertTenantOwnsKey(tenantId, key);
     return this.provider.exists(key);
   }
 
   /**
-   * Get file metadata
+   * Get file metadata (tenant-scoped, W1.3).
    */
-  async getMetadata(key: string): Promise<FileMetadata> {
+  async getMetadata(tenantId: string, key: string): Promise<FileMetadata> {
+    key = this.sanitizeKey(key);
+    this.assertTenantOwnsKey(tenantId, key);
     return this.provider.getMetadata(key);
   }
 
   /**
-   * List files
+   * List files (tenant-scoped, W1.3). Any `prefix` option is automatically
+   * prepended with the tenant namespace so one tenant cannot enumerate another.
    */
-  async list(options?: ListOptions): Promise<ListResult> {
-    return this.provider.list(options);
+  async list(tenantId: string, options?: ListOptions): Promise<ListResult> {
+    if (!tenantId) throw new Error('Storage list requires a tenantId');
+    const prefix = options?.prefix
+      ? `${tenantId}/${options.prefix.replace(/^\/+/, '')}`
+      : `${tenantId}/`;
+    return this.provider.list({ ...options, prefix });
   }
 
   /**
-   * Copy a file
+   * Copy a file within one tenant's namespace (W1.3).
    */
-  async copy(sourceKey: string, destKey: string): Promise<UploadResult> {
-    return this.provider.copy(sourceKey, destKey);
+  async copy(tenantId: string, sourceKey: string, destKey: string): Promise<UploadResult> {
+    const src = this.sanitizeKey(sourceKey);
+    const dst = this.sanitizeKey(destKey);
+    this.assertTenantOwnsKey(tenantId, src);
+    this.assertTenantOwnsKey(tenantId, dst);
+    return this.provider.copy(src, dst);
   }
 
   /**
-   * Move a file
+   * Move a file within one tenant's namespace (W1.3).
    */
-  async move(sourceKey: string, destKey: string): Promise<UploadResult> {
-    return this.provider.move(sourceKey, destKey);
+  async move(tenantId: string, sourceKey: string, destKey: string): Promise<UploadResult> {
+    const src = this.sanitizeKey(sourceKey);
+    const dst = this.sanitizeKey(destKey);
+    this.assertTenantOwnsKey(tenantId, src);
+    this.assertTenantOwnsKey(tenantId, dst);
+    return this.provider.move(src, dst);
   }
 
   /**
-   * Get a presigned URL for downloading a file
+   * Get a presigned URL for downloading a file (tenant-scoped, W1.3).
    */
-  async getPresignedDownloadUrl(key: string, options?: PresignedUrlOptions): Promise<string> {
+  async getPresignedDownloadUrl(
+    tenantId: string,
+    key: string,
+    options?: PresignedUrlOptions,
+  ): Promise<string> {
+    key = this.sanitizeKey(key);
+    this.assertTenantOwnsKey(tenantId, key);
     return this.provider.getPresignedDownloadUrl(key, options);
   }
 
   /**
-   * Get a presigned URL for uploading a file
+   * Get a presigned URL for uploading a file (tenant-scoped, W1.3).
    */
-  async getPresignedUploadUrl(key: string, options?: PresignedUrlOptions): Promise<string> {
+  async getPresignedUploadUrl(
+    tenantId: string,
+    key: string,
+    options?: PresignedUrlOptions,
+  ): Promise<string> {
+    key = this.sanitizeKey(key);
+    this.assertTenantOwnsKey(tenantId, key);
     return this.provider.getPresignedUploadUrl(key, options);
   }
 
@@ -333,15 +388,17 @@ export class StorageService {
   }
 
   /**
-   * Delete attachments for a document
+   * Delete attachments for a document. All attachments must belong to the
+   * same tenant (W1.3).
    */
-  async deleteDocumentAttachments(attachments: FileAttachment[]): Promise<void> {
+  async deleteDocumentAttachments(tenantId: string, attachments: FileAttachment[]): Promise<void> {
     const keys = attachments.map((a) => a.storageKey);
-    await this.deleteMany(keys);
+    await this.deleteMany(tenantId, keys);
   }
 
   /**
-   * Copy attachments from one document to another
+   * Copy attachments from one document to another within the same tenant's
+   * namespace. Source keys must belong to targetTenantId (W1.3).
    */
   async copyDocumentAttachments(
     sourceAttachments: FileAttachment[],
@@ -357,7 +414,7 @@ export class StorageService {
         attachment.originalFilename,
         `attachments/${targetDoctype}/${targetDocname}`,
       );
-      const copyResult = await this.copy(attachment.storageKey, newKey);
+      const copyResult = await this.copy(targetTenantId, attachment.storageKey, newKey);
       results.push(
         this.createAttachmentDto(
           targetTenantId,

@@ -264,8 +264,15 @@ export class EbayMediaService {
     }
 
     try {
+      // Resolve tenantId from the connection so the storage access check
+      // (W1.3) can verify the key is within the caller's namespace.
+      const connection = await this.prisma.marketplaceConnection.findUniqueOrThrow({
+        where: { id: connectionId },
+        select: { tenantId: true },
+      });
+
       // Download image buffer from MinIO
-      const buffer = await this.storage.download(storageKey);
+      const buffer = await this.storage.download(connection.tenantId, storageKey);
 
       // Determine content type from file extension
       const contentType = this.getContentTypeFromKey(storageKey);
@@ -308,8 +315,14 @@ export class EbayMediaService {
     }
 
     try {
+      // Resolve tenantId for the W1.3 storage ownership check.
+      const connection = await this.prisma.marketplaceConnection.findUniqueOrThrow({
+        where: { id: connectionId },
+        select: { tenantId: true },
+      });
+
       // Step 1: Download video buffer from MinIO
-      const buffer = await this.storage.download(storageKey);
+      const buffer = await this.storage.download(connection.tenantId, storageKey);
       this.logger.log(`Downloaded video from storage: ${storageKey} (${buffer.length} bytes)`);
 
       // Step 2: Create video entry on eBay to get upload URL
