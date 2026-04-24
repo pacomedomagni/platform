@@ -131,8 +131,17 @@ export class CheckoutService {
         throw new BadRequestException('Order total must be greater than $0');
       }
 
-      // Re-validate coupon at checkout time (may have expired or hit limit since added to cart)
-      // Use FOR UPDATE to prevent concurrent orders from both passing the usage limit check
+      // Phase 2 W2.4: coupon validate + increment happen in the same tx with
+      // SELECT ... FOR UPDATE on the coupon row, so N concurrent checkouts
+      // near the usageLimit cannot all pass validation and all increment
+      // afterwards. The increment is now committed alongside the order
+      // creation; trackCouponUsage() in the webhook is a no-op because the
+      // counter already moved. Order cancel / refund (W2.5) decrements it
+      // back.
+      //
+      // `reservedCouponId` (returned via closure) is used below so that
+      // post-commit audit logging in the webhook still works.
+      let reservedCouponId: string | null = null;
       if (cart.couponCode) {
         const lockedCoupons = await tx.$queryRaw<any[]>`
           SELECT * FROM coupons
@@ -145,7 +154,6 @@ export class CheckoutService {
           || (coupon.expiresAt && new Date(coupon.expiresAt) < now)
           || (coupon.usageLimit && coupon.timesUsed >= coupon.usageLimit);
 
-        // Fix #14: Per-customer coupon limit re-validation
         if (!invalid && coupon.usageLimitPerCustomer && customerId) {
           const customerUsage = await tx.couponUsage.count({
             where: { couponId: coupon.id, customerId }
@@ -169,10 +177,19 @@ export class CheckoutService {
             : (coupon.expiresAt && new Date(coupon.expiresAt) < now)
               ? 'Coupon has expired'
               : 'Coupon usage limit has been reached';
-          // Recalculate grandTotal without discount
           (cart as any).grandTotal = new Prisma.Decimal(
             Number(cart.subtotal) + Number(cart.shippingTotal) + Number(cart.taxTotal)
           );
+        } else {
+          // Coupon is valid and the row is locked until this tx commits/rolls
+          // back. Reserve the usage now (before payment) so concurrent
+          // checkouts see the new timesUsed and cannot over-consume.
+          await tx.coupon.update({
+            where: { id: coupon.id },
+            data: { timesUsed: { increment: 1 } },
+          });
+          reservedCouponId = coupon.id;
+          // CouponUsage row is created after order.id exists, further below.
         }
       }
 
@@ -437,6 +454,22 @@ export class CheckoutService {
         where: { id: cart.id },
         data: { status: 'converted' },
       });
+
+      // Phase 2 W2.4: write the CouponUsage row now that order.id exists.
+      // Combined with the earlier `timesUsed` increment, this means coupon
+      // redemption is fully committed before the order leaves the tx, so
+      // concurrent checkouts cannot over-consume a limited coupon.
+      if (reservedCouponId && customerId) {
+        await tx.couponUsage.create({
+          data: {
+            tenantId,
+            couponId: reservedCouponId,
+            customerId,
+            orderId: order.id,
+            usedAt: new Date(),
+          },
+        });
+      }
 
       // ============ GIFT CARD REDEMPTION (inside transaction for automatic rollback) ============
       let giftCardDiscount = 0;

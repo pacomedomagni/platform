@@ -522,38 +522,33 @@ export class PaymentsService {
   }
 
   /**
-   * Track coupon usage and increment counter
+   * Phase 2 W2.4: coupon usage is now reserved inside the checkout
+   * transaction (see checkout.service: the coupon row is locked FOR UPDATE,
+   * `timesUsed` is incremented, and a CouponUsage row is written *before*
+   * the order-creation tx commits). This webhook-side handler is kept only
+   * for the audit log entry; it no longer increments or writes usage.
    */
   private async trackCouponUsage(order: any) {
-    // Only track if order has discount and coupon code
-    if (Number(order.discountTotal) <= 0 || !order.couponCode) {
-      return;
-    }
+    if (Number(order.discountTotal) <= 0 || !order.couponCode) return;
 
-    const couponCode = order.couponCode;
-
-    // Find the coupon
-    const coupon = await this.prisma.coupon.findFirst({
-      where: {
-        tenantId: order.tenantId,
-        code: couponCode,
-      },
+    const alreadyRecorded = await this.prisma.couponUsage.findFirst({
+      where: { tenantId: order.tenantId, orderId: order.id },
+      select: { id: true, couponId: true },
     });
 
-    if (!coupon) {
-      this.logger.warn(`Coupon ${couponCode} not found for order ${order.orderNumber}`);
-      return;
-    }
-
-    // Atomically increment usage, create tracking record, and audit log
-    await this.prisma.$transaction([
-      // Increment coupon usage counter
-      this.prisma.coupon.update({
-        where: { id: coupon.id },
-        data: { timesUsed: { increment: 1 } },
-      }),
-      // Create usage tracking record
-      this.prisma.couponUsage.create({
+    if (!alreadyRecorded) {
+      // Defensive: if for some reason the checkout tx did not create the
+      // usage record (e.g. a legacy order pre-W2.4), record it now without
+      // double-incrementing the counter.
+      const coupon = await this.prisma.coupon.findFirst({
+        where: { tenantId: order.tenantId, code: order.couponCode },
+        select: { id: true },
+      });
+      if (!coupon) {
+        this.logger.warn(`Coupon ${order.couponCode} not found for order ${order.orderNumber}`);
+        return;
+      }
+      await this.prisma.couponUsage.create({
         data: {
           tenantId: order.tenantId,
           couponId: coupon.id,
@@ -561,26 +556,26 @@ export class PaymentsService {
           orderId: order.id,
           usedAt: new Date(),
         },
-      }),
-      // Audit log for coupon usage (Fix #13: compliance and debugging)
-      this.prisma.auditLog.create({
-        data: {
-          tenantId: order.tenantId,
-          userId: order.customerId,
-          action: 'COUPON_USED',
-          docType: 'Order',
-          docName: order.orderNumber,
-          meta: {
-            couponCode,
-            couponId: coupon.id,
-            discountAmount: Number(order.discountTotal),
-            orderId: order.id,
-          },
-        },
-      }),
-    ]);
+      });
+    }
 
-    this.logger.log(`Coupon ${couponCode} usage tracked for order: ${order.orderNumber}`);
+    await this.prisma.auditLog.create({
+      data: {
+        tenantId: order.tenantId,
+        userId: order.customerId,
+        action: 'COUPON_PAID',
+        docType: 'Order',
+        docName: order.orderNumber,
+        meta: {
+          couponCode: order.couponCode,
+          couponId: alreadyRecorded?.couponId ?? null,
+          discountAmount: Number(order.discountTotal),
+          orderId: order.id,
+        },
+      },
+    });
+
+    this.logger.log(`Coupon payment confirmed for order: ${order.orderNumber}`);
   }
 
   /**
