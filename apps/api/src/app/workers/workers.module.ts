@@ -8,6 +8,7 @@ import { FailedOperationsService } from './failed-operations.service';
 import { ProductImportWorker } from './product-import.worker';
 import { ProductImportService } from '../storefront/products/product-import.service';
 import { ProductsService } from '../storefront/products/products.service';
+import { InventoryReconciliationService } from './reconciliation.service';
 
 @Module({
   imports: [
@@ -22,7 +23,12 @@ import { ProductsService } from '../storefront/products/products.service';
     ProductImportWorker,
     ProductImportService,
     ProductsService,
+    InventoryReconciliationService, // Phase 3 W3.8
   ],
-  exports: [CleanupService, FailedOperationsService],
+  exports: [
+    CleanupService,
+    FailedOperationsService,
+    InventoryReconciliationService,
+  ],
 })
 export class WorkersModule {}
