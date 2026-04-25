@@ -405,37 +405,42 @@ export class OrdersService {
       updateData.internalNotes = trackingInfo.adminNotes;
     }
 
-    await this.prisma.order.update({
-      where: { id: orderId, tenantId },
-      data: updateData,
+    // Phase 2 W2.5: side effects that can be expressed as DB writes are now
+    // batched inside one transaction with the order.update so a failure in
+    // any of them rolls the whole status change back. The two operations
+    // that *cannot* live in this tx — the stock-return RECEIPT (which is
+    // itself a multi-table transactional movement) and the
+    // emails/webhooks (network I/O) — run after commit. Stock return is
+    // recorded with FailedOperationsService on failure so the cron retries.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.order.update({
+        where: { id: orderId, tenantId },
+        data: updateData,
+      });
+
+      if (status !== 'CANCELLED') return;
+
+      // Release stock reservations for unpaid orders (raw SQL, atomic).
+      if (order.paymentStatus === 'PENDING') {
+        await this.releaseStockReservationsInTx(tx, tenantId, orderId);
+      }
+
+      // Reverse gift card redemption (lock + reverse inside the same tx).
+      await this.reverseGiftCardInTx(tx, tenantId, orderId);
+
+      // Reverse coupon usage (W2.4 reserved it inside the checkout tx).
+      if (order.couponCode) {
+        await this.reverseCouponUsageInTx(tx, tenantId, orderId);
+      }
     });
 
-    // Return stock to inventory when cancelling a paid order
+    // Stock RECEIPT for paid orders runs after the cancel tx commits because
+    // it crosses several tables and has its own transactional semantics.
+    // On failure it is recorded with FailedOperationsService so the cron
+    // retries; the order is already CANCELLED at this point so the worst
+    // case is a transient inventory delta until the retry succeeds.
     if (status === 'CANCELLED' && ['CAPTURED', 'PARTIALLY_REFUNDED'].includes(order.paymentStatus)) {
       await this.returnStockForOrder(tenantId, orderId);
-    }
-
-    // Release stock reservations when cancelling an unpaid order (PENDING)
-    if (status === 'CANCELLED' && order.paymentStatus === 'PENDING') {
-      await this.releaseStockReservationsForOrder(tenantId, orderId);
-    }
-
-    // Reverse gift card transaction when cancelling an order that used gift card payment
-    if (status === 'CANCELLED') {
-      await this.reverseGiftCardForOrder(tenantId, orderId);
-    }
-
-    // Phase 2 W2.5: reverse the coupon usage that W2.4 reserved at checkout.
-    // Failing silently here is acceptable — the order is already cancelled;
-    // an over-counted coupon is a minor side effect that surfaces in admin.
-    if (status === 'CANCELLED' && order.couponCode) {
-      await this.reverseCouponUsageForOrder(tenantId, orderId).catch((err) =>
-        this.logger.error(
-          `Failed to reverse coupon usage for cancelled order ${orderId}: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        ),
-      );
     }
 
     // Fire-and-forget transactional emails
@@ -730,6 +735,140 @@ export class OrdersService {
         errorStack: error instanceof Error ? error.stack : undefined,
       }).catch(err => this.logger.error(`Failed to record failed gift card reversal operation for order ${orderId}:`, err));
     }
+  }
+
+  // ============ Phase 2 W2.5 — in-transaction variants ============
+  //
+  // The `*ForOrder` helpers above each open their own $transaction. The cancel
+  // path now wraps order.update + reservation release + GC reverse + coupon
+  // reverse in a single tx via these variants, so any one failure rolls back
+  // the entire status change.
+
+  /**
+   * In-tx version of releaseStockReservationsForOrder. Decrements reservedQty
+   * for every line item using GREATEST(...) to prevent negative balances.
+   */
+  private async releaseStockReservationsInTx(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    orderId: string,
+  ) {
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      include: {
+        items: {
+          include: {
+            product: { include: { item: true } },
+          },
+        },
+      },
+    });
+    if (!order || !order.items.length) return;
+
+    const warehouse = await tx.warehouse.findFirst({
+      where: { tenantId, isActive: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!warehouse) {
+      this.logger.error(`No active warehouse for stock release on order ${orderId}`);
+      return;
+    }
+
+    for (const item of order.items) {
+      if (!item.product?.item?.id) continue;
+      await tx.$executeRaw`
+        UPDATE warehouse_item_balances
+        SET "reservedQty" = GREATEST("reservedQty" - ${item.quantity}, 0)
+        WHERE "tenantId"   = ${tenantId}::uuid
+          AND "itemId"     = ${item.product.item.id}::uuid
+          AND "warehouseId" = ${warehouse.id}::uuid
+      `;
+    }
+  }
+
+  /**
+   * In-tx version of reverseGiftCardForOrder. Same lock-and-reverse logic but
+   * using the caller's tx so all cancel-related changes commit or roll back
+   * as a unit.
+   */
+  private async reverseGiftCardInTx(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    orderId: string,
+  ) {
+    const gcTransaction = await tx.giftCardTransaction.findFirst({
+      where: { orderId, tenantId, type: 'redemption' },
+    });
+    if (!gcTransaction) return;
+
+    // Idempotent: bail if a refund row already exists.
+    const existingRefund = await tx.giftCardTransaction.findFirst({
+      where: { orderId, tenantId, type: 'refund' },
+    });
+    if (existingRefund) return;
+
+    const lockedCards = await tx.$queryRaw<Array<{
+      id: string;
+      currentBalance: string;
+    }>>`
+      SELECT id, "currentBalance"::text AS "currentBalance"
+      FROM gift_cards
+      WHERE id = ${gcTransaction.giftCardId}::uuid
+      FOR UPDATE
+    `;
+    const lockedCard = lockedCards[0];
+    if (!lockedCard) return;
+
+    const refundAmount = Math.abs(Number(gcTransaction.amount));
+    const currentBalance = Number(lockedCard.currentBalance);
+    const restoredBalance = currentBalance + refundAmount;
+
+    const order = await tx.order.findUnique({
+      where: { id: orderId },
+      select: { orderNumber: true },
+    });
+
+    await tx.giftCardTransaction.create({
+      data: {
+        tenantId,
+        giftCardId: gcTransaction.giftCardId,
+        type: 'refund',
+        amount: refundAmount,
+        balanceBefore: currentBalance,
+        balanceAfter: restoredBalance,
+        orderId,
+        notes: `Reversed due to order cancellation (${order?.orderNumber || orderId})`,
+      },
+    });
+    await tx.giftCard.update({
+      where: { id: gcTransaction.giftCardId },
+      data: { currentBalance: restoredBalance, status: 'active' },
+    });
+  }
+
+  /**
+   * In-tx version of reverseCouponUsageForOrder.
+   */
+  private async reverseCouponUsageInTx(
+    tx: Prisma.TransactionClient,
+    tenantId: string,
+    orderId: string,
+  ) {
+    const locked = await tx.$queryRaw<
+      Array<{ id: string; couponId: string }>
+    >`
+      SELECT id, "couponId" FROM coupon_usages
+      WHERE "tenantId" = ${tenantId}::uuid AND "orderId" = ${orderId}::uuid
+      FOR UPDATE
+    `;
+    if (locked.length === 0) return;
+    const usage = locked[0];
+    await tx.couponUsage.delete({ where: { id: usage.id } });
+    await tx.$executeRaw`
+      UPDATE coupons
+      SET "timesUsed" = GREATEST("timesUsed" - 1, 0)
+      WHERE id = ${usage.couponId}::uuid AND "tenantId" = ${tenantId}::uuid
+    `;
   }
 
   // ============ EMAIL HELPERS ============
