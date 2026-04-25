@@ -3021,6 +3021,9 @@ enum OperationType {
   COUPON_TRACKING
   EMAIL_SEND
   WEBHOOK_DELIVERY
+  // Phase 3 W3.5: marketplace per-order sync failures route here so the
+  // retry cron picks them up rather than relying on the next full sync run.
+  MARKETPLACE_SYNC
 }
 
 enum OperationStatus {

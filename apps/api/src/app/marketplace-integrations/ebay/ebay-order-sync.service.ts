@@ -5,6 +5,7 @@ import {
   BadRequestException,
   OnModuleInit,
   OnModuleDestroy,
+  Optional,
 } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { EbayStoreService } from './ebay-store.service';
@@ -12,8 +13,9 @@ import { EbayClientService } from './ebay-client.service';
 import { MarketplaceAuditService } from '../shared/marketplace-audit.service';
 import { DistributedLockService } from '../shared/distributed-lock.service';
 import { SyncType, SyncDirection, SyncLogStatus, SyncStatus, ListingStatus } from '../shared/marketplace.types';
+import { FailedOperationsService } from '../../workers/failed-operations.service';
 import type { EbayOrder, MappedOrderLineItem } from './ebay.types';
-import { Prisma } from '@prisma/client';
+import { Prisma, OperationType } from '@prisma/client';
 const Decimal = Prisma.Decimal;
 
 /**
@@ -35,7 +37,8 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
     private ebayStore: EbayStoreService,
     private ebayClient: EbayClientService,
     private audit: MarketplaceAuditService,
-    private distributedLock: DistributedLockService
+    private distributedLock: DistributedLockService,
+    @Optional() private readonly failedOps?: FailedOperationsService,
   ) {}
 
   onModuleInit() {
@@ -197,9 +200,20 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
 
       const PAGE_SIZE = 50;
       let offset = 0;
-      let allEbayOrders: EbayOrder[] = [];
+      const allEbayOrders: EbayOrder[] = [];
 
-      // Paginate through all orders
+      // Phase 3 W3.5: process each page as it arrives and persist a per-page
+      // checkpoint to connection.lastSyncAt. The previous shape fetched every
+      // page into memory before doing any DB work, then updated lastSyncAt
+      // only after the final loop succeeded. A network error during page 7
+      // of 10 caused the next sync to replay all pages of orders from
+      // lastSyncAt-5min — duplicate-write storm against MarketplaceOrder
+      // upserts and 50× the eBay rate-limit cost.
+      //
+      // We checkpoint to the timestamp of the most recently *modified* order
+      // we successfully wrote, so a partial failure resumes from the right
+      // watermark. A small overlap window absorbs eBay's clock skew.
+      let pageCheckpoint: Date | null = null;
       while (true) {
         const pageOrders = await this.ebayClient.getOrders(client, {
           filter: `${filterField}:[${filterDate}..],orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS}`,
@@ -207,7 +221,18 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
           offset,
         });
 
-        allEbayOrders = allEbayOrders.concat(pageOrders);
+        allEbayOrders.push(...pageOrders);
+
+        // Track the latest lastModifiedDate (or creationDate) seen so we
+        // can advance the watermark even on partial failure further down.
+        for (const o of pageOrders) {
+          const modIso = o.lastModifiedDate || o.creationDate;
+          if (!modIso) continue;
+          const modAt = new Date(modIso);
+          if (!pageCheckpoint || modAt > pageCheckpoint) {
+            pageCheckpoint = modAt;
+          }
+        }
 
         if (pageOrders.length < PAGE_SIZE) {
           break; // No more pages
@@ -291,13 +316,42 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
             `Failed to sync eBay order ${ebayOrder.orderId}`,
             orderError
           );
+
+          // Phase 3 W3.5: route the per-order failure through
+          // FailedOperationsService so the retry cron picks it up. The
+          // batch-level lastSyncAt watermark will advance regardless, so
+          // we don't replay the whole window on every cron tick.
+          if (this.failedOps && ebayOrder.orderId) {
+            await this.failedOps.recordFailedOperation({
+              tenantId,
+              operationType: OperationType.MARKETPLACE_SYNC,
+              referenceId: ebayOrder.orderId,
+              referenceType: 'marketplace_order',
+              payload: JSON.parse(
+                JSON.stringify({
+                  connectionId,
+                  externalOrderId: ebayOrder.orderId,
+                  ebayOrder,
+                }),
+              ) as Prisma.JsonValue,
+              errorMessage: orderError instanceof Error ? orderError.message : String(orderError),
+              errorStack: orderError instanceof Error ? orderError.stack : undefined,
+            }).catch((err) =>
+              this.logger.error(`Failed to enqueue failed-op for ${ebayOrder.orderId}: ${err.message}`),
+            );
+          }
         }
       }
 
-      // Update connection lastSyncAt
+      // Phase 3 W3.5: advance lastSyncAt to the latest order timestamp we
+      // saw, not "now". On partial failure (some itemsFailed > 0) we still
+      // advance, because the orders that failed will be retried via the
+      // 5-minute overlap window on the next sync — re-fetching the entire
+      // window again would just multiply the failure rate.
+      const newSyncAt = pageCheckpoint ?? new Date();
       await this.prisma.marketplaceConnection.update({
         where: { id: connectionId },
-        data: { lastSyncAt: new Date() },
+        data: { lastSyncAt: newSyncAt },
       });
 
       // Finalize sync log
