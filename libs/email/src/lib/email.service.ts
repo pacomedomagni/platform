@@ -12,6 +12,7 @@ import {
 } from './email.types';
 import { EmailTemplateService } from './template.service';
 import type { QueueService } from '@platform/queue';
+import type { PrismaService } from '@platform/db';
 
 @Injectable()
 export class EmailService implements OnModuleInit {
@@ -22,6 +23,7 @@ export class EmailService implements OnModuleInit {
     @Inject(EMAIL_MODULE_OPTIONS) private readonly options: EmailModuleOptions,
     private readonly templateService: EmailTemplateService,
     @Optional() @Inject('QueueService') private readonly queueService?: QueueService,
+    @Optional() @Inject('PrismaService') private readonly prisma?: PrismaService,
   ) {
     this.transporter = nodemailer.createTransport(options.smtp);
   }
@@ -604,38 +606,67 @@ export class EmailService implements OnModuleInit {
    * Send an email asynchronously via queue (for non-critical emails)
    */
   async sendAsync(emailOptions: SendEmailOptions): Promise<{ jobId: string }> {
+    // Phase 3 W3.6: refuse to fall back to synchronous SMTP when the queue
+    // is unavailable. The previous behaviour blocked the request thread on
+    // SMTP I/O, which under a Redis outage caused cascading API request
+    // timeouts. Better to return a clear 503 to the caller than to
+    // mask the outage by silently degrading.
     if (!this.queueService) {
-      this.logger.warn('Queue service not available, falling back to synchronous send');
-      await this.send(emailOptions);
-      return { jobId: 'sync-fallback' };
+      this.logger.error(
+        'sendAsync: queue service unavailable. Refusing synchronous SMTP fallback (W3.6).',
+      );
+      throw new Error('Email queue is unavailable');
+    }
+
+    // Phase 3 W3.3: tenantId is a required top-level field on the job
+    // payload so workers can recover tenant context without reaching into
+    // emailOptions.context (which is template data, not infra metadata).
+    const tenantId = (emailOptions.context as { tenantId?: string } | undefined)?.tenantId;
+    if (!tenantId) {
+      this.logger.error(
+        'sendAsync called without context.tenantId; refusing to enqueue an unscoped job',
+      );
+      throw new Error('Email send requires context.tenantId');
+    }
+
+    // Phase 3 W3.6: bounce suppression at enqueue time. The worker also
+    // checks, but doing it here means we never burn a queue slot on a
+    // mail we're going to drop anyway. If the bounce table has the
+    // recipient, we log + audit and return without enqueuing.
+    if (this.prisma) {
+      const recipientEmail = this.firstRecipient(emailOptions.to);
+      if (recipientEmail) {
+        const suppressed = await this.prisma.emailBounce.findFirst({
+          where: { tenantId, email: recipientEmail, suppressed: true },
+          select: { id: true, type: true },
+        });
+        if (suppressed) {
+          this.logger.warn(
+            `sendAsync: dropping send to suppressed address ${recipientEmail} (bounce ${suppressed.type})`,
+          );
+          return { jobId: 'suppressed' };
+        }
+      }
     }
 
     try {
-      // Phase 3 W3.3: tenantId is now a top-level required field on the job
-      // so workers can recover tenant context without dredging through
-      // emailOptions.context (which is template-data, not infrastructure
-      // metadata).
-      const tenantId = (emailOptions.context as { tenantId?: string } | undefined)?.tenantId;
-      if (!tenantId) {
-        // Without a tenantId we cannot run the bounce-suppression check or
-        // audit-log the send. Fall back to direct send rather than enqueue
-        // an unscoped job.
-        this.logger.warn('sendAsync called without context.tenantId; falling back to synchronous send');
-        await this.send(emailOptions);
-        return { jobId: 'sync-no-tenant' };
-      }
-
-      const job = await this.queueService.sendEmail({
-        tenantId,
-        emailOptions,
-      });
+      const job = await this.queueService.sendEmail({ tenantId, emailOptions });
       this.logger.debug(`Email queued with job ID: ${job.id}`);
       return { jobId: job.id || 'unknown' };
     } catch (error) {
-      this.logger.error('Failed to queue email, falling back to synchronous send', error);
-      await this.send(emailOptions);
-      return { jobId: 'sync-fallback-error' };
+      this.logger.error('Failed to queue email', error);
+      throw error;
     }
+  }
+
+  /** Phase 3 W3.6 helper. */
+  private firstRecipient(
+    to: SendEmailOptions['to'],
+  ): string | undefined {
+    const v = Array.isArray(to) ? to[0] : to;
+    if (!v) return undefined;
+    if (typeof v === 'string') return v;
+    return (v as { address?: string }).address;
   }
 
   /**
@@ -715,13 +746,27 @@ export class EmailService implements OnModuleInit {
     };
 
     if (this.options.previewMode) {
-      this.logger.log('Email preview mode - would send:');
-      this.logger.log(`  To: ${JSON.stringify(emailOptions.to)}`);
-      this.logger.log(`  Subject: ${subject}`);
-      this.logger.debug(`  HTML: ${html?.substring(0, 200)}...`);
+      // Phase 3 W3.6: redact recipient + body in preview-mode logs. The
+      // earlier shape logged the full address list and the first 200
+      // chars of HTML to Pino, which then shipped to Loki — verification
+      // codes, password-reset links, and customer email addresses leaked
+      // into the centralised logging system.
+      const previewId = `preview-${Date.now()}`;
+      const accepted = Array.isArray(emailOptions.to)
+        ? emailOptions.to.map((t) => (typeof t === 'string' ? t : t.address))
+        : [typeof emailOptions.to === 'string' ? emailOptions.to : emailOptions.to.address];
+      this.logger.log({
+        previewId,
+        recipientCount: accepted.length,
+        recipientHash: accepted
+          .map((a) => (a ? a.split('@')[1] || 'unknown' : 'unknown'))
+          .join(','),
+        subjectLength: subject.length,
+        htmlLength: html?.length ?? 0,
+      }, 'Email preview (redacted) — not sent');
       return {
-        messageId: `preview-${Date.now()}`,
-        accepted: Array.isArray(emailOptions.to) ? emailOptions.to.map(t => typeof t === 'string' ? t : t.address) : [typeof emailOptions.to === 'string' ? emailOptions.to : emailOptions.to.address],
+        messageId: previewId,
+        accepted,
         rejected: [],
         response: 'Preview mode - email not sent',
       };
@@ -729,7 +774,9 @@ export class EmailService implements OnModuleInit {
 
     const result = await this.transporter.sendMail(mailOptions);
 
-    this.logger.log(`Email sent: ${result.messageId} to ${JSON.stringify(emailOptions.to)}`);
+    // Production log: messageId only. Recipient stays out of the centralised
+    // log stream (W3.6).
+    this.logger.log(`Email sent: ${result.messageId}`);
 
     return {
       messageId: result.messageId,
