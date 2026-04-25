@@ -34,7 +34,7 @@ export class ThemesService implements OnModuleInit {
    */
   async getThemes(tenantId: string) {
     const themes = await this.prisma.storeTheme.findMany({
-      where: { tenantId },
+      where: { tenantId, deletedAt: null },
       orderBy: [{ isPreset: 'desc' }, { isActive: 'desc' }, { createdAt: 'asc' }],
       select: {
         id: true,
@@ -73,6 +73,7 @@ export class ThemesService implements OnModuleInit {
       where: {
         tenantId,
         isActive: true,
+        deletedAt: null,
       },
     });
 
@@ -99,7 +100,7 @@ export class ThemesService implements OnModuleInit {
    */
   async getThemeById(id: string, tenantId: string) {
     const theme = await this.prisma.storeTheme.findFirst({
-      where: { id, tenantId },
+      where: { id, tenantId, deletedAt: null },
     });
 
     if (!theme) {
@@ -267,7 +268,7 @@ export class ThemesService implements OnModuleInit {
    */
   async deleteTheme(id: string, tenantId: string) {
     const existing = await this.prisma.storeTheme.findFirst({
-      where: { id, tenantId },
+      where: { id, tenantId, deletedAt: null },
     });
 
     if (!existing) {
@@ -284,11 +285,37 @@ export class ThemesService implements OnModuleInit {
       throw new BadRequestException('Cannot delete the active theme. Please activate another theme first.');
     }
 
-    await this.prisma.storeTheme.delete({
-      where: { id },
+    // Soft delete: set deletedAt. Frontend's Undo toast can call restoreTheme within ~5s.
+    await this.prisma.storeTheme.updateMany({
+      where: { id, tenantId },
+      data: { deletedAt: new Date() },
     });
 
-    return { success: true, message: 'Theme deleted successfully' };
+    return { success: true, message: 'Theme deleted successfully', deletedAt: new Date().toISOString() };
+  }
+
+  /**
+   * Restore a soft-deleted theme. Used by the frontend's Undo toast within
+   * the ~5s window. Idempotent: no-op for active themes.
+   */
+  async restoreTheme(id: string, tenantId: string) {
+    const existing = await this.prisma.storeTheme.findFirst({
+      where: { id, tenantId },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Theme not found');
+    }
+    if (existing.deletedAt === null) {
+      return { success: true, alreadyActive: true };
+    }
+
+    await this.prisma.storeTheme.updateMany({
+      where: { id, tenantId },
+      data: { deletedAt: null },
+    });
+
+    return { success: true };
   }
 
   /**
@@ -296,7 +323,7 @@ export class ThemesService implements OnModuleInit {
    */
   async activateTheme(id: string, tenantId: string) {
     const theme = await this.prisma.storeTheme.findFirst({
-      where: { id, tenantId },
+      where: { id, tenantId, deletedAt: null },
     });
 
     if (!theme) {

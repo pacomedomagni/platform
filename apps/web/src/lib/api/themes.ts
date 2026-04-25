@@ -167,6 +167,21 @@ async function deleteTheme(id: string, tenantId: string): Promise<void> {
 }
 
 /**
+ * Restore a soft-deleted theme. Idempotent.
+ */
+async function restoreTheme(id: string, tenantId: string): Promise<void> {
+  const response = await fetch(`${BASE_URL}/admin/themes/${id}/restore`, {
+    method: 'POST',
+    headers: buildHeaders(tenantId),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.message || errorData.error || 'Failed to restore theme');
+  }
+}
+
+/**
  * Activate theme
  */
 async function activateTheme(id: string, tenantId: string): Promise<Theme> {
@@ -257,6 +272,7 @@ export const themesApi = {
   createFromPreset,
   updateTheme,
   deleteTheme,
+  restoreTheme,
   activateTheme,
   duplicateTheme,
   resetToPreset,

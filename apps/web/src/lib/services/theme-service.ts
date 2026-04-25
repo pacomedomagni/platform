@@ -65,11 +65,19 @@ class ThemeService {
   }
 
   /**
-   * Delete theme
+   * Soft delete theme. Use restoreTheme to undo within the operator's window.
    */
   async deleteTheme(id: string): Promise<void> {
     const tenantId = await resolveTenantId();
     return themesApi.deleteTheme(id, tenantId);
+  }
+
+  /**
+   * Restore a soft-deleted theme. Idempotent.
+   */
+  async restoreTheme(id: string): Promise<void> {
+    const tenantId = await resolveTenantId();
+    return themesApi.restoreTheme(id, tenantId);
   }
 
   /**

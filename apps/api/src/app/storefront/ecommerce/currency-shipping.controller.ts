@@ -220,7 +220,20 @@ export class CurrencyShippingController {
   async deleteZone(
     @Tenant() tenantId: string,
     @Param('id') id: string
-  ) {    return this.shippingService.deleteZone(tenantId, id);
+  ) {
+    return this.shippingService.deleteZone(tenantId, id);
+  }
+
+  /**
+   * Restore a soft-deleted zone (used by Undo toast within ~5s).
+   */
+  @Post('admin/shipping/zones/:id/restore')
+  @UseGuards(StoreAdminGuard)
+  async restoreZone(
+    @Tenant() tenantId: string,
+    @Param('id') id: string
+  ) {
+    return this.shippingService.restoreZone(tenantId, id);
   }
 
   // ============ SHIPPING RATES - ADMIN ============

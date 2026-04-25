@@ -118,7 +118,7 @@ export class ShippingService {
 
   async listZones(tenantId: string) {
     return this.prisma.shippingZone.findMany({
-      where: { tenantId },
+      where: { tenantId, deletedAt: null },
       include: {
         rates: {
           where: { isEnabled: true },
@@ -130,10 +130,10 @@ export class ShippingService {
   }
 
   async createZone(tenantId: string, dto: CreateZoneDto) {
-    // If setting as default, unset other defaults
+    // If setting as default, unset other defaults (only among active zones)
     if (dto.isDefault) {
       await this.prisma.shippingZone.updateMany({
-        where: { tenantId, isDefault: true },
+        where: { tenantId, isDefault: true, deletedAt: null },
         data: { isDefault: false },
       });
     }
@@ -152,7 +152,7 @@ export class ShippingService {
 
   async updateZone(tenantId: string, id: string, dto: UpdateZoneDto) {
     const zone = await this.prisma.shippingZone.findFirst({
-      where: { id, tenantId },
+      where: { id, tenantId, deletedAt: null },
     });
 
     if (!zone) {
@@ -161,7 +161,7 @@ export class ShippingService {
 
     if (dto.isDefault) {
       await this.prisma.shippingZone.updateMany({
-        where: { tenantId, isDefault: true, NOT: { id } },
+        where: { tenantId, isDefault: true, deletedAt: null, NOT: { id } },
         data: { isDefault: false },
       });
     }
@@ -174,14 +174,40 @@ export class ShippingService {
 
   async deleteZone(tenantId: string, id: string) {
     const zone = await this.prisma.shippingZone.findFirst({
-      where: { id, tenantId },
+      where: { id, tenantId, deletedAt: null },
     });
 
     if (!zone) {
       throw new NotFoundException('Zone not found');
     }
 
-    await this.prisma.shippingZone.delete({ where: { id } });
+    // Soft delete — frontend Undo toast can call restoreZone within ~5s.
+    await this.prisma.shippingZone.updateMany({
+      where: { id, tenantId },
+      data: { deletedAt: new Date() },
+    });
+    return { success: true, deletedAt: new Date().toISOString() };
+  }
+
+  /**
+   * Restore a soft-deleted zone. Idempotent.
+   */
+  async restoreZone(tenantId: string, id: string) {
+    const zone = await this.prisma.shippingZone.findFirst({
+      where: { id, tenantId },
+    });
+
+    if (!zone) {
+      throw new NotFoundException('Zone not found');
+    }
+    if (zone.deletedAt === null) {
+      return { success: true, alreadyActive: true };
+    }
+
+    await this.prisma.shippingZone.updateMany({
+      where: { id, tenantId },
+      data: { deletedAt: null },
+    });
     return { success: true };
   }
 
@@ -413,7 +439,7 @@ export class ShippingService {
     postalCode?: string
   ) {
     const zones = await this.prisma.shippingZone.findMany({
-      where: { tenantId },
+      where: { tenantId, deletedAt: null },
       orderBy: { isDefault: 'asc' }, // Non-default first to find specific matches
     });
 

@@ -206,34 +206,46 @@ export default function ShippingTaxPage() {
     if (!zoneId) return;
     setDeleteZoneConfirm(null);
 
-    // Optimistic remove with 5s undo. Server DELETE is deferred so undo is a true no-op.
     const snapshot = zones.find((z) => z.id === zoneId);
+    // Optimistic UI remove for snappy feel.
     if (snapshot) setZones((prev) => prev.filter((z) => z.id !== zoneId));
 
-    let cancelled = false;
+    try {
+      const res = await fetch(`/api/v1/store/admin/shipping/zones/${zoneId}`, {
+        method: 'DELETE',
+        headers: getHeaders(),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err: any) {
+      toast({ title: 'Delete failed', description: err?.message ?? 'Could not delete zone.', variant: 'destructive' });
+      // Roll back optimistic UI.
+      if (snapshot) setZones((prev) => (prev.find((z) => z.id === snapshot.id) ? prev : [snapshot, ...prev]));
+      return;
+    }
+
     toastUndo({
       title: 'Zone deleted',
       description: snapshot ? `${snapshot.name} — undo within 5 seconds.` : 'Undo within 5 seconds.',
       windowMs: 5000,
-      onUndo: () => {
-        cancelled = true;
-        if (snapshot) setZones((prev) => [snapshot, ...prev]);
+      onUndo: async () => {
+        try {
+          const res = await fetch(`/api/v1/store/admin/shipping/zones/${zoneId}/restore`, {
+            method: 'POST',
+            headers: getHeaders(),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          if (snapshot) setZones((prev) => [snapshot, ...prev]);
+          toast({ title: 'Zone restored', variant: 'success' });
+        } catch (err: any) {
+          toast({
+            title: 'Restore failed',
+            description: err?.message ?? 'Could not restore.',
+            variant: 'destructive',
+          });
+          await fetchZones();
+        }
       },
     });
-
-    setTimeout(async () => {
-      if (cancelled) return;
-      try {
-        await fetch(`/api/v1/store/admin/shipping/zones/${zoneId}`, {
-          method: 'DELETE',
-          headers: getHeaders(),
-        });
-        await fetchZones();
-      } catch (err: any) {
-        toast({ title: 'Delete failed', description: err?.message ?? 'Restoring.', variant: 'destructive' });
-        await fetchZones();
-      }
-    }, 5000);
   };
 
   const handleAddRate = async () => {

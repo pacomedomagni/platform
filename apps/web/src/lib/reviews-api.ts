@@ -253,10 +253,17 @@ export const adminReviewsApi = {
     });
   },
 
-  // Delete review
-  deleteReview: (reviewId: string): Promise<{ success: boolean }> => {
+  // Soft delete review (sets deletedAt). Use restoreReview to undo.
+  deleteReview: (reviewId: string): Promise<{ success: boolean; deletedAt?: string }> => {
     return apiFetch(`/v1/store/admin/reviews/${reviewId}`, {
       method: 'DELETE',
+    });
+  },
+
+  // Restore a soft-deleted review (idempotent).
+  restoreReview: (reviewId: string): Promise<{ success: boolean; alreadyActive?: boolean }> => {
+    return apiFetch(`/v1/store/admin/reviews/${reviewId}/restore`, {
+      method: 'POST',
     });
   },
 };

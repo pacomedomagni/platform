@@ -26,6 +26,7 @@ export class ReviewsService {
       tenantId,
       productListingId,
       status: 'approved',
+      deletedAt: null,
     };
 
     if (rating) {
@@ -75,6 +76,7 @@ export class ReviewsService {
         tenantId,
         productListingId,
         status: 'approved',
+        deletedAt: null,
       },
       _count: true,
     });
@@ -111,13 +113,14 @@ export class ReviewsService {
       throw new NotFoundException('Product not found');
     }
 
-    // Check if customer already reviewed this product (exclude rejected reviews)
+    // Check if customer already reviewed this product (exclude rejected + soft-deleted)
     const existingReview = await this.prisma.productReview.findFirst({
       where: {
         tenantId,
         productListingId: dto.productListingId,
         customerId,
         status: { not: 'rejected' },
+        deletedAt: null,
       },
     });
 
@@ -175,7 +178,7 @@ export class ReviewsService {
 
   async voteReview(tenantId: string, reviewId: string, customerId: string | null, sessionToken: string | null, dto: ReviewVoteDto) {
     const review = await this.prisma.productReview.findFirst({
-      where: { id: reviewId, tenantId },
+      where: { id: reviewId, tenantId, deletedAt: null },
     });
 
     if (!review || review.status !== 'approved') {
@@ -262,8 +265,14 @@ export class ReviewsService {
     const { page = 1, limit = 20, status, productId, search } = options;
     const skip = (page - 1) * limit;
 
+    // Admin list defaults to active (deletedAt IS NULL); pass status='deleted' to see soft-deleted.
     const where: Prisma.ProductReviewWhereInput = { tenantId };
-    if (status) where.status = status;
+    if (status === 'deleted') {
+      where.deletedAt = { not: null };
+    } else {
+      where.deletedAt = null;
+      if (status) where.status = status;
+    }
     if (productId) where.productListingId = productId;
     // L1: Server-side search for admin reviews list
     if (search) {
@@ -365,17 +374,50 @@ export class ReviewsService {
 
   async deleteReview(tenantId: string, reviewId: string) {
     const review = await this.prisma.productReview.findFirst({
-      where: { id: reviewId, tenantId },
+      where: { id: reviewId, tenantId, deletedAt: null },
     });
 
     if (!review) {
       throw new NotFoundException('Review not found');
     }
 
-    // M2: Use deleteMany with tenantId scope for defense in depth
-    await this.prisma.productReview.deleteMany({ where: { id: reviewId, tenantId } });
+    // Soft delete: set deletedAt instead of hard delete. The frontend's "undo"
+    // toast calls restoreReview within ~5s; if it doesn't, the row stays
+    // soft-deleted indefinitely (admins can purge later via a sweep job).
+    await this.prisma.productReview.updateMany({
+      where: { id: reviewId, tenantId },
+      data: { deletedAt: new Date() },
+    });
 
-    // Update product rating stats
+    // Update product rating stats — soft-deleted reviews are excluded from aggregates.
+    await this.updateProductRatingStats(tenantId, review.productListingId);
+
+    return { success: true, deletedAt: new Date().toISOString() };
+  }
+
+  /**
+   * Restore a previously soft-deleted review. Used by the frontend's "Undo"
+   * toast within the ~5s window. Returns 404 if the review doesn't exist or
+   * was never soft-deleted.
+   */
+  async restoreReview(tenantId: string, reviewId: string) {
+    const review = await this.prisma.productReview.findFirst({
+      where: { id: reviewId, tenantId },
+    });
+
+    if (!review) {
+      throw new NotFoundException('Review not found');
+    }
+    if (review.deletedAt === null) {
+      // Idempotent — restoring a non-deleted row is a no-op.
+      return { success: true, alreadyActive: true };
+    }
+
+    await this.prisma.productReview.updateMany({
+      where: { id: reviewId, tenantId },
+      data: { deletedAt: null },
+    });
+
     await this.updateProductRatingStats(tenantId, review.productListingId);
 
     return { success: true };
@@ -389,6 +431,7 @@ export class ReviewsService {
         tenantId,
         productListingId,
         status: 'approved',
+        deletedAt: null,
       },
       _avg: { rating: true },
       _count: true,

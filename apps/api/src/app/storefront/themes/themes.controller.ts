@@ -132,7 +132,21 @@ export class ThemesController {
   async deleteTheme(
     @Tenant() tenantId: string,
     @Param('id') id: string
-  ) {    return this.themesService.deleteTheme(id, tenantId);
+  ) {
+    return this.themesService.deleteTheme(id, tenantId);
+  }
+
+  /**
+   * Restore a soft-deleted theme (used by the frontend's Undo toast within ~5s).
+   * POST /api/v1/store/admin/themes/:id/restore
+   */
+  @Post('admin/themes/:id/restore')
+  @UseGuards(StoreAdminGuard)
+  async restoreTheme(
+    @Tenant() tenantId: string,
+    @Param('id') id: string
+  ) {
+    return this.themesService.restoreTheme(id, tenantId);
   }
 
   /**

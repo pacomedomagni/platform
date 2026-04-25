@@ -144,40 +144,44 @@ export default function ThemesPage() {
   const confirmDelete = async () => {
     if (!themeToDelete) return;
 
-    // Optimistic delete with a 5s undo window. The actual server-side DELETE is delayed
-    // so undo is a true no-op on the backend; if the user undoes within the window we
-    // restore the theme to local state without ever calling DELETE.
     const snapshot = themeToDelete;
+    // Optimistic UI remove for snappy feel.
     setThemes((prev) => prev.filter((t) => t.id !== snapshot.id));
     setDeleteDialogOpen(false);
     setThemeToDelete(null);
 
-    let cancelled = false;
+    try {
+      await themeService.deleteTheme(snapshot.id);
+    } catch (error) {
+      console.error('Failed to delete theme:', error);
+      toast({
+        title: 'Delete failed',
+        description: error instanceof Error ? error.message : 'Could not delete theme.',
+        variant: 'destructive',
+      });
+      // Roll back optimistic UI.
+      setThemes((prev) => (prev.find((t) => t.id === snapshot.id) ? prev : [snapshot, ...prev]));
+      return;
+    }
+
     toastUndo({
       title: 'Theme deleted',
       description: `${snapshot.name} — undo within 5 seconds.`,
       windowMs: 5000,
-      onUndo: () => {
-        cancelled = true;
-        setThemes((prev) => [snapshot, ...prev]);
+      onUndo: async () => {
+        try {
+          await themeService.restoreTheme(snapshot.id);
+          setThemes((prev) => [snapshot, ...prev]);
+          toast({ title: 'Theme restored' });
+        } catch (err: any) {
+          toast({
+            title: 'Restore failed',
+            description: err?.message || 'Could not restore. Refresh to see the latest state.',
+            variant: 'destructive',
+          });
+        }
       },
     });
-
-    setTimeout(async () => {
-      if (cancelled) return;
-      try {
-        await themeService.deleteTheme(snapshot.id);
-      } catch (error) {
-        console.error('Failed to delete theme:', error);
-        // Server delete failed — recover by reloading authoritative state.
-        toast({
-          title: 'Delete failed',
-          description: error instanceof Error ? error.message : 'Restoring theme.',
-          variant: 'destructive',
-        });
-        setThemes((prev) => (prev.find((t) => t.id === snapshot.id) ? prev : [snapshot, ...prev]));
-      }
-    }, 5000);
   };
 
   // Filter themes

@@ -83,38 +83,39 @@ export default function AdminReviewsPage() {
     if (!reviewId) return;
     setDeleteConfirm(null);
 
-    // Snapshot the row for potential undo so we can re-show it instantly if user reverts.
     const snapshot = reviews.find((r) => r.id === reviewId);
-
-    // Optimistic remove from UI
+    // Optimistic UI remove for snappy feel.
     setReviews((prev) => prev.filter((r) => r.id !== reviewId));
 
-    let cancelled = false;
+    try {
+      // Real soft delete on the server (sets deletedAt).
+      await adminReviewsApi.deleteReview(reviewId);
+    } catch (error) {
+      console.error('Failed to delete review:', error);
+      toast({ title: 'Delete failed', variant: 'destructive' });
+      // Roll back optimistic UI.
+      if (snapshot) setReviews((prev) => [snapshot, ...prev]);
+      return;
+    }
+
     toastUndo({
       title: 'Review deleted',
-      description: 'You can undo for the next 5 seconds.',
+      description: 'Undo within 5 seconds.',
       windowMs: 5000,
-      onUndo: () => {
-        cancelled = true;
-        // Restore in UI; actual server-side restore would need a real endpoint.
-        if (snapshot) setReviews((prev) => [snapshot, ...prev]);
-        toast({ title: 'Restored', variant: 'success' });
+      onUndo: async () => {
+        try {
+          await adminReviewsApi.restoreReview(reviewId);
+          if (snapshot) setReviews((prev) => [snapshot, ...prev]);
+          toast({ title: 'Review restored', variant: 'success' });
+        } catch (err: any) {
+          toast({
+            title: 'Restore failed',
+            description: err?.message || 'Could not restore. Refresh to see the latest state.',
+            variant: 'destructive',
+          });
+        }
       },
     });
-
-    // Defer the actual API call to the end of the undo window so undo is a true no-op on the server.
-    setTimeout(async () => {
-      if (cancelled) return;
-      try {
-        await adminReviewsApi.deleteReview(reviewId);
-        await loadReviews();
-      } catch (error) {
-        console.error('Failed to delete review:', error);
-        toast({ title: 'Delete failed', description: 'Restoring review.', variant: 'destructive' });
-        // Re-fetch to recover authoritative state
-        await loadReviews();
-      }
-    }, 5000);
   };
 
   const toggleReviewSelection = (reviewId: string) => {

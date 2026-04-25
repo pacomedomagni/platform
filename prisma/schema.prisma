@@ -1901,8 +1901,9 @@ model ProductReview {
   adminResponse    String?
   adminRespondedAt DateTime?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   votes ReviewVote[]
 
@@ -1910,6 +1911,7 @@ model ProductReview {
   @@index([productListingId])
   @@index([customerId])
   @@index([tenantId, status])
+  @@index([tenantId, deletedAt])
   @@map("product_reviews")
 }
 
@@ -2188,12 +2190,14 @@ model ShippingZone {
   zipCodes  String[] @default([])
   isDefault Boolean  @default(false)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   rates ShippingRate[]
 
   @@index([tenantId])
+  @@index([tenantId, deletedAt])
   @@map("shipping_zones")
 }
 
@@ -2549,12 +2553,14 @@ model StoreTheme {
   previewImageUrl String?
   tags            String[] // Array of tags for filtering
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
 
   @@unique([tenantId, slug])
   @@index([tenantId, isActive])
   @@index([tenantId, isPreset])
+  @@index([tenantId, deletedAt])
   @@map("store_themes")
 }
 

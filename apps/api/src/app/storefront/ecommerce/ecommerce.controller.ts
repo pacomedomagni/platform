@@ -386,6 +386,20 @@ export class EcommerceController {
     return this.reviewsService.deleteReview(tenantId, reviewId);
   }
 
+  /**
+   * Restore a soft-deleted review (used by the frontend's Undo toast within ~5s).
+   * Idempotent: restoring an already-active review is a no-op.
+   */
+  @Post('admin/reviews/:reviewId/restore')
+  @UseGuards(StoreAdminGuard)
+  async restoreReview(
+    @Tenant() tenantId: string,
+    @Param('reviewId') reviewId: string
+  ) {
+    if (!tenantId) throw new BadRequestException('Tenant ID required');
+    return this.reviewsService.restoreReview(tenantId, reviewId);
+  }
+
   // ============ GIFT CARDS - PUBLIC ============
 
   @Throttle({ default: { limit: 5, ttl: 60000 } })
