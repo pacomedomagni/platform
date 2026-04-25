@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { Money } from '@platform/business-logic';
 import { StripeService } from './stripe.service';
 import { StripeConnectService } from '../../onboarding/stripe-connect.service';
 import { SquarePaymentService } from '../../onboarding/square-payment.service';
@@ -235,12 +236,12 @@ export class PaymentsService {
       return;
     }
 
-    // PAY-6 (Phase 1 W1.6): Verify payment amount matches order total exactly.
-    // The previous ±$0.01 tolerance let an attacker mint value systematically
-    // by rounding in their favor across thousands of orders. Rounding on the
-    // DB/service layer should be exact; any drift indicates a real mismatch.
-    const giftCardApplied = Number(order.giftCardDiscount || 0);
-    const expectedAmountCents = Math.round((Number(order.grandTotal) - giftCardApplied) * 100);
+    // PAY-6 (Phase 1 W1.6 + Phase 2 W2.2): Verify payment amount matches
+    // exactly, computed end-to-end in Decimal so no float coercion can drift
+    // by a cent. Money.toCents throws on sub-cent precision; that's the
+    // intended invariant — every persisted price/discount must be 2dp.
+    const expectedDecimal = Money.sub(order.grandTotal as never, order.giftCardDiscount ?? 0);
+    const expectedAmountCents = Money.toCents(expectedDecimal);
     if (paymentIntent.amount !== expectedAmountCents) {
       this.logger.error(
         `Payment amount mismatch for order ${order.orderNumber}: ` +
@@ -1017,7 +1018,12 @@ export class PaymentsService {
     // a retry would compute a NEW key (count+1 after the committed first row)
     // and Stripe would create a second, duplicate refund. Keying on
     // (orderId + amount) makes Stripe return the original refund on replay.
-    const amountCents = Math.round((amount ?? Number(order.grandTotal)) * 100);
+    // Phase 2 W2.2: convert to cents in Decimal so a half-cent never silently
+    // rounds in the attacker's favor.
+    const amountDecimal = amount != null
+      ? Money.dec(amount)
+      : Money.dec(order.grandTotal as never);
+    const amountCents = Money.toCents(amountDecimal);
     const idempotencyKey = `refund_${orderId}_${amountCents}`;
 
     // Check if tenant uses Stripe Connect (has a connected account)

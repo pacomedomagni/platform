@@ -819,9 +819,14 @@ export class OrdersService {
     const lockedCard = lockedCards[0];
     if (!lockedCard) return;
 
-    const refundAmount = Math.abs(Number(gcTransaction.amount));
-    const currentBalance = Number(lockedCard.currentBalance);
-    const restoredBalance = currentBalance + refundAmount;
+    // Phase 2 W2.2: Decimal arithmetic for the balance restore so we never
+    // lose sub-cent precision through a Number cast on large balances.
+    const refundDecimal = new Prisma.Decimal(gcTransaction.amount as never).abs();
+    const currentDecimal = new Prisma.Decimal(lockedCard.currentBalance);
+    const restoredDecimal = currentDecimal.add(refundDecimal);
+    const refundAmount = refundDecimal.toNumber();
+    const currentBalance = currentDecimal.toNumber();
+    const restoredBalance = restoredDecimal.toNumber();
 
     const order = await tx.order.findUnique({
       where: { id: orderId },
