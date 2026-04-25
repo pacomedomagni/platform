@@ -380,6 +380,14 @@ export class WebhookService {
    * it is automatically disabled (circuit breaker).
    */
   private async deliverWebhook(webhook: Webhook, event: WebhookEvent, attempt = 0): Promise<void> {
+    // Phase 3 W3.7: deterministic idempotency-key per (event, attempt-zero)
+    // so the receiver can dedupe even if our retry logic delivers the same
+    // event twice. Subsequent retries reuse the same key.
+    const idempotencyKey = crypto
+      .createHash('sha256')
+      .update(`${webhook.id}:${event.event}:${event.timestamp.toISOString()}:${JSON.stringify(event.payload)}`)
+      .digest('hex');
+
     const payload = JSON.stringify({
       event: event.event,
       timestamp: event.timestamp.toISOString(),
@@ -400,7 +408,33 @@ export class WebhookService {
       'X-Webhook-Signature': `sha256=${signature}`,
       'X-Webhook-Event': event.event,
       'X-Webhook-Timestamp': event.timestamp.toISOString(),
+      'X-Idempotency-Key': idempotencyKey,
     };
+
+    // Phase 3 W3.7: re-validate URL (DNS) immediately before fetch. The URL
+    // was validated at create time, but DNS rebinding lets an attacker change
+    // the resolution to 127.0.0.1 between create and delivery. Re-resolving
+    // here closes the SSRF window.
+    try {
+      await this.validateWebhookUrl(webhook.url);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Validation failed';
+      this.logger.error(`Webhook URL re-validation failed for ${webhook.id}: ${msg}`);
+      await this.prisma.webhookDelivery.create({
+        data: {
+          tenantId: webhook.tenantId,
+          webhookId: webhook.id,
+          event: event.event,
+          payload,
+          statusCode: 0,
+          response: null,
+          error: `Pre-delivery URL validation failed: ${msg}`,
+          duration: 0,
+          success: false,
+        },
+      });
+      return;
+    }
 
     const startTime = Date.now();
     let response: Response | null = null;
@@ -457,6 +491,20 @@ export class WebhookService {
           where: { id: webhook.id },
           data: { status: 'disabled' },
         });
+      }
+
+      // Phase 3 W3.7: differentiate transient vs permanent failures.
+      // - Network errors / 5xx -> retry with exponential backoff
+      // - 4xx client errors    -> do not retry (the receiver explicitly
+      //                            rejected the payload; replaying it
+      //                            won't help and just wastes attempts)
+      const status = response?.status ?? 0;
+      const isPermanentClientError = status >= 400 && status < 500;
+      if (isPermanentClientError) {
+        this.logger.warn(
+          `Webhook ${webhook.id} returned ${status} — treating as permanent failure, not retrying.`,
+        );
+        return;
       }
 
       // H-WH-2: Automatic retry with exponential backoff (1min, 5min, 30min)
