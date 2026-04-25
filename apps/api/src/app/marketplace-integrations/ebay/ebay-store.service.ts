@@ -3,18 +3,25 @@ import { PrismaService } from '@platform/db';
 import { ClsService } from 'nestjs-cls';
 import eBayApi from 'ebay-api';
 import Redis from 'ioredis';
+import { DistributedLockService } from '@platform/queue';
 import { EncryptionService } from '../shared/encryption.service';
 import { EbayTokenResponse } from '../shared/marketplace.types';
 
 /**
  * eBay Store Management Service
- * Handles multi-store connections, OAuth tokens, and authenticated clients
+ * Handles multi-store connections, OAuth tokens, and authenticated clients.
+ *
+ * Phase 3 W3.4: token refresh is now serialized via Redis distributed lock.
+ * The previous in-memory `refreshLocks` Map only prevented concurrent
+ * refreshes within a single pod; under multi-pod deploys two pods could
+ * both refresh the same connection's token, race on the DB write, and
+ * each cache a different access token — leading to intermittent 401s
+ * served from one pod after the other had already rotated.
  */
 @Injectable()
 export class EbayStoreService implements OnModuleDestroy {
   private readonly logger = new Logger(EbayStoreService.name);
   private readonly clientCache = new Map<string, { client: eBayApi; expiry: number }>();
-  private readonly refreshLocks = new Map<string, Promise<any>>();
   private readonly TOKEN_BUFFER_MS = 60000; // Refresh 1 min before expiry
   private readonly mockMode = process.env.MOCK_EXTERNAL_SERVICES === 'true';
 
@@ -33,7 +40,8 @@ export class EbayStoreService implements OnModuleDestroy {
   constructor(
     private prisma: PrismaService,
     private cls: ClsService,
-    private encryption: EncryptionService
+    private encryption: EncryptionService,
+    private lockService: DistributedLockService,
   ) {}
 
   private getRedis(): Redis {
@@ -276,22 +284,26 @@ export class EbayStoreService implements OnModuleDestroy {
       return client;
     }
 
-    // Refresh the token (with mutex to prevent concurrent refreshes)
-    const existingLock = this.refreshLocks.get(connectionId);
-    if (existingLock) {
-      await existingLock;
-      // After waiting, retry getClient to use the refreshed token
+    // Phase 3 W3.4: serialize the refresh via a Redis distributed lock so
+    // concurrent pods don't both call eBay's refresh endpoint and race on
+    // the DB write. The lock TTL is generous (60s) because the network
+    // round-trip plus DB write should complete in single-digit seconds; if
+    // the lock is held by another pod we wait for it to finish, then re-call
+    // getClient() — by then the cache is warm with the rotated token.
+    const lockKey = `ebay:tokenRefresh:${connectionId}`;
+    const acquired = await this.lockService.tryAcquire(lockKey, 60_000);
+    if (!acquired) {
+      // Another pod is refreshing. Brief sleep then retry getClient(); the
+      // refresh should be done by then.
+      await new Promise((resolve) => setTimeout(resolve, 250));
       return this.getClient(connectionId, tenantId);
     }
 
-    const refreshPromise = this.refreshAccessToken(refreshToken)
-      .finally(() => this.refreshLocks.delete(connectionId));
-    this.refreshLocks.set(connectionId, refreshPromise);
-
     let tokens: EbayTokenResponse;
     try {
-      tokens = await refreshPromise;
+      tokens = await this.refreshAccessToken(refreshToken);
     } catch (error: any) {
+      await this.lockService.release(lockKey, acquired).catch(() => {});
       // H2: If token is revoked, mark connection as disconnected
       if (error?.isTokenRevoked) {
         await this.prisma.marketplaceConnection.update({
@@ -331,6 +343,10 @@ export class EbayStoreService implements OnModuleDestroy {
       client,
       expiry: expiry - this.TOKEN_BUFFER_MS,
     });
+
+    // Phase 3 W3.4: release the refresh lock now that the rotated token is
+    // both persisted and cached.
+    await this.lockService.release(lockKey, acquired).catch(() => {});
 
     this.logger.log(`Refreshed access token for connection ${connectionId}`);
     return client;

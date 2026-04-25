@@ -1,48 +1,33 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { DistributedLockService } from '@platform/queue';
 import { EbayStoreService } from './ebay-store.service';
 import { EbayOrderSyncService } from './ebay-order-sync.service';
 import { EbayWebhookService } from './ebay-webhook.service';
 
 /**
- * eBay Notification Service
- * Manages eBay webhook notification subscriptions and routes incoming events.
+ * eBay Notification Service.
  *
- * Supported topics:
- *   MARKETPLACE_ACCOUNT_DELETION
- *   ORDER_CREATED, ORDER_UPDATED
- *   ITEM_SOLD, ITEM_OUT_OF_STOCK
- *   RETURN_CREATED, RETURN_UPDATED
+ * Phase 3 W3.4: deduplication moved from an in-memory Map to Redis. The
+ * previous Map was per-pod and lost on restart, so a notificationId could
+ * be processed N times across N pods (or after a redeploy). Redis with
+ * SET NX EX gives durable, cross-pod dedup.
  */
 @Injectable()
 export class EbayNotificationService {
   private readonly logger = new Logger(EbayNotificationService.name);
 
-  /**
-   * In-memory deduplication cache for processed notification IDs.
-   * Prevents reprocessing the same event on eBay retries.
-   * Entries expire after 1 hour.
-   */
-  private readonly processedNotifications = new Map<string, number>();
-  private readonly DEDUP_TTL_MS = 60 * 60 * 1000; // 1 hour
-  private dedupCleanupTimer: ReturnType<typeof setInterval> | null = null;
+  // 24h matches eBay's typical retry window. Old enough to absorb their
+  // exponential backoff; short enough that the keyspace stays small.
+  private readonly DEDUP_TTL_MS = 24 * 60 * 60 * 1000;
 
   constructor(
     private prisma: PrismaService,
     private ebayStore: EbayStoreService,
     private orderSync: EbayOrderSyncService,
-    private webhookService: EbayWebhookService
-  ) {
-    // Periodically clean up expired dedup entries every 10 minutes
-    this.dedupCleanupTimer = setInterval(() => this.cleanupDedupCache(), 10 * 60 * 1000);
-  }
-
-  onModuleDestroy() {
-    if (this.dedupCleanupTimer) {
-      clearInterval(this.dedupCleanupTimer);
-      this.dedupCleanupTimer = null;
-    }
-  }
+    private webhookService: EbayWebhookService,
+    private lockService: DistributedLockService,
+  ) {}
 
   /**
    * Extract a unique notification ID from the payload for deduplication.
@@ -57,39 +42,14 @@ export class EbayNotificationService {
   }
 
   /**
-   * Check if a notification has already been processed (deduplication).
-   * Returns true if the notification is a duplicate.
+   * Atomic claim of a notificationId — returns true on first sight, false on
+   * duplicate. Uses the W3.2 distributed-lock primitive's underlying
+   * SET NX PX.
    */
-  private isDuplicate(notificationId: string): boolean {
-    const processed = this.processedNotifications.get(notificationId);
-    if (processed && Date.now() < processed) {
-      return true;
-    }
-    return false;
-  }
-
-  /**
-   * Mark a notification as processed for deduplication.
-   */
-  private markProcessed(notificationId: string): void {
-    this.processedNotifications.set(notificationId, Date.now() + this.DEDUP_TTL_MS);
-  }
-
-  /**
-   * Remove expired entries from the dedup cache.
-   */
-  private cleanupDedupCache(): void {
-    const now = Date.now();
-    let cleaned = 0;
-    for (const [key, expiry] of this.processedNotifications) {
-      if (now >= expiry) {
-        this.processedNotifications.delete(key);
-        cleaned++;
-      }
-    }
-    if (cleaned > 0) {
-      this.logger.debug(`Cleaned ${cleaned} expired notification dedup entries`);
-    }
+  private async claimNotificationId(notificationId: string): Promise<boolean> {
+    const key = `ebay:notif:dedup:${notificationId}`;
+    const token = await this.lockService.tryAcquire(key, this.DEDUP_TTL_MS);
+    return token !== null;
   }
 
   /**
@@ -97,14 +57,14 @@ export class EbayNotificationService {
    * Includes deduplication to prevent reprocessing on eBay retries.
    */
   async processNotification(topic: string, payload: any): Promise<void> {
-    // Deduplication check
+    // Deduplication check (Redis-backed, cross-pod, survives restart)
     const notificationId = this.getNotificationId(payload);
     if (notificationId) {
-      if (this.isDuplicate(notificationId)) {
+      const isFirstSeen = await this.claimNotificationId(notificationId);
+      if (!isFirstSeen) {
         this.logger.log(`Skipping duplicate eBay notification: ${topic} (id=${notificationId})`);
         return;
       }
-      this.markProcessed(notificationId);
     }
 
     this.logger.log(`Processing eBay notification: ${topic}${notificationId ? ` (id=${notificationId})` : ''}`);
