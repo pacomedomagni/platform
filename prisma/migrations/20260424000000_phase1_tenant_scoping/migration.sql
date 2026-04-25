@@ -13,7 +13,7 @@
 --    Backfill from product_variants.tenantId
 -- -----------------------------------------------------------------
 ALTER TABLE "product_variant_attributes"
-  ADD COLUMN IF NOT EXISTS "tenantId" UUID;
+  ADD COLUMN IF NOT EXISTS "tenantId" TEXT;
 
 UPDATE "product_variant_attributes" pva
 SET "tenantId" = pv."tenantId"
@@ -27,13 +27,15 @@ DELETE FROM "product_variant_attributes" WHERE "tenantId" IS NULL;
 ALTER TABLE "product_variant_attributes"
   ALTER COLUMN "tenantId" SET NOT NULL;
 
+ALTER TABLE "product_variant_attributes" DROP CONSTRAINT IF EXISTS "product_variant_attributes_tenantId_fkey";
 ALTER TABLE "product_variant_attributes"
   ADD CONSTRAINT "product_variant_attributes_tenantId_fkey"
   FOREIGN KEY ("tenantId") REFERENCES "tenants"(id) ON DELETE CASCADE;
 
 -- Swap the global unique for a tenant-scoped composite
+ALTER TABLE "product_variant_attributes" DROP CONSTRAINT IF EXISTS "product_variant_attributes_variantId_attributeTypeId_key";
 DROP INDEX IF EXISTS "product_variant_attributes_variantId_attributeTypeId_key";
-CREATE UNIQUE INDEX "product_variant_attributes_tenantId_variantId_attributeTypeId_key"
+CREATE UNIQUE INDEX IF NOT EXISTS "product_variant_attributes_tenantId_variantId_attributeTypeId_key"
   ON "product_variant_attributes" ("tenantId", "variantId", "attributeTypeId");
 CREATE INDEX IF NOT EXISTS "product_variant_attributes_tenantId_idx"
   ON "product_variant_attributes" ("tenantId");
@@ -43,7 +45,7 @@ CREATE INDEX IF NOT EXISTS "product_variant_attributes_tenantId_idx"
 --    Backfill from product_reviews.tenantId
 -- -----------------------------------------------------------------
 ALTER TABLE "review_votes"
-  ADD COLUMN IF NOT EXISTS "tenantId" UUID;
+  ADD COLUMN IF NOT EXISTS "tenantId" TEXT;
 
 UPDATE "review_votes" rv
 SET "tenantId" = pr."tenantId"
@@ -56,17 +58,20 @@ DELETE FROM "review_votes" WHERE "tenantId" IS NULL;
 ALTER TABLE "review_votes"
   ALTER COLUMN "tenantId" SET NOT NULL;
 
+ALTER TABLE "review_votes" DROP CONSTRAINT IF EXISTS "review_votes_tenantId_fkey";
 ALTER TABLE "review_votes"
   ADD CONSTRAINT "review_votes_tenantId_fkey"
   FOREIGN KEY ("tenantId") REFERENCES "tenants"(id) ON DELETE CASCADE;
 
 -- Originally global uniques: (reviewId, customerId), (reviewId, sessionToken)
 -- Tenant-scope them defensively, even though reviewId is tenant-scoped by FK.
+ALTER TABLE "review_votes" DROP CONSTRAINT IF EXISTS "review_votes_reviewId_customerId_key";
 DROP INDEX IF EXISTS "review_votes_reviewId_customerId_key";
+ALTER TABLE "review_votes" DROP CONSTRAINT IF EXISTS "review_votes_reviewId_sessionToken_key";
 DROP INDEX IF EXISTS "review_votes_reviewId_sessionToken_key";
-CREATE UNIQUE INDEX "review_votes_tenantId_reviewId_customerId_key"
+CREATE UNIQUE INDEX IF NOT EXISTS "review_votes_tenantId_reviewId_customerId_key"
   ON "review_votes" ("tenantId", "reviewId", "customerId");
-CREATE UNIQUE INDEX "review_votes_tenantId_reviewId_sessionToken_key"
+CREATE UNIQUE INDEX IF NOT EXISTS "review_votes_tenantId_reviewId_sessionToken_key"
   ON "review_votes" ("tenantId", "reviewId", "sessionToken");
 CREATE INDEX IF NOT EXISTS "review_votes_tenantId_idx"
   ON "review_votes" ("tenantId");
@@ -76,7 +81,7 @@ CREATE INDEX IF NOT EXISTS "review_votes_tenantId_idx"
 --    Backfill from wishlists.tenantId
 -- -----------------------------------------------------------------
 ALTER TABLE "wishlist_items"
-  ADD COLUMN IF NOT EXISTS "tenantId" UUID;
+  ADD COLUMN IF NOT EXISTS "tenantId" TEXT;
 
 UPDATE "wishlist_items" wi
 SET "tenantId" = w."tenantId"
@@ -89,6 +94,7 @@ DELETE FROM "wishlist_items" WHERE "tenantId" IS NULL;
 ALTER TABLE "wishlist_items"
   ALTER COLUMN "tenantId" SET NOT NULL;
 
+ALTER TABLE "wishlist_items" DROP CONSTRAINT IF EXISTS "wishlist_items_tenantId_fkey";
 ALTER TABLE "wishlist_items"
   ADD CONSTRAINT "wishlist_items_tenantId_fkey"
   FOREIGN KEY ("tenantId") REFERENCES "tenants"(id) ON DELETE CASCADE;
@@ -105,7 +111,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "wishlist_items_tenantId_wishlistId_productLis
 --    Backfill from marketplace_message_threads.tenantId
 -- -----------------------------------------------------------------
 ALTER TABLE "marketplace_messages"
-  ADD COLUMN IF NOT EXISTS "tenantId" UUID;
+  ADD COLUMN IF NOT EXISTS "tenantId" TEXT;
 
 UPDATE "marketplace_messages" mm
 SET "tenantId" = t."tenantId"
@@ -118,13 +124,15 @@ DELETE FROM "marketplace_messages" WHERE "tenantId" IS NULL;
 ALTER TABLE "marketplace_messages"
   ALTER COLUMN "tenantId" SET NOT NULL;
 
+ALTER TABLE "marketplace_messages" DROP CONSTRAINT IF EXISTS "marketplace_messages_tenantId_fkey";
 ALTER TABLE "marketplace_messages"
   ADD CONSTRAINT "marketplace_messages_tenantId_fkey"
   FOREIGN KEY ("tenantId") REFERENCES "tenants"(id) ON DELETE CASCADE;
 
 -- Scope the previously-global externalMessageId unique
+ALTER TABLE "marketplace_messages" DROP CONSTRAINT IF EXISTS "marketplace_messages_externalMessageId_key";
 DROP INDEX IF EXISTS "marketplace_messages_externalMessageId_key";
-CREATE UNIQUE INDEX "marketplace_messages_tenantId_externalMessageId_key"
+CREATE UNIQUE INDEX IF NOT EXISTS "marketplace_messages_tenantId_externalMessageId_key"
   ON "marketplace_messages" ("tenantId", "externalMessageId");
 CREATE INDEX IF NOT EXISTS "marketplace_messages_tenantId_idx"
   ON "marketplace_messages" ("tenantId");
@@ -134,7 +142,7 @@ CREATE INDEX IF NOT EXISTS "marketplace_messages_tenantId_idx"
 --    Backfill from webhooks.tenantId
 -- -----------------------------------------------------------------
 ALTER TABLE "webhook_deliveries"
-  ADD COLUMN IF NOT EXISTS "tenantId" UUID;
+  ADD COLUMN IF NOT EXISTS "tenantId" TEXT;
 
 UPDATE "webhook_deliveries" wd
 SET "tenantId" = w."tenantId"
@@ -147,6 +155,7 @@ DELETE FROM "webhook_deliveries" WHERE "tenantId" IS NULL;
 ALTER TABLE "webhook_deliveries"
   ALTER COLUMN "tenantId" SET NOT NULL;
 
+ALTER TABLE "webhook_deliveries" DROP CONSTRAINT IF EXISTS "webhook_deliveries_tenantId_fkey";
 ALTER TABLE "webhook_deliveries"
   ADD CONSTRAINT "webhook_deliveries_tenantId_fkey"
   FOREIGN KEY ("tenantId") REFERENCES "tenants"(id) ON DELETE CASCADE;
@@ -164,8 +173,9 @@ CREATE INDEX IF NOT EXISTS "webhook_deliveries_tenantId_createdAt_idx"
 DELETE FROM "processed_webhook_events";
 
 ALTER TABLE "processed_webhook_events"
-  ADD COLUMN IF NOT EXISTS "tenantId" UUID NOT NULL;
+  ADD COLUMN IF NOT EXISTS "tenantId" TEXT NOT NULL;
 
+ALTER TABLE "processed_webhook_events" DROP CONSTRAINT IF EXISTS "processed_webhook_events_tenantId_fkey";
 ALTER TABLE "processed_webhook_events"
   ADD CONSTRAINT "processed_webhook_events_tenantId_fkey"
   FOREIGN KEY ("tenantId") REFERENCES "tenants"(id) ON DELETE CASCADE;
@@ -173,8 +183,9 @@ ALTER TABLE "processed_webhook_events"
 -- Swap the global eventId unique for a tenant-scoped composite.
 -- An attacker-controlled Stripe event ID can no longer block a different
 -- tenant's processing via the dedup table.
+ALTER TABLE "processed_webhook_events" DROP CONSTRAINT IF EXISTS "processed_webhook_events_eventId_key";
 DROP INDEX IF EXISTS "processed_webhook_events_eventId_key";
-CREATE UNIQUE INDEX "processed_webhook_events_tenantId_eventId_key"
+CREATE UNIQUE INDEX IF NOT EXISTS "processed_webhook_events_tenantId_eventId_key"
   ON "processed_webhook_events" ("tenantId", "eventId");
 CREATE INDEX IF NOT EXISTS "processed_webhook_events_tenantId_idx"
   ON "processed_webhook_events" ("tenantId");
@@ -184,7 +195,7 @@ CREATE INDEX IF NOT EXISTS "processed_webhook_events_tenantId_idx"
 --    Backfill from users.tenantId
 -- -----------------------------------------------------------------
 ALTER TABLE "merchant_email_verification_tokens"
-  ADD COLUMN IF NOT EXISTS "tenantId" UUID;
+  ADD COLUMN IF NOT EXISTS "tenantId" TEXT;
 
 UPDATE "merchant_email_verification_tokens" t
 SET "tenantId" = u."tenantId"
@@ -197,14 +208,16 @@ DELETE FROM "merchant_email_verification_tokens" WHERE "tenantId" IS NULL;
 ALTER TABLE "merchant_email_verification_tokens"
   ALTER COLUMN "tenantId" SET NOT NULL;
 
+ALTER TABLE "merchant_email_verification_tokens" DROP CONSTRAINT IF EXISTS "merchant_email_verification_tokens_tenantId_fkey";
 ALTER TABLE "merchant_email_verification_tokens"
   ADD CONSTRAINT "merchant_email_verification_tokens_tenantId_fkey"
   FOREIGN KEY ("tenantId") REFERENCES "tenants"(id) ON DELETE CASCADE;
 
 -- Scope the global token unique so one tenant cannot block a token
 -- value another tenant happens to generate.
+ALTER TABLE "merchant_email_verification_tokens" DROP CONSTRAINT IF EXISTS "merchant_email_verification_tokens_token_key";
 DROP INDEX IF EXISTS "merchant_email_verification_tokens_token_key";
-CREATE UNIQUE INDEX "merchant_email_verification_tokens_tenantId_token_key"
+CREATE UNIQUE INDEX IF NOT EXISTS "merchant_email_verification_tokens_tenantId_token_key"
   ON "merchant_email_verification_tokens" ("tenantId", "token");
 CREATE INDEX IF NOT EXISTS "merchant_email_verification_tokens_tenantId_idx"
   ON "merchant_email_verification_tokens" ("tenantId");
@@ -216,18 +229,21 @@ CREATE INDEX IF NOT EXISTS "merchant_email_verification_tokens_tenantId_idx"
 -- Cart.sessionToken was globally unique — a leaked token exposed
 -- cross-tenant session enumeration. Scope to (tenantId, sessionToken).
 -- Global unique allowed multiple NULLs (which is fine and preserved).
+ALTER TABLE "carts" DROP CONSTRAINT IF EXISTS "carts_sessionToken_key";
 DROP INDEX IF EXISTS "carts_sessionToken_key";
-CREATE UNIQUE INDEX "carts_tenantId_sessionToken_key"
+CREATE UNIQUE INDEX IF NOT EXISTS "carts_tenantId_sessionToken_key"
   ON "carts" ("tenantId", "sessionToken");
 
 -- marketplace_listings.externalOfferId / externalListingId were globally
 -- unique. A reseller transferring between tenants, or an overlap of eBay
 -- offers, could collide across tenants. Scope to (tenantId, ...).
+ALTER TABLE "marketplace_listings" DROP CONSTRAINT IF EXISTS "marketplace_listings_externalOfferId_key";
 DROP INDEX IF EXISTS "marketplace_listings_externalOfferId_key";
+ALTER TABLE "marketplace_listings" DROP CONSTRAINT IF EXISTS "marketplace_listings_externalListingId_key";
 DROP INDEX IF EXISTS "marketplace_listings_externalListingId_key";
-CREATE UNIQUE INDEX "marketplace_listings_tenantId_externalOfferId_key"
+CREATE UNIQUE INDEX IF NOT EXISTS "marketplace_listings_tenantId_externalOfferId_key"
   ON "marketplace_listings" ("tenantId", "externalOfferId");
-CREATE UNIQUE INDEX "marketplace_listings_tenantId_externalListingId_key"
+CREATE UNIQUE INDEX IF NOT EXISTS "marketplace_listings_tenantId_externalListingId_key"
   ON "marketplace_listings" ("tenantId", "externalListingId");
 
 -- =================================================================
