@@ -944,7 +944,7 @@ export class StockMovementService {
     // next_voucher_seq() does the increment in a single INSERT ... ON CONFLICT
     // statement, scoped to (tenantId, voucherType, yearMonth).
     const seqResult = await tx.$queryRaw<Array<{ next_voucher_seq: number }>>`
-      SELECT next_voucher_seq(${tenantId}::uuid, ${voucherType}, ${yearMonth}) AS next_voucher_seq
+      SELECT next_voucher_seq(${tenantId}, ${voucherType}, ${yearMonth}) AS next_voucher_seq
     `;
     const nextSeq = seqResult[0]?.next_voucher_seq;
     if (typeof nextSeq !== 'number') {

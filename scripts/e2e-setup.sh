@@ -143,6 +143,11 @@ else
   (
     set -a
     source .env.e2e
+    # Defensive defaults — .env.e2e is gitignored so individual dev
+    # copies can drift. The payments-config e2e test asserts
+    # isConfigured: true, which requires Stripe to be in mock mode.
+    : "${MOCK_PAYMENTS:=true}"
+    : "${MOCK_EXTERNAL_SERVICES:=true}"
     set +a
     npx nx serve api &
   )

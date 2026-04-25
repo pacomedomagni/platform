@@ -1,6 +1,11 @@
 import axios from 'axios';
 import { signupJourneyTenant, journeyAdminHeaders } from '../support/auth-helper';
 import { store } from '../support/data-store';
+import {
+  activateTenantPayments,
+  getLatestMerchantVerificationToken,
+  getUserIdByEmail,
+} from '../support/db-helper';
 
 const UNIQUE = Date.now();
 
@@ -173,31 +178,57 @@ describe('Journey: Merchant Onboarding', () => {
       store.journeyProductId = id;
     });
 
-    it('POST /store/admin/dashboard/publish → publish gate enforced for unverified tenant', async () => {
+    it('POST /store/admin/dashboard/publish → blocked until merchant email verified', async () => {
       const res = await axios.post(
         '/store/admin/dashboard/publish',
         {},
         { headers: jHeaders() },
       );
 
-      // Fresh tenant with unverified email cannot publish.
-      // Expect 400 (BadRequest) explaining the readiness gate.
-      expect([200, 201, 400]).toContain(res.status);
+      // Fresh tenant with unverified email cannot publish — readiness gate.
+      expect(res.status).toBe(400);
     });
 
-    it('GET /store/products → public storefront blocked until store published', async () => {
+    it('POST /onboarding/verify-email → verify with the token written to the DB', async () => {
+      const userId = await getUserIdByEmail(store.journeyEmail, store.journeyTenantId);
+      expect(userId).toBeTruthy();
+
+      const token = await getLatestMerchantVerificationToken(userId as string);
+      expect(token).toBeTruthy();
+
+      const res = await axios.post(
+        '/onboarding/verify-email',
+        { token },
+        { headers: jHeaders() },
+      );
+
+      expect(res.status).toBeLessThan(400);
+    });
+
+    it('POST /store/admin/dashboard/publish → succeeds once verified + payments active', async () => {
+      // Stripe Connect can't be driven end-to-end from e2e without real
+      // creds, so shim the post-condition the publish gate cares about.
+      await activateTenantPayments(store.journeyTenantId);
+
+      const res = await axios.post(
+        '/store/admin/dashboard/publish',
+        {},
+        { headers: jHeaders() },
+      );
+
+      expect([200, 201]).toContain(res.status);
+      expect(res.data.storePublished).toBe(true);
+    });
+
+    it('GET /store/products → product visible on public storefront', async () => {
       const res = await axios.get('/store/products', {
         headers: { 'x-tenant-id': store.journeyTenantId },
       });
 
-      // Either 200 (if upstream test managed to publish) or 503 (gate active).
-      // The journey-purchase-lifecycle / cancellation suites cover the
-      // happy-path storefront access on the seeded, pre-published tenant.
-      expect([200, 503]).toContain(res.status);
-      if (res.status === 200) {
-        const items = res.data.data ?? res.data;
-        expect(Array.isArray(items)).toBe(true);
-      }
+      expect(res.status).toBe(200);
+      const items = res.data.data ?? res.data;
+      expect(Array.isArray(items)).toBe(true);
+      expect(items.length).toBeGreaterThanOrEqual(1);
     });
   });
 });
