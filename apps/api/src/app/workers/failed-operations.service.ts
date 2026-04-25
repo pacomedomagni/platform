@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '@platform/db';
+import { DistributedLockService } from '@platform/queue';
 import { OperationType, OperationStatus, Prisma, FailedOperation } from '@prisma/client';
 import { StockMovementService } from '../inventory-management/stock-movement.service';
 import { WebhookService } from '../operations/webhook.service';
@@ -29,7 +30,17 @@ export class FailedOperationsService {
     private readonly stockMovementService: StockMovementService,
     private readonly webhookService: WebhookService,
     private readonly emailService: EmailService,
+    private readonly lockService: DistributedLockService,
   ) {}
+
+  /** Phase 3 W3.2: distributed-lock wrapper for cron handlers. */
+  private async withCronLock<T>(
+    name: string,
+    ttlMs: number,
+    fn: () => Promise<T>,
+  ): Promise<T | null> {
+    return this.lockService.withLock(`cron:failedOps:${name}`, ttlMs, fn);
+  }
 
   /**
    * Record a failed operation for retry
@@ -73,6 +84,10 @@ export class FailedOperationsService {
    */
   @Cron(CronExpression.EVERY_5_MINUTES)
   async retryFailedOperations() {
+    return this.withCronLock('retryFailedOperations', 4 * 60_000, () => this.runRetryFailedOperations());
+  }
+
+  private async runRetryFailedOperations() {
     this.logger.log('Starting failed operations retry...');
 
     try {
@@ -435,6 +450,10 @@ export class FailedOperationsService {
    */
   @Cron(CronExpression.EVERY_DAY_AT_1AM)
   async cleanupOldOperations() {
+    return this.withCronLock('cleanupOldOperations', 30 * 60_000, () => this.runCleanupOldOperations());
+  }
+
+  private async runCleanupOldOperations() {
     this.logger.log('Starting cleanup of old succeeded operations...');
 
     try {

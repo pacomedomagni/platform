@@ -1,5 +1,6 @@
 import { Module, DynamicModule, Global } from '@nestjs/common';
 import { QueueService } from './queue.service';
+import { DistributedLockService } from './distributed-lock.service';
 import { QueueModuleOptions, QUEUE_MODULE_OPTIONS } from './queue.types';
 
 @Global()
@@ -14,8 +15,9 @@ export class QueueModule {
           useValue: options,
         },
         QueueService,
+        DistributedLockService,
       ],
-      exports: [QueueService],
+      exports: [QueueService, DistributedLockService],
     };
   }
 
@@ -32,8 +34,9 @@ export class QueueModule {
           inject: (options.inject || []) as any[],
         },
         QueueService,
+        DistributedLockService,
       ],
-      exports: [QueueService],
+      exports: [QueueService, DistributedLockService],
     };
   }
 }

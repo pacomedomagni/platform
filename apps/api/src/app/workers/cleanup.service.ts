@@ -1,11 +1,19 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '@platform/db';
+import { DistributedLockService } from '@platform/queue';
 import { WebhookService } from '../operations/webhook.service';
 
 /**
  * Cleanup Service
- * Handles periodic cleanup of expired data
+ * Handles periodic cleanup of expired data.
+ *
+ * Phase 3 W3.2: every @Cron handler is wrapped in a Redis distributed lock
+ * via `withCronLock()` so it fires on exactly one API pod per interval.
+ * Without this, every pod runs the same cron — N pods × N× cleanup work,
+ * duplicate password-reset deletions, the failed-operations queue polled
+ * N×, etc. Lock TTLs are sized to be 2× the expected job runtime; the
+ * cleanup tasks are short enough that no heartbeat is needed.
  */
 @Injectable()
 export class CleanupService {
@@ -14,7 +22,17 @@ export class CleanupService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly webhookService: WebhookService,
+    private readonly lockService: DistributedLockService,
   ) {}
+
+  /** Helper that wraps a cron handler in the W3.2 distributed lock. */
+  private async withCronLock<T>(
+    name: string,
+    ttlMs: number,
+    fn: () => Promise<T>,
+  ): Promise<T | null> {
+    return this.lockService.withLock(`cron:cleanup:${name}`, ttlMs, fn);
+  }
 
   /**
    * Clean up expired carts and release stock reservations
@@ -22,6 +40,10 @@ export class CleanupService {
    */
   @Cron(CronExpression.EVERY_10_MINUTES)
   async cleanupExpiredCarts() {
+    return this.withCronLock('expiredCarts', 5 * 60_000, () => this.runExpiredCartCleanup());
+  }
+
+  private async runExpiredCartCleanup() {
     this.logger.log('Starting expired cart cleanup...');
 
     try {
@@ -131,6 +153,10 @@ export class CleanupService {
    */
   @Cron(CronExpression.EVERY_DAY_AT_2AM)
   async cleanupExpiredPasswordResets() {
+    return this.withCronLock('expiredPasswordResets', 30 * 60_000, () => this.runExpiredPasswordResetCleanup());
+  }
+
+  private async runExpiredPasswordResetCleanup() {
     this.logger.log('Starting password reset token cleanup...');
 
     try {
@@ -157,6 +183,10 @@ export class CleanupService {
    */
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
   async cleanupOldAbandonedCarts() {
+    return this.withCronLock('oldAbandonedCarts', 30 * 60_000, () => this.runOldAbandonedCartCleanup());
+  }
+
+  private async runOldAbandonedCartCleanup() {
     this.logger.log('Starting old abandoned cart cleanup...');
 
     try {
@@ -222,6 +252,10 @@ export class CleanupService {
    */
   @Cron(CronExpression.EVERY_WEEK)
   async cleanupOldAuditLogs() {
+    return this.withCronLock('oldAuditLogs', 60 * 60_000, () => this.runOldAuditLogCleanup());
+  }
+
+  private async runOldAuditLogCleanup() {
     this.logger.log('Starting old audit log cleanup...');
 
     try {
