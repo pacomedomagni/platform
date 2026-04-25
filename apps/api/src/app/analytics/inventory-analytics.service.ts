@@ -410,19 +410,25 @@ export class InventoryAnalyticsService {
           AND COALESCE(wib_totals.total_qty, 0) > 0
       )
       SELECT
-        CASE
-          WHEN last_activity >= NOW() - INTERVAL '30 days' THEN '0-30 days'
-          WHEN last_activity >= NOW() - INTERVAL '60 days' THEN '31-60 days'
-          WHEN last_activity >= NOW() - INTERVAL '90 days' THEN '61-90 days'
-          WHEN last_activity >= NOW() - INTERVAL '180 days' THEN '91-180 days'
-          ELSE '180+ days'
-        END as age_range,
+        age_range,
         COUNT(*)::int as item_count,
         COALESCE(SUM(qty_on_hand)::float, 0) as total_units,
         COALESCE(SUM(qty_on_hand * cost_price)::float, 0) as total_value
-      FROM last_movement
+      FROM (
+        SELECT
+          qty_on_hand,
+          cost_price,
+          CASE
+            WHEN last_activity >= NOW() - INTERVAL '30 days' THEN '0-30 days'
+            WHEN last_activity >= NOW() - INTERVAL '60 days' THEN '31-60 days'
+            WHEN last_activity >= NOW() - INTERVAL '90 days' THEN '61-90 days'
+            WHEN last_activity >= NOW() - INTERVAL '180 days' THEN '91-180 days'
+            ELSE '180+ days'
+          END as age_range
+        FROM last_movement
+      ) AS bucketed
       GROUP BY age_range
-      ORDER BY 
+      ORDER BY
         CASE age_range
           WHEN '0-30 days' THEN 1
           WHEN '31-60 days' THEN 2

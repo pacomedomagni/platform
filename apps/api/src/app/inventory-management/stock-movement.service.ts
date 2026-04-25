@@ -885,8 +885,8 @@ export class StockMovementService {
           sle."valuationRate"::text AS rate
         FROM stock_ledger_entries sle
         JOIN warehouses w ON w.id = sle."warehouseId"
-        WHERE sle."tenantId" = ${ctx.tenantId}::uuid
-          AND sle."itemId"   = ${item.id}::uuid
+        WHERE sle."tenantId" = ${ctx.tenantId}
+          AND sle."itemId"   = ${item.id}
         ORDER BY sle."postingTs" DESC, sle.id DESC
         LIMIT ${limit} OFFSET ${offset}
       `;

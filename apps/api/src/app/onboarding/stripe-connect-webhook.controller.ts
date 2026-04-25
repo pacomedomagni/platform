@@ -76,7 +76,7 @@ export class StripeConnectWebhookController {
     // Webhook deduplication: prevent processing the same event twice
     const dedupeResult = await this.prisma.$queryRaw<{ already_processed: boolean }[]>`
       INSERT INTO processed_webhook_events (id, "tenantId", "eventId", "eventType", "processedAt")
-      VALUES (gen_random_uuid(), ${tenant.id}::uuid, ${event.id}, ${event.type}, NOW())
+      VALUES (gen_random_uuid(), ${tenant.id}, ${event.id}, ${event.type}, NOW())
       ON CONFLICT ("tenantId", "eventId") DO NOTHING
       RETURNING FALSE as already_processed
     `;

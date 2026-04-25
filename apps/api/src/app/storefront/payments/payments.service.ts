@@ -117,7 +117,7 @@ export class PaymentsService {
     // after a partial success are safe.
     const dedupeResult = await this.prisma.$queryRaw<{ already_processed: boolean }[]>`
       INSERT INTO processed_webhook_events (id, "tenantId", "eventId", "eventType", "processedAt")
-      VALUES (gen_random_uuid(), ${tenantId}::uuid, ${event.id}, ${event.type}, NOW())
+      VALUES (gen_random_uuid(), ${tenantId}, ${event.id}, ${event.type}, NOW())
       ON CONFLICT ("tenantId", "eventId") DO NOTHING
       RETURNING FALSE as already_processed
     `;

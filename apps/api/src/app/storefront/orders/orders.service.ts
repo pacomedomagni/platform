@@ -657,7 +657,7 @@ export class OrdersService {
       await tx.$executeRaw`
         UPDATE coupons
         SET "timesUsed" = GREATEST("timesUsed" - 1, 0)
-        WHERE id = ${usage.couponId}::uuid AND "tenantId" = ${tenantId}::uuid
+        WHERE id = ${usage.couponId} AND "tenantId" = ${tenantId}
       `;
     });
     this.logger.log(`Reversed coupon usage for cancelled order ${orderId}`);
@@ -779,9 +779,9 @@ export class OrdersService {
       await tx.$executeRaw`
         UPDATE warehouse_item_balances
         SET "reservedQty" = GREATEST("reservedQty" - ${item.quantity}, 0)
-        WHERE "tenantId"   = ${tenantId}::uuid
-          AND "itemId"     = ${item.product.item.id}::uuid
-          AND "warehouseId" = ${warehouse.id}::uuid
+        WHERE "tenantId"   = ${tenantId}
+          AND "itemId"     = ${item.product.item.id}
+          AND "warehouseId" = ${warehouse.id}
       `;
     }
   }
@@ -813,7 +813,7 @@ export class OrdersService {
     }>>`
       SELECT id, "currentBalance"::text AS "currentBalance"
       FROM gift_cards
-      WHERE id = ${gcTransaction.giftCardId}::uuid
+      WHERE id = ${gcTransaction.giftCardId}
       FOR UPDATE
     `;
     const lockedCard = lockedCards[0];
@@ -863,7 +863,7 @@ export class OrdersService {
       Array<{ id: string; couponId: string }>
     >`
       SELECT id, "couponId" FROM coupon_usages
-      WHERE "tenantId" = ${tenantId}::uuid AND "orderId" = ${orderId}::uuid
+      WHERE "tenantId" = ${tenantId} AND "orderId" = ${orderId}
       FOR UPDATE
     `;
     if (locked.length === 0) return;
@@ -872,7 +872,7 @@ export class OrdersService {
     await tx.$executeRaw`
       UPDATE coupons
       SET "timesUsed" = GREATEST("timesUsed" - 1, 0)
-      WHERE id = ${usage.couponId}::uuid AND "tenantId" = ${tenantId}::uuid
+      WHERE id = ${usage.couponId} AND "tenantId" = ${tenantId}
     `;
   }
 

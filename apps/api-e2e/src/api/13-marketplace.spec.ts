@@ -122,7 +122,7 @@ describe('Marketplace Endpoints', () => {
   let listingId: string;
 
   describe('eBay Listing Lifecycle (Mock Mode)', () => {
-    it('POST /marketplace/ebay/listings → 201 (create listing from product)', async () => {
+    it('POST /marketplace/listings → 201 (create listing from product)', async () => {
       expect(connectionId).toBeTruthy();
 
       // We need a product listing ID. Get the product and find its first listing.
@@ -150,10 +150,16 @@ describe('Marketplace Endpoints', () => {
       expect(productListingId).toBeTruthy();
 
       const res = await axios.post(
-        '/marketplace/ebay/listings',
+        '/marketplace/listings',
         {
           connectionId,
           productListingId,
+          title: 'E2E Marketplace Test Listing',
+          description: 'End-to-end marketplace listing',
+          price: 29.99,
+          quantity: 10,
+          condition: 'NEW',
+          categoryId: '171485',
         },
         { headers: adminHeaders() },
       );
@@ -165,7 +171,7 @@ describe('Marketplace Endpoints', () => {
       store.ebayListingId = listingId;
     });
 
-    it('POST /marketplace/ebay/listings/:id/publish → 200 (publish with mock eBay API)', async () => {
+    it('POST /marketplace/listings/:id/publish → 200 (publish with mock eBay API)', async () => {
       if (!listingId) {
         console.warn('Skipping: no listing to publish');
         return;
@@ -173,7 +179,7 @@ describe('Marketplace Endpoints', () => {
 
       // Approve first (required before publish)
       const approveRes = await axios.post(
-        `/marketplace/ebay/listings/${listingId}/approve`,
+        `/marketplace/listings/${listingId}/approve`,
         {},
         { headers: adminHeaders() },
       );
@@ -181,7 +187,7 @@ describe('Marketplace Endpoints', () => {
 
       // Publish to eBay (mock mode)
       const res = await axios.post(
-        `/marketplace/ebay/listings/${listingId}/publish`,
+        `/marketplace/listings/${listingId}/publish`,
         {},
         { headers: adminHeaders() },
       );
@@ -193,14 +199,14 @@ describe('Marketplace Endpoints', () => {
       }
     });
 
-    it('POST /marketplace/ebay/listings/:id/sync-inventory → 200 (sync with mock)', async () => {
+    it('POST /marketplace/listings/:id/sync-inventory → 200 (sync with mock)', async () => {
       if (!listingId) {
         console.warn('Skipping: no listing to sync');
         return;
       }
 
       const res = await axios.post(
-        `/marketplace/ebay/listings/${listingId}/sync-inventory`,
+        `/marketplace/listings/${listingId}/sync-inventory`,
         {},
         { headers: adminHeaders() },
       );
@@ -215,8 +221,8 @@ describe('Marketplace Endpoints', () => {
   // ───────────────────────── eBay Listing Management (Mock Mode) ─────────────────────────
 
   describe('eBay Listing Management (Mock Mode)', () => {
-    it('GET /marketplace/ebay/listings → 200 (list all eBay listings)', async () => {
-      const res = await axios.get('/marketplace/ebay/listings', {
+    it('GET /marketplace/listings → 200 (list all eBay listings)', async () => {
+      const res = await axios.get('/marketplace/listings', {
         headers: adminHeaders(),
       });
 
@@ -224,14 +230,14 @@ describe('Marketplace Endpoints', () => {
       expect(res.data).toBeDefined();
     });
 
-    it('GET /marketplace/ebay/listings/:id → 200 (get listing detail)', async () => {
+    it('GET /marketplace/listings/:id → 200 (get listing detail)', async () => {
       if (!listingId) {
         console.warn('Skipping: no listing to get');
         return;
       }
 
       const res = await axios.get(
-        `/marketplace/ebay/listings/${listingId}`,
+        `/marketplace/listings/${listingId}`,
         { headers: adminHeaders() },
       );
 
@@ -240,14 +246,14 @@ describe('Marketplace Endpoints', () => {
       expect(res.data.id).toBe(listingId);
     });
 
-    it('PATCH /marketplace/ebay/listings/:id → 200 (update listing)', async () => {
+    it('PATCH /marketplace/listings/:id → 200 (update listing)', async () => {
       if (!listingId) {
         console.warn('Skipping: no listing to update');
         return;
       }
 
       const res = await axios.patch(
-        `/marketplace/ebay/listings/${listingId}`,
+        `/marketplace/listings/${listingId}`,
         { title: 'Updated E2E Test Listing' },
         { headers: adminHeaders() },
       );
@@ -255,14 +261,14 @@ describe('Marketplace Endpoints', () => {
       expect(res.status).toBeLessThan(500);
     });
 
-    it('POST /marketplace/ebay/listings/:id/end → 200 (end listing on eBay)', async () => {
+    it('POST /marketplace/listings/:id/end → 200 (end listing on eBay)', async () => {
       if (!listingId) {
         console.warn('Skipping: no listing to end');
         return;
       }
 
       const res = await axios.post(
-        `/marketplace/ebay/listings/${listingId}/end`,
+        `/marketplace/listings/${listingId}/end`,
         {},
         { headers: adminHeaders() },
       );
@@ -328,17 +334,23 @@ describe('Marketplace Endpoints', () => {
   describe('eBay Listing Cleanup (Mock Mode)', () => {
     let draftListingId: string;
 
-    it('POST /marketplace/ebay/listings → create a draft listing for reject test', async () => {
+    it('POST /marketplace/listings → create a draft listing for reject test', async () => {
       if (!connectionId || !store.productIds?.length) {
         console.warn('Skipping: no connection or product');
         return;
       }
 
       const res = await axios.post(
-        '/marketplace/ebay/listings',
+        '/marketplace/listings',
         {
           connectionId,
           productListingId: store.productIds[0],
+          title: 'E2E Reject Test Listing',
+          description: 'End-to-end reject lifecycle',
+          price: 19.99,
+          quantity: 5,
+          condition: 'NEW',
+          categoryId: '171485',
         },
         { headers: adminHeaders() },
       );
@@ -349,14 +361,14 @@ describe('Marketplace Endpoints', () => {
       expect(res.status).toBeLessThan(500);
     });
 
-    it('POST /marketplace/ebay/listings/:id/reject → 200 (reject draft listing)', async () => {
+    it('POST /marketplace/listings/:id/reject → 200 (reject draft listing)', async () => {
       if (!draftListingId) {
         console.warn('Skipping: no draft listing to reject');
         return;
       }
 
       const res = await axios.post(
-        `/marketplace/ebay/listings/${draftListingId}/reject`,
+        `/marketplace/listings/${draftListingId}/reject`,
         { reason: 'E2E test rejection' },
         { headers: adminHeaders() },
       );
@@ -364,14 +376,14 @@ describe('Marketplace Endpoints', () => {
       expect(res.status).toBeLessThan(500);
     });
 
-    it('DELETE /marketplace/ebay/listings/:id → 200 (delete listing)', async () => {
+    it('DELETE /marketplace/listings/:id → 200 (delete listing)', async () => {
       if (!draftListingId) {
         console.warn('Skipping: no listing to delete');
         return;
       }
 
       const res = await axios.delete(
-        `/marketplace/ebay/listings/${draftListingId}`,
+        `/marketplace/listings/${draftListingId}`,
         { headers: adminHeaders() },
       );
 

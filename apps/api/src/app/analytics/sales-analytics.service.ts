@@ -212,8 +212,8 @@ export class SalesAnalyticsService {
           WHERE "tenantId" = ${ctx.tenantId} AND "paymentStatus" = 'CAPTURED'
           GROUP BY "customerId"
         ) oc ON oc."customerId" = cfo."customerId"
-        WHERE cfo.cohort_month >= TO_CHAR(${startDate}, 'YYYY-MM')
-          AND cfo.cohort_month <= TO_CHAR(${endDate}, 'YYYY-MM')
+        WHERE cfo.cohort_month >= TO_CHAR(${startDate}::timestamp, 'YYYY-MM')
+          AND cfo.cohort_month <= TO_CHAR(${endDate}::timestamp, 'YYYY-MM')
         GROUP BY cfo.cohort_month
         ORDER BY cfo.cohort_month
         LIMIT ${cohortMonths}
@@ -250,8 +250,8 @@ export class SalesAnalyticsService {
         INNER JOIN orders o2 ON o2."customerId" = cfo."customerId"
           AND o2."paymentStatus" = 'CAPTURED'
           AND o2."tenantId" = ${ctx.tenantId}
-        WHERE cfo.cohort_month >= TO_CHAR(${startDate}, 'YYYY-MM')
-          AND cfo.cohort_month <= TO_CHAR(${endDate}, 'YYYY-MM')
+        WHERE cfo.cohort_month >= TO_CHAR(${startDate}::timestamp, 'YYYY-MM')
+          AND cfo.cohort_month <= TO_CHAR(${endDate}::timestamp, 'YYYY-MM')
         GROUP BY cfo."customerId", cfo.cohort_month, EXTRACT(YEAR FROM o."createdAt"), EXTRACT(MONTH FROM o."createdAt")
       )
       SELECT

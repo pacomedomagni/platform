@@ -124,8 +124,19 @@ export class MerchantVerificationService {
       throw new BadRequestException('Please wait 60 seconds before requesting another verification email');
     }
 
-    await this.sendVerificationEmail(userId);
-    return { sent: true };
+    try {
+      await this.sendVerificationEmail(userId);
+      return { sent: true };
+    } catch (err) {
+      // Email infra outage (queue down, SMTP error) must not 500 the onboarding
+      // flow — caller can retry, and the token row was already created.
+      this.logger.error(
+        `Failed to dispatch verification email for user ${userId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return { sent: false };
+    }
   }
 
   async getEmailStatus(userId: string): Promise<{ verified: boolean; email: string }> {
