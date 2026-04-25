@@ -25,16 +25,19 @@ export class EmailWorker implements OnModuleInit {
   }
 
   /**
-   * Process email jobs from the queue
+   * Process email jobs from the queue.
+   *
+   * Phase 3 W3.3: tenantId is now read from the top-level job payload (not
+   * dredged from emailOptions.context). Producers must include it; sendAsync
+   * falls back to synchronous send when missing.
    */
   private async processEmailJob(job: Job<EmailJobData>): Promise<void> {
-    const { emailOptions } = job.data;
+    const { emailOptions, tenantId } = job.data;
 
     try {
       this.logger.debug(`Processing email job ${job.id}: ${emailOptions.subject}`);
 
       // Check bounce suppression before sending
-      const tenantId = emailOptions.context?.tenantId as string | undefined;
       if (tenantId) {
         const rawRecipient = Array.isArray(emailOptions.to)
           ? emailOptions.to[0]
@@ -101,8 +104,7 @@ export class EmailWorker implements OnModuleInit {
     errorMessage?: string,
   ): Promise<void> {
     try {
-      const { emailOptions } = job.data;
-      const tenantId = emailOptions.context?.tenantId as string | undefined;
+      const { emailOptions, tenantId } = job.data;
 
       // Only log if we have a tenantId
       if (!tenantId) {

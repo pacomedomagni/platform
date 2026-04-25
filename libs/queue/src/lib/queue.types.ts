@@ -31,7 +31,17 @@ export enum QueueName {
   PRODUCT_IMPORT = 'product-import',
 }
 
-export interface EmailJobData {
+/**
+ * Phase 3 W3.3: required tenant context on every job. Workers and any
+ * downstream service that reads CLS must be able to recover tenantId from
+ * the payload, since CLS does not propagate from the producer process to
+ * the BullMQ worker process.
+ */
+export interface TenantScopedJob {
+  tenantId: string;
+}
+
+export interface EmailJobData extends TenantScopedJob {
   emailOptions: {
     to: string | string[] | { name?: string; address: string } | { name?: string; address: string }[];
     cc?: string | string[] | { name?: string; address: string } | { name?: string; address: string }[];

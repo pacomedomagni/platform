@@ -611,7 +611,22 @@ export class EmailService implements OnModuleInit {
     }
 
     try {
+      // Phase 3 W3.3: tenantId is now a top-level required field on the job
+      // so workers can recover tenant context without dredging through
+      // emailOptions.context (which is template-data, not infrastructure
+      // metadata).
+      const tenantId = (emailOptions.context as { tenantId?: string } | undefined)?.tenantId;
+      if (!tenantId) {
+        // Without a tenantId we cannot run the bounce-suppression check or
+        // audit-log the send. Fall back to direct send rather than enqueue
+        // an unscoped job.
+        this.logger.warn('sendAsync called without context.tenantId; falling back to synchronous send');
+        await this.send(emailOptions);
+        return { jobId: 'sync-no-tenant' };
+      }
+
       const job = await this.queueService.sendEmail({
+        tenantId,
         emailOptions,
       });
       this.logger.debug(`Email queued with job ID: ${job.id}`);
