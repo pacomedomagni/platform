@@ -185,6 +185,7 @@ model Tenant {
   webhookDeliveries               WebhookDelivery[]
   processedWebhookEvents          ProcessedWebhookEvent[]
   merchantEmailVerificationTokens MerchantEmailVerificationToken[]
+  userInvites                     UserInvite[]
 
   @@map("tenants")
 }
@@ -212,12 +213,58 @@ model User {
 
   refreshTokens RefreshToken[]
 
+  // Outstanding invites this user issued
+  invitesSent UserInvite[] @relation("InviteCreator")
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Index for performance
   @@index([tenantId])
   @@map("users")
+}
+
+enum UserInviteStatus {
+  PENDING
+  ACCEPTED
+  EXPIRED
+  REVOKED
+}
+
+/// A pending invitation to join a tenant. The User row is only created when
+/// the invitee accepts (sets their password). Tokens are single-use and
+/// expire after a configurable window (default 7 days).
+model UserInvite {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  email     String
+  firstName String?
+  lastName  String?
+  roles     String[] @default(["staff"])
+
+  /// SHA-256 hash of the raw token. Raw token is sent in the email link only.
+  tokenHash String
+
+  status         UserInviteStatus @default(PENDING)
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  acceptedUserId String?
+
+  invitedById String?
+  invitedBy   User?   @relation("InviteCreator", fields: [invitedById], references: [id], onDelete: SetNull)
+
+  resentAt   DateTime?
+  resentCount Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, tokenHash])
+  @@index([tenantId, email])
+  @@index([tenantId, status])
+  @@map("user_invites")
 }
 
 model Currency {

@@ -148,8 +148,17 @@ function UsersInner() {
         lastName: values.lastName?.trim() || undefined,
         roles: values.role ? [values.role] : ['staff'],
       };
-      await api.post('/v1/admin/users/invite', body);
-      toast({ title: 'User invited', description: `${body.email} can now sign in.`, variant: 'success' });
+      const res = await api.post('/v1/admin/users/invite', body);
+      const inviteData = res.data?.data ?? res.data;
+      const description = inviteData?.emailDelivered
+        ? `Invite sent to ${body.email}. Link valid for 7 days.`
+        : `Invite created for ${body.email} but email could not be sent. Copy the link from below.`;
+      toast({ title: 'Invite sent', description, variant: 'success' });
+      // Surface the inviteUrl in dev for manual delivery; harmless in prod (server omits it).
+      if (inviteData?.inviteUrl && typeof window !== 'undefined') {
+        // Best effort copy to clipboard for operator convenience.
+        try { await navigator.clipboard?.writeText(inviteData.inviteUrl); } catch { /* ignore */ }
+      }
       setInviteOpen(false);
       await load('refresh');
     } catch (err: any) {
