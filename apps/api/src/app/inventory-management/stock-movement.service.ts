@@ -443,8 +443,12 @@ export class StockMovementService {
                 serialUpdate.locationId = toLocation?.id ?? fromLocation?.id ?? null;
                 break;
               case MovementType.ISSUE:
+                // Phase 2 W2.7: keep warehouseId on the serial after issue.
+                // Nulling it erased the last-known warehouse, breaking
+                // downstream lookups for return / RMA flows. The status
+                // (ISSUED) signals the row is no longer in inventory; the
+                // warehouseId records *where* it was issued from.
                 serialUpdate.status = SerialStatus.ISSUED;
-                serialUpdate.warehouseId = null;
                 serialUpdate.locationId = null;
                 break;
               case MovementType.TRANSFER:
@@ -456,8 +460,9 @@ export class StockMovementService {
                   serialUpdate.warehouseId = warehouse.id;
                   serialUpdate.locationId = toLocation?.id ?? fromLocation?.id ?? null;
                 } else {
+                  // Phase 2 W2.7: same reasoning as ISSUE — preserve
+                  // warehouseId for traceability.
                   serialUpdate.status = SerialStatus.ISSUED;
-                  serialUpdate.warehouseId = null;
                   serialUpdate.locationId = null;
                 }
                 break;
@@ -758,30 +763,65 @@ export class StockMovementService {
         ? Prisma.sql`${Prisma.join(dateConditions, ' ')}`
         : Prisma.empty;
 
-      // Use GROUP BY to avoid loading all records into memory
+      // Phase 2 W2.7: report inbound and outbound separately. The previous
+      // SUM(ABS(qty)) collapsed signs, making receipts and issues both look
+      // positive — the financial summary was unreadable. We now expose:
+      //   inboundQty, inboundValue   (positive movements)
+      //   outboundQty, outboundValue (negative movements, reported as +)
+      //   netQty, netValue           (signed sum)
       const results = await tx.$queryRaw<Array<{
         voucherType: string;
         count: bigint;
-        totalQty: Prisma.Decimal;
-        totalValue: Prisma.Decimal;
+        inboundQty: Prisma.Decimal;
+        outboundQty: Prisma.Decimal;
+        inboundValue: Prisma.Decimal;
+        outboundValue: Prisma.Decimal;
+        netQty: Prisma.Decimal;
+        netValue: Prisma.Decimal;
       }>>`
         SELECT
           "voucherType",
           COUNT(*)::bigint AS "count",
-          COALESCE(SUM(ABS("qty")), 0) AS "totalQty",
-          COALESCE(SUM(ABS("stockValueDifference")), 0) AS "totalValue"
+          COALESCE(SUM(CASE WHEN qty > 0 THEN qty ELSE 0 END), 0) AS "inboundQty",
+          COALESCE(SUM(CASE WHEN qty < 0 THEN -qty ELSE 0 END), 0) AS "outboundQty",
+          COALESCE(SUM(CASE WHEN "stockValueDifference" > 0 THEN "stockValueDifference" ELSE 0 END), 0) AS "inboundValue",
+          COALESCE(SUM(CASE WHEN "stockValueDifference" < 0 THEN -"stockValueDifference" ELSE 0 END), 0) AS "outboundValue",
+          COALESCE(SUM(qty), 0) AS "netQty",
+          COALESCE(SUM("stockValueDifference"), 0) AS "netValue"
         FROM "stock_ledger_entries"
         WHERE "tenantId" = ${ctx.tenantId}
         ${dateClause}
         GROUP BY "voucherType"
       `;
 
-      const summary: Record<string, { count: number; totalQty: number; totalValue: number }> = {};
+      const summary: Record<string, {
+        count: number;
+        inboundQty: number;
+        outboundQty: number;
+        inboundValue: number;
+        outboundValue: number;
+        netQty: number;
+        netValue: number;
+        // Backward-compat aliases (totalQty / totalValue = abs sums) so
+        // existing FE consumers that read those fields keep working.
+        totalQty: number;
+        totalValue: number;
+      }> = {};
       for (const row of results) {
+        const inboundQty = Number(row.inboundQty);
+        const outboundQty = Number(row.outboundQty);
+        const inboundValue = Number(row.inboundValue);
+        const outboundValue = Number(row.outboundValue);
         summary[row.voucherType] = {
           count: Number(row.count),
-          totalQty: Number(row.totalQty),
-          totalValue: Number(row.totalValue),
+          inboundQty,
+          outboundQty,
+          inboundValue,
+          outboundValue,
+          netQty: Number(row.netQty),
+          netValue: Number(row.netValue),
+          totalQty: inboundQty + outboundQty,
+          totalValue: inboundValue + outboundValue,
         };
       }
 
@@ -808,66 +848,59 @@ export class StockMovementService {
         where: { tenantId: ctx.tenantId, itemId: item.id },
       });
 
-      const entries = await tx.stockLedgerEntry.findMany({
-        where: { tenantId: ctx.tenantId, itemId: item.id },
-        include: {
-          warehouse: true,
-          fromLocation: true,
-          toLocation: true,
-          batch: true,
-        },
-        orderBy: { postingTs: 'desc' },
-        take: limit,
-        skip: offset,
-      });
+      // Phase 2 W2.7: rewrite running balance with a SQL window function.
+      // The previous implementation summed total qty, queried the newer
+      // entries separately, and subtracted — an off-by-one in the page
+      // boundary plus a Decimal-to-Number coercion meant the running
+      // balance on paginated pages was wrong by one entry.
+      //
+      // The new query computes `SUM(qty) OVER (ORDER BY postingTs ASC ROWS
+      // BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)` for every entry, then
+      // we slice the requested page from the result. Order is restored to
+      // DESC for the response (newest first).
+      type RawEntry = {
+        id: string;
+        postingDate: Date;
+        postingTs: Date;
+        voucherType: string;
+        voucherNo: string;
+        warehouseCode: string;
+        qty: string;
+        runningBalance: string;
+        rate: string;
+      };
+      const allEntries = await tx.$queryRaw<RawEntry[]>`
+        SELECT
+          sle.id,
+          sle."postingDate",
+          sle."postingTs",
+          sle."voucherType",
+          sle."voucherNo",
+          w.code AS "warehouseCode",
+          sle.qty::text AS qty,
+          SUM(sle.qty) OVER (
+            ORDER BY sle."postingTs" ASC, sle.id ASC
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+          )::text AS "runningBalance",
+          sle."valuationRate"::text AS rate
+        FROM stock_ledger_entries sle
+        JOIN warehouses w ON w.id = sle."warehouseId"
+        WHERE sle."tenantId" = ${ctx.tenantId}::uuid
+          AND sle."itemId"   = ${item.id}::uuid
+        ORDER BY sle."postingTs" DESC, sle.id DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `;
 
-      // Compute the starting balance by summing all entries BEFORE the current page.
-      // Since we order by postingTs DESC, entries before the current page are those
-      // with an offset > (offset + limit - 1), i.e., older entries that we skip past.
-      // We need the sum of ALL entries minus those on later pages (i.e., sum of entries
-      // from index 0..total, then subtract entries on pages after ours).
-      // Simpler: sum all qty, then subtract the qty of entries that come AFTER this page
-      // in DESC order (i.e., those at offset 0..offset-1 in DESC = newer entries).
-      let startingBalance = 0;
-      if (offset > 0) {
-        // Sum all entries that are newer than the current page (offset 0..offset-1 in DESC order)
-        // These are the entries we've already paginated past. The starting balance for our page
-        // is the total sum minus the sum of those newer entries.
-        const totalSumResult = await tx.stockLedgerEntry.aggregate({
-          where: { tenantId: ctx.tenantId, itemId: item.id },
-          _sum: { qty: true },
-        });
-        const totalSum = Number(totalSumResult._sum.qty || 0);
-
-        // Sum of the entries on this page and all entries after (older)
-        // = total - sum of entries before this page in DESC order
-        const newerEntries = await tx.stockLedgerEntry.findMany({
-          where: { tenantId: ctx.tenantId, itemId: item.id },
-          orderBy: { postingTs: 'desc' },
-          take: offset,
-          select: { qty: true },
-        });
-        const newerSum = newerEntries.reduce((sum, e) => sum + Number(e.qty), 0);
-
-        // Starting balance = total - newer entries sum
-        startingBalance = totalSum - newerSum;
-      }
-
-      // Calculate running balance starting from the oldest entry in this page
-      let runningQty = startingBalance;
-      const movements = entries.reverse().map(e => {
-        runningQty += Number(e.qty);
-        return {
-          id: e.id,
-          postingDate: e.postingDate.toISOString().split('T')[0],
-          voucherType: e.voucherType,
-          voucherNo: e.voucherNo,
-          warehouseCode: e.warehouse.code,
-          qty: Number(e.qty),
-          runningBalance: runningQty,
-          rate: Number(e.valuationRate),
-        };
-      }).reverse();
+      const movements = allEntries.map((e) => ({
+        id: e.id,
+        postingDate: e.postingDate.toISOString().split('T')[0],
+        voucherType: e.voucherType,
+        voucherNo: e.voucherNo,
+        warehouseCode: e.warehouseCode,
+        qty: Number(e.qty),
+        runningBalance: Number(e.runningBalance),
+        rate: Number(e.rate),
+      }));
 
       return {
         itemCode: item.code,
@@ -898,52 +931,38 @@ export class StockMovementService {
 
     const year = new Date().getFullYear();
     const month = String(new Date().getMonth() + 1).padStart(2, '0');
+    const yearMonth = `${year}${month}`;
     const voucherType = this.getVoucherType(type);
 
-    // Use posting markers to prevent duplicate sequence numbers
-    const maxRetries = 5;
-
-    // Find the highest sequence number once, then increment locally on conflict
-    const lastEntry = await tx.stockLedgerEntry.findFirst({
-      where: {
-        tenantId,
-        voucherType,
-        voucherNo: { startsWith: `${prefix}-${year}${month}` },
-      },
-      orderBy: { voucherNo: 'desc' },
-      select: { voucherNo: true },
-    });
-
-    let nextSeq = lastEntry
-      ? parseInt(lastEntry.voucherNo.split('-').pop() || '0') + 1
-      : 1;
-
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      const voucherNo = `${prefix}-${year}${month}-${String(nextSeq).padStart(5, '0')}`;
-
-      // Try to create a posting marker to claim this voucher number
-      try {
-        await tx.stockPosting.create({
-          data: {
-            tenantId,
-            postingKey: `${voucherType}:${voucherNo}`,
-            voucherType,
-            voucherNo,
-          },
-        });
-        return voucherNo;
-      } catch (error: unknown) {
-        // If unique constraint violated, increment and retry with next number
-        const prismaError = error as { code?: string };
-        if (prismaError.code === 'P2002' && attempt < maxRetries - 1) {
-          nextSeq++;
-          continue;
-        }
-        throw error;
-      }
+    // Phase 2 W2.7: atomic sequence via Postgres function.
+    // The previous findMax-then-loop pattern produced duplicate voucher
+    // numbers under concurrent load: two transactions could both read the
+    // same max, both increment locally, then race on stock_postings unique;
+    // the loser's retry would only increment its own counter, not re-read
+    // the latest value, sometimes producing a still-duplicate number.
+    //
+    // next_voucher_seq() does the increment in a single INSERT ... ON CONFLICT
+    // statement, scoped to (tenantId, voucherType, yearMonth).
+    const seqResult = await tx.$queryRaw<Array<{ next_voucher_seq: number }>>`
+      SELECT next_voucher_seq(${tenantId}::uuid, ${voucherType}, ${yearMonth}) AS next_voucher_seq
+    `;
+    const nextSeq = seqResult[0]?.next_voucher_seq;
+    if (typeof nextSeq !== 'number') {
+      throw new Error('next_voucher_seq did not return a value');
     }
+    const voucherNo = `${prefix}-${yearMonth}-${String(nextSeq).padStart(5, '0')}`;
 
-    throw new Error('Failed to generate unique voucher number after retries');
+    // Posting marker remains as a defense-in-depth idempotency record
+    // (a single voucherNo cannot be claimed twice across the whole table).
+    await tx.stockPosting.create({
+      data: {
+        tenantId,
+        postingKey: `${voucherType}:${voucherNo}`,
+        voucherType,
+        voucherNo,
+      },
+    });
+    return voucherNo;
   }
 
   private getVoucherType(type: MovementType): string {
@@ -1147,9 +1166,35 @@ export class StockMovementService {
       `;
 
       if (layers.length === 0) {
-        // No unlocked layers available -- insufficient stock
-        // With FOR UPDATE SKIP LOCKED, if layers exist but are all locked by
-        // concurrent transactions, we cannot proceed within this transaction.
+        // Phase 2 W2.7: SKIP LOCKED returns empty in two distinct cases:
+        //   (a) the layers truly are exhausted -> "insufficient stock"
+        //   (b) all eligible layers are locked by concurrent transactions
+        // Distinguish them by re-querying without SKIP LOCKED. If a row
+        // exists but is locked, throw a serialization error so the caller's
+        // outer retry loop (createMovement's _executeMovementTransaction)
+        // can retry the whole movement on a fresh transaction.
+        const probe = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT l.id
+          FROM "stock_fifo_layers" l
+          WHERE l."tenantId" = ${input.tenantId}
+            AND l."itemId" = ${input.itemId}
+            AND l."warehouseId" = ${input.warehouseId}
+            AND l."qtyRemaining" > 0
+            AND l."isCancelled" = false
+            ${locationCondition}
+            ${batchCondition}
+          LIMIT 1
+        `;
+        if (probe.length > 0) {
+          // Eligible layer exists but is locked by another tx. Force a
+          // serialization-failure-style retry by raising a Postgres
+          // 40001-equivalent error. createMovement retries on P2034.
+          const err = new Error(
+            'FIFO layer contention: eligible layers are locked by concurrent transactions',
+          ) as Error & { code?: string };
+          err.code = 'P2034';
+          throw err;
+        }
         throw new BadRequestException(
           'Insufficient FIFO layers to satisfy the issued quantity',
         );

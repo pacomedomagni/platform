@@ -435,6 +435,19 @@ export class BatchSerialService {
    * Create multiple serials in bulk
    */
   async createSerialsBulk(ctx: TenantContext, dto: CreateSerialBulkDto) {
+    // Phase 2 W2.7: cap per-call bulk size so a single request cannot
+    // exhaust the parser, the transaction log, or memory. Callers needing
+    // larger batches must page through.
+    const MAX_BULK_SERIALS = 5000;
+    if (!dto.serialNos || dto.serialNos.length === 0) {
+      throw new BadRequestException('serialNos must not be empty');
+    }
+    if (dto.serialNos.length > MAX_BULK_SERIALS) {
+      throw new BadRequestException(
+        `Cannot create more than ${MAX_BULK_SERIALS} serials per call`,
+      );
+    }
+
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.tenant', ${ctx.tenantId}, true)`;
 
