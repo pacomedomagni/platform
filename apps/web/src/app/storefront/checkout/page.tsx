@@ -200,6 +200,13 @@ export default function CheckoutPage() {
       setError('No cart found. Please add items to your cart.');
       return;
     }
+    // Phase 2 W2.8: belt-and-suspenders against double-submit. The button
+    // is already disabled while isCreatingOrder is true, but mobile tap
+    // events can fire before React's render commit. Reject any concurrent
+    // call here before we hit the network.
+    if (isCreatingOrder) {
+      return;
+    }
 
     setIsCreatingOrder(true);
     setError(null);

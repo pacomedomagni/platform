@@ -54,10 +54,13 @@ function PaymentForm({ clientSecret, orderId, orderNumber, onSuccess, onError }:
     setMessage(null);
 
     try {
+      // Phase 2 W2.8: encode the order id/number in the return URL so a value
+      // containing an `&` or `#` cannot inject additional query parameters.
+      const orderRef = encodeURIComponent(orderNumber || orderId || '');
       const { error, paymentIntent } = await stripe.confirmPayment({
         elements,
         confirmParams: {
-          return_url: `${window.location.origin}/storefront/order-confirmation?order=${orderNumber || orderId || ''}`,
+          return_url: `${window.location.origin}/storefront/order-confirmation?order=${orderRef}`,
         },
         redirect: 'if_required',
       });

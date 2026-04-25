@@ -111,18 +111,38 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const response = await axios.post(`/api${refreshEndpoint}`, {
-          refresh_token: refreshToken,
-        });
+        // Phase 2 W2.8: forward x-tenant-id (and x-cart-session for the
+        // storefront) on the refresh call. Without these, the backend
+        // refresh handler runs without a tenant context and the resulting
+        // tokens are tied to the wrong (or no) tenant — root cause of an
+        // intermittent post-refresh 401 loop in multi-tenant deployments.
+        const refreshHeaders: Record<string, string> = {
+          'Content-Type': 'application/json',
+        };
+        const tenantId = localStorage.getItem('tenantId');
+        if (tenantId) refreshHeaders['x-tenant-id'] = tenantId;
+        if (isStorefront) {
+          const cartSession = localStorage.getItem('cart_session');
+          if (cartSession) refreshHeaders['x-cart-session'] = cartSession;
+        }
+
+        const response = await axios.post(
+          `/api${refreshEndpoint}`,
+          { refresh_token: refreshToken },
+          { headers: refreshHeaders },
+        );
 
         const data = response.data?.data || response.data;
-        const newAccessToken = data.access_token || data.token;
-        const newRefreshToken = data.refresh_token;
+        const newAccessToken: unknown = data.access_token || data.token;
+        const newRefreshToken: unknown = data.refresh_token;
 
-        if (newAccessToken) {
-          localStorage.setItem(accessTokenKey, newAccessToken);
+        // Defensively reject non-string tokens so we never persist the
+        // literal strings "null" or "undefined" into localStorage.
+        if (typeof newAccessToken !== 'string' || newAccessToken.length === 0) {
+          throw new Error('Refresh response missing a valid access token');
         }
-        if (newRefreshToken) {
+        localStorage.setItem(accessTokenKey, newAccessToken);
+        if (typeof newRefreshToken === 'string' && newRefreshToken.length > 0) {
           localStorage.setItem(refreshTokenKey, newRefreshToken);
         }
 

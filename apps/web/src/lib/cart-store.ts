@@ -52,6 +52,11 @@ interface CartState {
   setCartFromApi: (cart: Cart) => void;
 }
 
+// Phase 2 W2.8: shared promise so two concurrent initCart() callers (e.g.
+// CartIcon + CartDrawer mounting in the same tick) don't both create new
+// anonymous carts.
+let initCartInFlight: Promise<void> | null = null;
+
 // Generate session token for anonymous carts
 function generateSessionToken(): string {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -116,36 +121,49 @@ export const useCartStore = create<CartState>()(
         });
       },
 
-      // Initialize cart (get existing or create new)
+      // Initialize cart (get existing or create new).
+      //
+      // Phase 2 W2.8: coalesce concurrent callers via a module-scoped
+      // in-flight Promise. Without this, a page that mounts CartIcon and
+      // CartDrawer simultaneously fires two initCart()s, and the
+      // anonymous-cart create path returns two distinct cart ids — the
+      // second one overwrites the first in the store and stranded the
+      // first cart with its reservations.
       initCart: async () => {
-        const { cartId, sessionToken } = get();
-        
-        // Ensure session token exists
-        if (!sessionToken) {
-          const newToken = generateSessionToken();
-          set({ sessionToken: newToken });
-          localStorage.setItem('cart_session', newToken);
-        }
+        if (initCartInFlight) return initCartInFlight;
+        initCartInFlight = (async () => {
+          const { cartId, sessionToken } = get();
 
-        set({ isLoading: true, error: null });
-
-        try {
-          if (cartId) {
-            // Try to fetch existing cart
-            const cart = await cartApi.getById(cartId);
-            get().setCartFromApi(cart);
-          } else {
-            // Get or create cart
-            const cart = await cartApi.get();
-            get().setCartFromApi(cart);
+          // Ensure session token exists
+          if (!sessionToken) {
+            const newToken = generateSessionToken();
+            set({ sessionToken: newToken });
+            localStorage.setItem('cart_session', newToken);
           }
-        } catch (error) {
-          console.error('Failed to init cart:', error);
-          // Cart might not exist, will be created on first add
-          set({ error: null });
-        } finally {
-          set({ isLoading: false });
-        }
+
+          set({ isLoading: true, error: null });
+
+          try {
+            if (cartId) {
+              // Try to fetch existing cart
+              const cart = await cartApi.getById(cartId);
+              get().setCartFromApi(cart);
+            } else {
+              // Get or create cart
+              const cart = await cartApi.get();
+              get().setCartFromApi(cart);
+            }
+          } catch (error) {
+            console.error('Failed to init cart:', error);
+            // Cart might not exist, will be created on first add
+            set({ error: null });
+          } finally {
+            set({ isLoading: false });
+          }
+        })().finally(() => {
+          initCartInFlight = null;
+        });
+        return initCartInFlight;
       },
 
       // Add item to cart
