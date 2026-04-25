@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Card, Button, Badge } from '@platform/ui';
+import { Card, Button, Badge, ToastAction, toast } from '@platform/ui';
 import { Heart, Trash2, ShoppingCart, Share2, ArrowLeft, Loader2 } from 'lucide-react';
 import { useAuthStore } from '../../../lib/auth-store';
 import { useCartStore } from '../../../lib/cart-store';
@@ -25,7 +25,69 @@ export default function WishlistPage() {
   const [error, setError] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [movingId, setMovingId] = useState<string | null>(null);
+  const [bulkMoving, setBulkMoving] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [copied, setCopied] = useState(false);
+
+  const allChecked =
+    !!wishlist && wishlist.items.length > 0 && selectedIds.size === wishlist.items.length;
+  const toggleAll = () => {
+    if (!wishlist) return;
+    setSelectedIds(allChecked ? new Set() : new Set(wishlist.items.map((i) => i.id)));
+  };
+  const toggleOne = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const moveItemsToCart = async (ids: string[]) => {
+    if (!wishlist || !cartId) {
+      setError(cartId ? 'No items selected.' : 'No cart found. Please add an item from the store first.');
+      return;
+    }
+    const targetIds = new Set(ids);
+    const targets = wishlist.items.filter((i) => targetIds.has(i.id));
+    if (targets.length === 0) return;
+    setBulkMoving(true);
+    let moved = 0;
+    try {
+      for (const item of targets) {
+        // eslint-disable-next-line no-await-in-loop
+        await wishlistApi
+          .moveToCart(item.id, cartId)
+          .then(() => {
+            moved += 1;
+          })
+          .catch(() => {
+            // skip individual failures so the rest still go through
+          });
+      }
+      setWishlist((prev) =>
+        prev ? { ...prev, items: prev.items.filter((i) => !targetIds.has(i.id)) } : prev
+      );
+      setSelectedIds(new Set());
+      toast({
+        title: `${moved} item${moved === 1 ? '' : 's'} added to cart`,
+        action: (
+          <ToastAction altText="View cart" onClick={() => router.push('/storefront/cart')}>
+            View cart
+          </ToastAction>
+        ),
+      });
+    } finally {
+      setBulkMoving(false);
+    }
+  };
+
+  const moveSelectedToCart = () => moveItemsToCart(Array.from(selectedIds));
+  const moveAllToCart = () => {
+    if (!wishlist) return;
+    moveItemsToCart(wishlist.items.map((i) => i.id));
+  };
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -142,6 +204,47 @@ export default function WishlistPage() {
         <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600">{error}</div>
       )}
 
+      {/* Bulk actions */}
+      {wishlist && wishlist.items.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={allChecked}
+              onChange={toggleAll}
+              className="h-4 w-4 rounded border-slate-300 text-primary"
+              aria-label="Select all wishlist items"
+            />
+            <span className="text-slate-600">
+              {selectedIds.size > 0 ? `${selectedIds.size} selected` : 'Select all'}
+            </span>
+          </label>
+          <div className="ml-auto flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={moveSelectedToCart}
+              disabled={bulkMoving || selectedIds.size === 0}
+              aria-busy={bulkMoving}
+              className="gap-2"
+            >
+              {bulkMoving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShoppingCart className="h-4 w-4" />}
+              Move selected
+            </Button>
+            <Button
+              size="sm"
+              onClick={moveAllToCart}
+              disabled={bulkMoving}
+              aria-busy={bulkMoving}
+              className="gap-2"
+            >
+              {bulkMoving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShoppingCart className="h-4 w-4" />}
+              Move all to cart
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Items */}
       {!wishlist || wishlist.items.length === 0 ? (
         <Card className="border-slate-200/70 bg-white p-12 text-center shadow-sm">
@@ -167,6 +270,15 @@ export default function WishlistPage() {
             return (
               <Card key={item.id} className="border-slate-200/70 bg-white p-5 shadow-sm">
                 <div className="flex gap-5">
+                  <div className="flex items-start pt-1">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(item.id)}
+                      onChange={() => toggleOne(item.id)}
+                      className="h-4 w-4 rounded border-slate-300 text-primary"
+                      aria-label={`Select ${item.product.name}`}
+                    />
+                  </div>
                   {/* Image */}
                   <Link href={`/storefront/products/${item.product.slug}`} className="shrink-0">
                     <div className="h-24 w-24 overflow-hidden rounded-lg bg-gradient-to-br from-blue-50 via-slate-50 to-amber-50">

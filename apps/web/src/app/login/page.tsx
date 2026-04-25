@@ -1,5 +1,6 @@
 'use client';
 import { Suspense, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button, Input, Card, Label } from '@platform/ui';
 import { Loader2, ShieldCheck, Eye, EyeOff } from 'lucide-react';
@@ -17,6 +18,7 @@ function LoginForm() {
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (loading) return;
         setLoading(true);
         setError('');
         try {
@@ -32,7 +34,7 @@ function LoginForm() {
                 localStorage.setItem('tenantId', user.tenantId);
             }
 
-            router.push(redirectTo || '/app');
+            router.replace(redirectTo || '/app');
         } catch (err: any) {
             console.error(err);
             setError(err.response?.data?.message || 'Login failed. Please check your credentials.');
@@ -55,23 +57,26 @@ function LoginForm() {
                             NoSlag
                         </h2>
                         <p className="text-slate-500 mt-2">
-                            Enterprise Resource Platform
+                            Sign in to your store
                         </p>
                     </div>
                 </div>
 
                 <Card className="p-8 border-slate-200 dark:border-slate-800 shadow-xl bg-white dark:bg-slate-900">
-                    <form onSubmit={handleLogin} className="space-y-6">
+                    <form onSubmit={handleLogin} className="space-y-6" noValidate>
                         {error && (
-                            <div className="p-3 text-sm text-red-500 bg-red-50 rounded-md border border-red-100">
+                            <div role="alert" aria-live="assertive" className="p-3 text-sm text-red-500 bg-red-50 rounded-md border border-red-100">
                                 {error}
                             </div>
                         )}
                         <div className="space-y-2">
-                            <Label htmlFor="email">Email address</Label>
+                            <Label htmlFor="login-email">Email address</Label>
                             <Input
-                                id="email"
+                                id="login-email"
+                                name="email"
                                 type="email"
+                                inputMode="email"
+                                autoComplete="email"
                                 placeholder="name@company.com"
                                 required
                                 value={email}
@@ -81,15 +86,17 @@ function LoginForm() {
                         </div>
                         <div className="space-y-2">
                             <div className="flex items-center justify-between">
-                                <Label htmlFor="password">Password</Label>
-                                <a href="/forgot-password" className="text-sm font-medium text-indigo-600 hover:text-indigo-500">
+                                <Label htmlFor="login-password">Password</Label>
+                                <Link href="/forgot-password" className="text-sm font-medium text-indigo-600 hover:text-indigo-500">
                                     Forgot password?
-                                </a>
+                                </Link>
                             </div>
                             <div className="relative">
                                 <Input
-                                    id="password"
+                                    id="login-password"
+                                    name="password"
                                     type={showPassword ? 'text' : 'password'}
+                                    autoComplete="current-password"
                                     required
                                     value={password}
                                     onChange={(e) => setPassword(e.target.value)}
@@ -106,7 +113,7 @@ function LoginForm() {
                             </div>
                         </div>
 
-                        <Button type="submit" className="w-full h-11 text-base bg-gradient-to-r from-indigo-600 via-blue-600 to-amber-400 text-white shadow-lg shadow-indigo-600/20 hover:shadow-indigo-600/30" disabled={loading}>
+                        <Button type="submit" aria-busy={loading} className="w-full h-11 text-base bg-gradient-to-r from-indigo-600 via-blue-600 to-amber-400 text-white shadow-lg shadow-indigo-600/20 hover:shadow-indigo-600/30" disabled={loading}>
                             {loading ? (
                                 <>
                                     <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Signing in...
@@ -118,10 +125,10 @@ function LoginForm() {
                     </form>
 
                     <div className="mt-6 text-center text-sm text-slate-500">
-                        Don't have an account?{' '}
-                        <a href="mailto:support@noslag.com" className="font-medium text-indigo-600 hover:text-indigo-500">
-                            Contact Admin
-                        </a>
+                        Don&apos;t have an account?{' '}
+                        <Link href="/signup" className="font-medium text-indigo-600 hover:text-indigo-500">
+                            Start free trial
+                        </Link>
                     </div>
                 </Card>
 

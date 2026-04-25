@@ -1,33 +1,33 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { ListView, DocTypeDefinition } from '@platform/ui';
+import { useEffect } from 'react';
+import { useParams } from 'next/navigation';
+import { Card } from '@platform/ui';
 
-export default function ListPage({ params }: { params: { doctype: string } }) {
-    const router = useRouter();
-    const docName = decodeURIComponent(params.doctype);
-    const [meta, setMeta] = useState<DocTypeDefinition | null>(null);
+const WEB_URL = process.env.NEXT_PUBLIC_WEB_URL || 'http://localhost:3001';
 
-    useEffect(() => {
-        fetch(`/api/v1/meta/${docName}`)
-            .then(res => res.json())
-            .then(data => {
-                if (data.error) throw new Error(data.error);
-                setMeta(data);
-            })
-            .catch(err => {
-                console.error(err);
-                // Optionally redirect to 404
-            });
-    }, [docName]);
+export default function DeskDoctypeRedirect() {
+  const params = useParams();
+  const doctype = (params.doctype as string) || '';
 
-    if (!meta) return <div className="p-10 text-center">Loading Metadata...</div>;
+  useEffect(() => {
+    if (typeof window !== 'undefined' && doctype) {
+      window.location.replace(`${WEB_URL}/app/${encodeURIComponent(doctype)}`);
+    }
+  }, [doctype]);
 
-    return (
-        <ListView 
-            docType={meta} 
-            onRowClick={(row: { name?: string }) => router.push(`/desk/${docName}/${row.name || 'new'}`)} 
-        />
-    );
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6 dark:bg-slate-950">
+      <Card className="max-w-md p-8 text-center">
+        <h1 className="text-base font-semibold">Redirecting to the unified workspace…</h1>
+        <p className="mt-2 text-sm text-slate-500">
+          The {doctype} list now lives at{' '}
+          <a className="underline" href={`${WEB_URL}/app/${encodeURIComponent(doctype)}`}>
+            /app/{doctype}
+          </a>
+          .
+        </p>
+      </Card>
+    </div>
+  );
 }

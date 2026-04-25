@@ -3,7 +3,19 @@
 import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Badge, Button, Card, Input, NativeSelect, Spinner } from '@platform/ui';
+import {
+  Badge,
+  Button,
+  Card,
+  Input,
+  NativeSelect,
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+  Spinner,
+} from '@platform/ui';
 import { Filter, SlidersHorizontal, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { SectionHeader } from '../_components/section-header';
 import { ProductCard } from '../_components/product-card';
@@ -45,6 +57,16 @@ function ProductsContent() {
   const [sortBy, setSortBy] = useState<SortOption>('featured');
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+
+  // Active filter count for mobile badge (excluding default sort).
+  const activeFilterCount =
+    (selectedCategory !== 'all' ? 1 : 0) + (sortBy !== 'featured' ? 1 : 0);
+
+  const clearFilters = () => {
+    setSelectedCategory('all');
+    setSortBy('featured');
+  };
 
   // Load categories on mount
   useEffect(() => {
@@ -134,80 +156,215 @@ function ProductsContent() {
       />
 
       <Card
-        className="flex flex-col gap-4 border-border bg-card p-5 shadow-sm md:flex-row md:items-center md:justify-between"
+        className="flex flex-col gap-4 border-border bg-card p-5 shadow-sm"
         role="search"
         aria-label="Product filters and search"
       >
-        <nav aria-label="Product category filters">
-          <div className="flex flex-wrap items-center gap-3 text-sm">
-            <div className="flex items-center gap-2 rounded-full border border-border bg-muted px-3 py-1.5 text-muted-foreground">
-              <Filter className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-              <span>Filters</span>
-            </div>
-            {/* "All" filter */}
-            <Badge
-              variant="outline"
-              className={`cursor-pointer ${
-                selectedCategory === 'all'
-                  ? 'bg-primary/10 text-primary border-primary/20'
-                  : 'bg-card text-muted-foreground hover:bg-muted'
-              }`}
-              onClick={() => setSelectedCategory('all')}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  setSelectedCategory('all');
-                }
-              }}
-              aria-pressed={selectedCategory === 'all'}
-              aria-label="Show all products"
+        {/* Search input — always visible (full-width on mobile) */}
+        <div className="relative w-full">
+          <label htmlFor="product-search" className="sr-only">
+            Search products
+          </label>
+          <Input
+            id="product-search"
+            placeholder="Search products"
+            className="h-10 w-full"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            type="search"
+            aria-label="Search products"
+          />
+        </div>
+
+        {/* Mobile-only Filters trigger */}
+        <div className="flex items-center justify-between md:hidden">
+          <Sheet open={mobileFiltersOpen} onOpenChange={setMobileFiltersOpen}>
+            <SheetTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 gap-2"
+                aria-label={`Open filters${activeFilterCount > 0 ? `, ${activeFilterCount} active` : ''}`}
+              >
+                <Filter className="h-4 w-4" aria-hidden="true" />
+                Filters
+                {activeFilterCount > 0 && (
+                  <Badge
+                    variant="default"
+                    className="h-5 min-w-[20px] px-1.5 text-xs"
+                    aria-hidden="true"
+                  >
+                    {activeFilterCount}
+                  </Badge>
+                )}
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="right" className="w-full max-w-sm overflow-y-auto p-6">
+              <SheetHeader>
+                <SheetTitle>Filters</SheetTitle>
+              </SheetHeader>
+              <div className="mt-4 space-y-6">
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    Categories
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge
+                      variant="outline"
+                      className={`cursor-pointer ${
+                        selectedCategory === 'all'
+                          ? 'bg-primary/10 text-primary border-primary/20'
+                          : 'bg-card text-muted-foreground hover:bg-muted'
+                      }`}
+                      onClick={() => setSelectedCategory('all')}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setSelectedCategory('all');
+                        }
+                      }}
+                      aria-pressed={selectedCategory === 'all'}
+                    >
+                      All
+                    </Badge>
+                    {categories.map((category) => (
+                      <Badge
+                        key={category.slug}
+                        variant="outline"
+                        className={`cursor-pointer ${
+                          selectedCategory === category.slug
+                            ? 'bg-primary/10 text-primary border-primary/20'
+                            : 'bg-card text-muted-foreground hover:bg-muted'
+                        }`}
+                        onClick={() => setSelectedCategory(category.slug)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setSelectedCategory(category.slug);
+                          }
+                        }}
+                        aria-pressed={selectedCategory === category.slug}
+                      >
+                        {category.name}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label
+                    htmlFor="sort-by-mobile"
+                    className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground"
+                  >
+                    Sort by
+                  </label>
+                  <NativeSelect
+                    id="sort-by-mobile"
+                    className="h-10 w-full"
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as SortOption)}
+                    aria-label="Sort products"
+                  >
+                    <option value="featured">Featured</option>
+                    <option value="price-asc">Price low to high</option>
+                    <option value="price-desc">Price high to low</option>
+                    <option value="newest">Newest</option>
+                  </NativeSelect>
+                </div>
+              </div>
+
+              {/* Apply / Clear sit in the thumb-zone (bottom 60% of viewport) */}
+              <div className="sticky bottom-0 mt-8 flex gap-2 border-t border-border bg-background pb-2 pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => {
+                    clearFilters();
+                  }}
+                >
+                  Clear
+                </Button>
+                <Button
+                  type="button"
+                  className="flex-1"
+                  onClick={() => setMobileFiltersOpen(false)}
+                >
+                  Apply
+                </Button>
+              </div>
+            </SheetContent>
+          </Sheet>
+          {activeFilterCount > 0 && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="text-xs font-medium text-muted-foreground hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded"
             >
-              All
-            </Badge>
-            {/* Dynamic categories from API */}
-            {categories.map((category) => (
+              Reset
+            </button>
+          )}
+        </div>
+
+        {/* Desktop inline filters */}
+        <div className="hidden flex-col gap-4 md:flex md:flex-row md:items-center md:justify-between">
+          <nav aria-label="Product category filters">
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <div className="flex items-center gap-2 rounded-full border border-border bg-muted px-3 py-1.5 text-muted-foreground">
+                <Filter className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                <span>Filters</span>
+              </div>
               <Badge
-                key={category.slug}
                 variant="outline"
                 className={`cursor-pointer ${
-                  selectedCategory === category.slug
+                  selectedCategory === 'all'
                     ? 'bg-primary/10 text-primary border-primary/20'
                     : 'bg-card text-muted-foreground hover:bg-muted'
                 }`}
-                onClick={() => setSelectedCategory(category.slug)}
+                onClick={() => setSelectedCategory('all')}
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    setSelectedCategory(category.slug);
+                    setSelectedCategory('all');
                   }
                 }}
-                aria-pressed={selectedCategory === category.slug}
-                aria-label={`Filter by ${category.name}`}
+                aria-pressed={selectedCategory === 'all'}
+                aria-label="Show all products"
               >
-                {category.name}
+                All
               </Badge>
-            ))}
-          </div>
-        </nav>
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative w-full sm:w-60">
-            <label htmlFor="product-search" className="sr-only">
-              Search products
-            </label>
-            <Input
-              id="product-search"
-              placeholder="Search products"
-              className="h-9"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              type="search"
-              aria-label="Search products"
-            />
-          </div>
+              {categories.map((category) => (
+                <Badge
+                  key={category.slug}
+                  variant="outline"
+                  className={`cursor-pointer ${
+                    selectedCategory === category.slug
+                      ? 'bg-primary/10 text-primary border-primary/20'
+                      : 'bg-card text-muted-foreground hover:bg-muted'
+                  }`}
+                  onClick={() => setSelectedCategory(category.slug)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setSelectedCategory(category.slug);
+                    }
+                  }}
+                  aria-pressed={selectedCategory === category.slug}
+                  aria-label={`Filter by ${category.name}`}
+                >
+                  {category.name}
+                </Badge>
+              ))}
+            </div>
+          </nav>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
             <label htmlFor="sort-by" className="sr-only">

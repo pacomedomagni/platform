@@ -1,7 +1,7 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ListView, DocTypeDefinition } from '@platform/ui';
+import { ListView, DocTypeDefinition, toast } from '@platform/ui';
 import { Loader2 } from 'lucide-react';
 import api from '../../../lib/api';
 
@@ -14,40 +14,53 @@ export default function DocTypeListPage() {
     const [data, setData] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
 
+    const loadData = useCallback(async () => {
+        try {
+            const dataRes = await api.get(`/v1/doc/${docTypeName}`);
+            if (Array.isArray(dataRes.data)) setData(dataRes.data);
+        } catch (err) {
+            console.error(err);
+        }
+    }, [docTypeName]);
+
     useEffect(() => {
         const init = async () => {
             setLoading(true);
             try {
-                // 1. Fetch Meta
                 const metaRes = await api.get(`/v1/doc/meta/${docTypeName}`);
-                if (metaRes.data) {
-                    setDocType(metaRes.data);
-                }
-
-                // 2. Fetch Data
-                const dataRes = await api.get(`/v1/doc/${docTypeName}`);
-                if (Array.isArray(dataRes.data)) {
-                    setData(dataRes.data);
-                }
+                if (metaRes.data) setDocType(metaRes.data);
+                await loadData();
             } catch (err) {
                 console.error(err);
             } finally {
                 setLoading(false);
             }
         };
+        if (docTypeName) init();
+    }, [docTypeName, loadData]);
 
-        if (docTypeName) {
-            init();
+    const handleRowClick = (row: any) => router.push(`/app/${docTypeName}/${row.name}`);
+    const handleCreate = () => router.push(`/app/${docTypeName}/new`);
+
+    const handleBulkDelete = async (rows: any[]) => {
+        if (!rows.length) return;
+        if (!confirm(`Delete ${rows.length} ${docTypeName} record${rows.length === 1 ? '' : 's'}? This cannot be undone.`)) return;
+        const results = await Promise.allSettled(
+            rows.map((r) => api.delete(`/v1/doc/${docTypeName}/${encodeURIComponent(r.name)}`))
+        );
+        const ok = results.filter((r) => r.status === 'fulfilled').length;
+        const failed = results.length - ok;
+        if (failed === 0) {
+            toast({ title: `Deleted ${ok}`, description: `Removed ${ok} record${ok === 1 ? '' : 's'}.`, variant: 'success' });
+        } else {
+            toast({
+                title: 'Partial delete',
+                description: `${ok} succeeded, ${failed} failed.`,
+                variant: 'destructive',
+            });
         }
-    }, [docTypeName]);
-
-    const handleRowClick = (row: any) => {
-        router.push(`/app/${docTypeName}/${row.name}`);
+        await loadData();
     };
-
-    const handleCreate = () => {
-        router.push(`/app/${docTypeName}/new`);
-    }
 
     if (loading && !docType) {
         return (
@@ -63,12 +76,14 @@ export default function DocTypeListPage() {
 
     return (
         <div className="h-full">
-            <ListView 
-                docType={docType} 
+            <ListView
+                docType={docType}
                 data={data}
                 loading={loading}
                 onRowClick={handleRowClick}
                 onCreateClick={handleCreate}
+                onRefresh={loadData}
+                onBulkDelete={handleBulkDelete}
             />
         </div>
     );

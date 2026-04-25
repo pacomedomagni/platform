@@ -276,6 +276,43 @@ function toast({ ...props }: ToastInput) {
   };
 }
 
+/**
+ * Show a toast with an Undo action that runs the provided callback when the user clicks it.
+ * Use this for soft destructive actions: optimistically apply the change, then offer undo
+ * within `windowMs` (default 5s).
+ */
+interface UndoToastInput {
+  title: string;
+  description?: string;
+  variant?: 'default' | 'destructive' | 'success';
+  windowMs?: number;
+  onUndo: () => void | Promise<void>;
+}
+
+function toastUndo({ title, description, variant = 'default', windowMs = 5000, onUndo }: UndoToastInput) {
+  let undone = false;
+  const handle = toast({
+    title,
+    description,
+    variant,
+    duration: windowMs,
+    action: (
+      <ToastAction
+        altText="Undo"
+        onClick={async () => {
+          if (undone) return;
+          undone = true;
+          await onUndo();
+          handle.dismiss();
+        }}
+      >
+        Undo
+      </ToastAction>
+    ),
+  });
+  return handle;
+}
+
 function useToast() {
   const [state, setState] = React.useState<State>(memoryState);
 
@@ -334,4 +371,5 @@ export {
   Toaster,
   useToast,
   toast,
+  toastUndo,
 };

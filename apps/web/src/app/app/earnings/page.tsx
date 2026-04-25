@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Card, Skeleton } from '@platform/ui';
+import { Card, Skeleton, StatusBadge } from '@platform/ui';
 import {
   DollarSign,
   TrendingUp,
@@ -13,6 +13,7 @@ import {
   Banknote,
   AlertCircle,
   CreditCard,
+  AlertTriangle,
 } from 'lucide-react';
 import Link from 'next/link';
 import { unwrapJson } from '@/lib/admin-fetch';
@@ -39,6 +40,11 @@ interface EarningsData {
   payouts: Payout[];
   platformFeePercent: number;
   message?: string;
+  /** Provider-account status from Stripe/Square. 'active' means payouts are enabled. */
+  paymentStatus?: string;
+  /** Connection presence — set false when the merchant hasn't connected any provider. */
+  paymentsConnected?: boolean;
+  paymentProvider?: string | null;
 }
 
 const _locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
@@ -81,22 +87,10 @@ function formatDateTime(dateStr: string): string {
   }
 }
 
+// Stripe/Square use lowercase enum strings (paid|pending|in_transit|canceled|failed).
+// StatusBadge expects uppercased keys; normalise here so we never duplicate the lookup.
 function PayoutStatusBadge({ status }: { status: string }) {
-  const styles: Record<string, { className: string; label: string }> = {
-    paid: { className: 'bg-emerald-50 text-emerald-700 border-emerald-200', label: 'Paid' },
-    pending: { className: 'bg-amber-50 text-amber-700 border-amber-200', label: 'Pending' },
-    in_transit: { className: 'bg-blue-50 text-blue-700 border-blue-200', label: 'In Transit' },
-    canceled: { className: 'bg-red-50 text-red-700 border-red-200', label: 'Canceled' },
-    failed: { className: 'bg-red-50 text-red-700 border-red-200', label: 'Failed' },
-  };
-
-  const style = styles[status] || { className: 'bg-slate-50 text-slate-600 border-slate-200', label: status };
-
-  return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${style.className}`}>
-      {style.label}
-    </span>
-  );
+  return <StatusBadge kind="payout" status={status?.toUpperCase()} />;
 }
 
 export default function EarningsPage() {
@@ -207,6 +201,28 @@ export default function EarningsPage() {
           <p className="mt-1 text-slate-500">Track your revenue and payouts</p>
         </div>
 
+        {/*
+          Rose banner mirrors the dashboard banner so the disconnect state is consistent
+          across screens. Single CTA points to the settings page where this gets fixed.
+        */}
+        <div role="status" className="flex items-center gap-4 rounded-xl border border-rose-200 bg-rose-50 p-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-rose-100">
+            <CreditCard className="h-5 w-5 text-rose-600" />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-semibold text-rose-800">Connect a payment provider</h3>
+            <p className="text-sm text-rose-700">
+              Your store cannot accept payments — and you have no earnings to track — until Stripe or Square is connected.
+            </p>
+          </div>
+          <Link
+            href="/app/settings/payments"
+            className="shrink-0 rounded-lg border border-rose-300 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
+          >
+            Resolve in Settings
+          </Link>
+        </div>
+
         <Card className="p-8 text-center">
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-amber-50">
             <CreditCard className="h-8 w-8 text-amber-600" />
@@ -264,6 +280,34 @@ export default function EarningsPage() {
           >
             ×
           </button>
+        </div>
+      )}
+
+      {/*
+        Mirrors the dashboard rose banner — payments connected (we wouldn't be in this branch
+        otherwise) but the provider account is not currently active. Rendered ABOVE the balance
+        cards so the merchant can't miss it before reading numbers.
+      */}
+      {data.paymentStatus && data.paymentStatus !== 'active' && (
+        <div role="status" className="flex items-center gap-4 rounded-xl border border-rose-200 bg-rose-50 p-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-rose-100">
+            <AlertTriangle className="h-5 w-5 text-rose-600" />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-semibold text-rose-800">Payouts are paused</h3>
+            <p className="text-sm text-rose-700">
+              {data.paymentProvider
+                ? data.paymentProvider.charAt(0).toUpperCase() + data.paymentProvider.slice(1)
+                : 'Your payment provider'}{' '}
+              needs additional information before payouts can resume.
+            </p>
+          </div>
+          <Link
+            href="/app/settings/payments"
+            className="shrink-0 rounded-lg border border-rose-300 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
+          >
+            Resolve in Settings
+          </Link>
         </div>
       )}
 
@@ -346,12 +390,40 @@ export default function EarningsPage() {
         </Card>
       </div>
 
-      {/* Platform Fee Info */}
+      {/*
+        Totals breakdown — surfaces the platform fee inline alongside the numbers it impacts,
+        so the merchant sees the deduction at the same glance as their balance, not buried below.
+      */}
+      <Card className="p-6">
+        <h3 className="text-sm font-semibold text-slate-900">Earnings Summary</h3>
+        <dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 text-sm">
+          <div className="flex items-baseline justify-between sm:flex-col sm:items-start sm:gap-1">
+            <dt className="text-slate-500">Available</dt>
+            <dd className="font-semibold text-slate-900">{formatCurrency(availableTotal)}</dd>
+          </div>
+          <div className="flex items-baseline justify-between sm:flex-col sm:items-start sm:gap-1">
+            <dt className="text-slate-500">Pending</dt>
+            <dd className="font-semibold text-slate-900">{formatCurrency(pendingTotal)}</dd>
+          </div>
+          <div className="flex items-baseline justify-between sm:flex-col sm:items-start sm:gap-1">
+            <dt className="text-slate-500">Total Balance</dt>
+            <dd className="font-semibold text-slate-900">{formatCurrency(totalEarnings)}</dd>
+          </div>
+          <div className="flex items-baseline justify-between sm:flex-col sm:items-start sm:gap-1">
+            <dt className="text-slate-500">Platform fee</dt>
+            <dd className="font-semibold text-slate-900">
+              {data.platformFeePercent > 0 ? `${data.platformFeePercent}%` : '—'}
+            </dd>
+          </div>
+        </dl>
+      </Card>
+
+      {/* Platform Fee Info — kept as the long-form explanation; the summary above is the at-a-glance view. */}
       {data.platformFeePercent > 0 && (
         <div className="flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
           <AlertCircle className="h-5 w-5 text-blue-600" />
           <p className="text-sm text-blue-700">
-            <strong>Platform Fee:</strong> {data.platformFeePercent}% is deducted from each transaction. 
+            <strong>Platform Fee:</strong> {data.platformFeePercent}% is deducted from each transaction.
             Your balance shown is after fees.
           </p>
         </div>

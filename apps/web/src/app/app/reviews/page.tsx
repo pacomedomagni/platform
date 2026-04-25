@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Button, Card, Badge, Spinner, Textarea, Input, ConfirmDialog } from '@platform/ui';
+import { Button, Card, Badge, Spinner, Textarea, Input, ConfirmDialog, toast, toastUndo } from '@platform/ui';
 import { Star, ShieldCheck, Check, X, MessageSquare, Search, Filter } from 'lucide-react';
 import { adminReviewsApi, AdminReview } from '@/lib/reviews-api';
 
@@ -83,12 +83,38 @@ export default function AdminReviewsPage() {
     if (!reviewId) return;
     setDeleteConfirm(null);
 
-    try {
-      await adminReviewsApi.deleteReview(reviewId);
-      await loadReviews();
-    } catch (error) {
-      console.error('Failed to delete review:', error);
-    }
+    // Snapshot the row for potential undo so we can re-show it instantly if user reverts.
+    const snapshot = reviews.find((r) => r.id === reviewId);
+
+    // Optimistic remove from UI
+    setReviews((prev) => prev.filter((r) => r.id !== reviewId));
+
+    let cancelled = false;
+    toastUndo({
+      title: 'Review deleted',
+      description: 'You can undo for the next 5 seconds.',
+      windowMs: 5000,
+      onUndo: () => {
+        cancelled = true;
+        // Restore in UI; actual server-side restore would need a real endpoint.
+        if (snapshot) setReviews((prev) => [snapshot, ...prev]);
+        toast({ title: 'Restored', variant: 'success' });
+      },
+    });
+
+    // Defer the actual API call to the end of the undo window so undo is a true no-op on the server.
+    setTimeout(async () => {
+      if (cancelled) return;
+      try {
+        await adminReviewsApi.deleteReview(reviewId);
+        await loadReviews();
+      } catch (error) {
+        console.error('Failed to delete review:', error);
+        toast({ title: 'Delete failed', description: 'Restoring review.', variant: 'destructive' });
+        // Re-fetch to recover authoritative state
+        await loadReviews();
+      }
+    }, 5000);
   };
 
   const toggleReviewSelection = (reviewId: string) => {

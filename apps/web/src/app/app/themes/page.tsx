@@ -18,6 +18,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  ConfirmDialog,
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+  toastUndo,
+} from '@platform/ui';
 import type { Theme } from '@/lib/theme/types';
 
 export default function ThemesPage() {
@@ -28,9 +37,21 @@ export default function ThemesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [themeToDelete, setThemeToDelete] = useState<Theme | null>(null);
+  // Activate confirmation — switching themes hits the live storefront immediately, so we gate on a dialog.
+  const [activateConfirmId, setActivateConfirmId] = useState<string | null>(null);
+  // Preview drawer — holds the theme being previewed in an iframe.
+  const [previewTheme, setPreviewTheme] = useState<Theme | null>(null);
 
   const router = useRouter();
   const { toast } = useToast();
+
+  // Best-effort storefront URL for the preview iframe; falls back to the public storefront route.
+  // The storefront does not yet honour ?theme= for live overrides — see report.
+  const storefrontPreviewUrl = (themeId: string) => {
+    if (typeof window === 'undefined') return '/storefront';
+    const base = window.location.origin;
+    return `${base}/storefront?theme=${encodeURIComponent(themeId)}`;
+  };
 
   useEffect(() => {
     loadThemes();
@@ -58,7 +79,17 @@ export default function ThemesPage() {
     }
   };
 
-  const handleActivate = async (themeId: string) => {
+  // Two-step: card calls requestActivate which opens the dialog; confirmActivate actually fires the API.
+  // Done this way because flipping the active theme replaces the storefront for end-users immediately.
+  const requestActivate = (themeId: string) => {
+    if (themeId === activeThemeId) return;
+    setActivateConfirmId(themeId);
+  };
+
+  const confirmActivate = async () => {
+    const themeId = activateConfirmId;
+    if (!themeId) return;
+    setActivateConfirmId(null);
     try {
       await themeService.activateTheme(themeId);
       setActiveThemeId(themeId);
@@ -113,25 +144,40 @@ export default function ThemesPage() {
   const confirmDelete = async () => {
     if (!themeToDelete) return;
 
-    try {
-      await themeService.deleteTheme(themeToDelete.id);
-      setThemes((prev) => prev.filter((t) => t.id !== themeToDelete.id));
+    // Optimistic delete with a 5s undo window. The actual server-side DELETE is delayed
+    // so undo is a true no-op on the backend; if the user undoes within the window we
+    // restore the theme to local state without ever calling DELETE.
+    const snapshot = themeToDelete;
+    setThemes((prev) => prev.filter((t) => t.id !== snapshot.id));
+    setDeleteDialogOpen(false);
+    setThemeToDelete(null);
 
-      toast({
-        title: 'Theme deleted',
-        description: `${themeToDelete.name} has been deleted`,
-      });
-    } catch (error) {
-      console.error('Failed to delete theme:', error);
-      toast({
-        title: 'Failed to delete theme',
-        description: error instanceof Error ? error.message : 'Unknown error',
-        variant: 'destructive',
-      });
-    } finally {
-      setDeleteDialogOpen(false);
-      setThemeToDelete(null);
-    }
+    let cancelled = false;
+    toastUndo({
+      title: 'Theme deleted',
+      description: `${snapshot.name} — undo within 5 seconds.`,
+      windowMs: 5000,
+      onUndo: () => {
+        cancelled = true;
+        setThemes((prev) => [snapshot, ...prev]);
+      },
+    });
+
+    setTimeout(async () => {
+      if (cancelled) return;
+      try {
+        await themeService.deleteTheme(snapshot.id);
+      } catch (error) {
+        console.error('Failed to delete theme:', error);
+        // Server delete failed — recover by reloading authoritative state.
+        toast({
+          title: 'Delete failed',
+          description: error instanceof Error ? error.message : 'Restoring theme.',
+          variant: 'destructive',
+        });
+        setThemes((prev) => (prev.find((t) => t.id === snapshot.id) ? prev : [snapshot, ...prev]));
+      }
+    }, 5000);
   };
 
   // Filter themes
@@ -215,10 +261,11 @@ export default function ThemesPage() {
               key={theme.id}
               theme={theme}
               isActive={theme.id === activeThemeId}
-              onActivate={() => handleActivate(theme.id)}
+              onActivate={() => requestActivate(theme.id)}
               onEdit={() => handleEdit(theme.id)}
               onDuplicate={() => handleDuplicate(theme)}
               onDelete={() => handleDelete(theme)}
+              onPreview={() => setPreviewTheme(theme)}
             />
           ))}
         </div>
@@ -245,6 +292,41 @@ export default function ThemesPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Activate confirmation — uses the shared platform ConfirmDialog. */}
+      <ConfirmDialog
+        open={activateConfirmId !== null}
+        onOpenChange={(open) => { if (!open) setActivateConfirmId(null); }}
+        title="Activate this theme?"
+        description="Your live storefront will switch immediately."
+        confirmLabel="Activate"
+        onConfirm={confirmActivate}
+      />
+
+      {/*
+        Preview drawer — iframe pointing at the storefront. We pass ?theme=<id> for forward-compat;
+        once the storefront honours the override the same URL will start showing the chosen theme.
+      */}
+      <Sheet open={previewTheme !== null} onOpenChange={(open) => { if (!open) setPreviewTheme(null); }}>
+        <SheetContent side="right" className="!max-w-none w-full sm:w-[80vw] md:w-[70vw] lg:w-[60vw] flex flex-col">
+          <SheetHeader>
+            <SheetTitle>Preview: {previewTheme?.name ?? ''}</SheetTitle>
+            <SheetDescription>
+              Live storefront in an iframe. The override query parameter is included so the preview
+              will reflect this theme once the storefront supports per-request overrides.
+            </SheetDescription>
+          </SheetHeader>
+          {previewTheme && (
+            <div className="mt-4 flex-1 overflow-hidden rounded-lg border">
+              <iframe
+                title={`Preview of ${previewTheme.name}`}
+                src={storefrontPreviewUrl(previewTheme.id)}
+                className="h-full w-full"
+              />
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

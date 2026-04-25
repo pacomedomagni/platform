@@ -31,6 +31,7 @@ import { WorkersModule } from './workers/workers.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
 import { DomainResolverModule } from './storefront/domain-resolver/domain-resolver.module';
+import { AdminUsersModule } from './admin-users/admin-users.module';
 
 @Module({
   imports: [
@@ -85,6 +86,7 @@ import { DomainResolverModule } from './storefront/domain-resolver/domain-resolv
     WorkersModule,
     MonitoringModule,
     OnboardingModule,
+    AdminUsersModule,
     // MetaModule MUST be last — its UniversalController has catch-all routes
     // (@Get(':doctype')) that would shadow all other routes if registered first
     MetaModule,

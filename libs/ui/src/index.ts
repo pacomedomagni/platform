@@ -20,3 +20,11 @@ export * from './lib/toast';
 export * from './lib/tabs';
 export * from './lib/avatar';
 export * from './lib/tooltip';
+
+// Wave 1 primitives
+export * from './lib/status-badge';
+export * from './lib/use-url-state';
+export * from './lib/data-table';
+export * from './lib/prompt-dialog';
+export * from './lib/sheet';
+export * from './lib/empty-state';

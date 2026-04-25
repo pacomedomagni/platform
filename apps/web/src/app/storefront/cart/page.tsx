@@ -8,6 +8,7 @@ import { Trash2, Minus, Plus, ShoppingBag } from 'lucide-react';
 import { useCartStore } from '@/lib/cart-store';
 import { formatCurrency } from '../_lib/format';
 import { ButtonLink } from '../_components/button-link';
+import { ShippingEstimator } from './_components/shipping-estimator';
 
 export default function CartPage() {
   const {
@@ -25,7 +26,17 @@ export default function CartPage() {
     removeItem,
     applyCoupon,
     removeCoupon,
+    shippingEstimate,
   } = useCartStore();
+
+  // Effective shipping/tax/total — prefer the user's estimate when set,
+  // otherwise fall back to whatever the cart API has computed.
+  const effectiveShipping = shippingEstimate ? shippingEstimate.ratePrice : shipping;
+  const effectiveTax = shippingEstimate?.estimatedTax ?? tax;
+  const effectiveTotal =
+    subtotal + effectiveShipping + effectiveTax - discount;
+  const FREE_SHIPPING_THRESHOLD = 75;
+  const remainingForFreeShipping = Math.max(0, FREE_SHIPPING_THRESHOLD - subtotal);
 
   const [promoCode, setPromoCode] = useState('');
   const [promoLoading, setPromoLoading] = useState(false);
@@ -204,7 +215,8 @@ export default function CartPage() {
           </div>
         </main>
 
-        <aside aria-labelledby="order-summary-heading">
+        <aside aria-labelledby="order-summary-heading" className="space-y-4">
+          <ShippingEstimator />
           <Card className="h-fit space-y-5 border-border bg-card p-6 shadow-sm">
             <div className="space-y-2">
               <h2 id="order-summary-heading" className="text-lg font-semibold text-foreground">
@@ -212,21 +224,37 @@ export default function CartPage() {
               </h2>
               <p className="text-sm text-muted-foreground">Shipping calculated by fulfillment region.</p>
             </div>
+            {remainingForFreeShipping > 0 && (
+              <div
+                className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800"
+                role="status"
+              >
+                Add {formatCurrency(remainingForFreeShipping)} to qualify for free shipping.
+              </div>
+            )}
             <div className="space-y-3 text-sm text-muted-foreground">
               <div className="flex items-center justify-between">
                 <span>Subtotal</span>
                 <span className="font-semibold text-foreground">{formatCurrency(subtotal)}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span>Shipping</span>
+                <span>Shipping{shippingEstimate ? ` · ${shippingEstimate.rateName}` : ''}</span>
                 <span className="font-semibold text-foreground">
-                  {shipping > 0 ? formatCurrency(shipping) : 'Calculated at checkout'}
+                  {shippingEstimate
+                    ? effectiveShipping > 0
+                      ? formatCurrency(effectiveShipping)
+                      : 'Free'
+                    : shipping > 0
+                      ? formatCurrency(shipping)
+                      : 'Calculated at checkout'}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span>Tax</span>
+                <span>{shippingEstimate?.taxLabel || 'Tax'}</span>
                 <span className="font-semibold text-foreground">
-                  {tax > 0 ? formatCurrency(tax) : 'Calculated at checkout'}
+                  {effectiveTax > 0
+                    ? formatCurrency(effectiveTax)
+                    : 'Calculated at checkout'}
                 </span>
               </div>
               {discount > 0 && (
@@ -251,7 +279,9 @@ export default function CartPage() {
               )}
               <div className="flex items-center justify-between border-t border-border pt-3 text-base font-semibold text-foreground">
                 <span>Total</span>
-                <span>{formatCurrency(total)}</span>
+                <span>
+                  {formatCurrency(shippingEstimate ? effectiveTotal : total)}
+                </span>
               </div>
             </div>
             <div className="space-y-3">

@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, Copy, Edit, MoreVertical, Trash2 } from 'lucide-react';
+import { Check, Copy, Edit, Eye, MoreVertical, Trash2 } from 'lucide-react';
+import { StatusBadge } from '@platform/ui';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -29,6 +30,8 @@ interface ThemeCardProps {
   onEdit: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  /** Open the preview drawer for this theme. Owner page wires this up to a Sheet. */
+  onPreview: () => void;
 }
 
 export function ThemeCard({
@@ -38,6 +41,7 @@ export function ThemeCard({
   onEdit,
   onDuplicate,
   onDelete,
+  onPreview,
 }: ThemeCardProps) {
   const [isHovered, setIsHovered] = useState(false);
 
@@ -65,9 +69,8 @@ export function ThemeCard({
             <CardTitle className="text-lg flex items-center gap-2">
               {theme.name}
               {isActive && (
-                <Badge variant="default" className="text-xs">
-                  Active
-                </Badge>
+                /* StatusBadge keeps the active marker visually consistent with the rest of the admin. */
+                <StatusBadge kind="connection" status="ACTIVE" />
               )}
               {theme.isPreset && (
                 <Badge variant="secondary" className="text-xs">
@@ -149,13 +152,29 @@ export function ThemeCard({
         </div>
       </CardContent>
 
-      <CardFooter className="pt-3">
+      <CardFooter className="pt-3 flex flex-col gap-3">
         <div className="flex items-center justify-between w-full text-xs text-muted-foreground">
           <span>Updated {new Date(theme.updatedAt).toLocaleDateString()}</span>
           <div className="flex items-center gap-2">
             <span className="font-mono">{theme.typography.bodyFont}</span>
           </div>
         </div>
+        {/*
+          Preview opens the storefront in a side-sheet iframe; cheap and works without
+          relying on a per-theme query param the storefront doesn't yet honour.
+        */}
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full"
+          onClick={(e) => {
+            e.stopPropagation();
+            onPreview();
+          }}
+        >
+          <Eye className="mr-2 h-4 w-4" />
+          Preview
+        </Button>
       </CardFooter>
 
       {/* Hover Overlay */}

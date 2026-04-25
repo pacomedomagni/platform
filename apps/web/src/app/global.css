@@ -631,3 +631,24 @@ summary svg {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Print-friendly defaults for the admin reports.
+ * The ReportToolbar already carries `print:hidden` for the per-page toolbar; this rule
+ * hides the global app shell (sidebar + topbar) so window.print() yields a clean PDF
+ * containing just the report. Tag whatever you want hidden with `data-print-hide`.
+ */
+@media print {
+  [data-print-hide],
+  nav[role='navigation'],
+  aside,
+  header[role='banner'] {
+    display: none !important;
+  }
+  body {
+    background: #fff !important;
+  }
+  main, .print-container {
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+}

@@ -215,14 +215,14 @@ export default function MarketplacePromotionsPage() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => alert('Create Markdown Sale — wire up your modal or route here')}
+            onClick={() => toast({ title: 'Coming soon', description: 'Markdown Sale builder is on the roadmap.' })}
             className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
           >
             <Plus className="w-4 h-4" />
             Markdown Sale
           </button>
           <button
-            onClick={() => alert('Create Order Discount — wire up your modal or route here')}
+            onClick={() => toast({ title: 'Coming soon', description: 'Order Discount builder is on the roadmap.' })}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
           >
             <Plus className="w-4 h-4" />
@@ -275,14 +275,14 @@ export default function MarketplacePromotionsPage() {
           </p>
           <div className="flex items-center justify-center gap-2">
             <button
-              onClick={() => alert('Create Markdown Sale — wire up your modal or route here')}
+              onClick={() => toast({ title: 'Coming soon', description: 'Markdown Sale builder is on the roadmap.' })}
               className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
             >
               <Plus className="w-4 h-4" />
               Markdown Sale
             </button>
             <button
-              onClick={() => alert('Create Order Discount — wire up your modal or route here')}
+              onClick={() => toast({ title: 'Coming soon', description: 'Order Discount builder is on the roadmap.' })}
               className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
             >
               <Plus className="w-4 h-4" />

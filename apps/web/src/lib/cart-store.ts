@@ -18,6 +18,22 @@ export interface CartItemDisplay extends CartItem {
   variant?: string;
 }
 
+/**
+ * Stored shipping estimate so users don't have to re-enter the address
+ * between cart and checkout. Persisted to localStorage via zustand persist.
+ */
+export interface ShippingEstimate {
+  country: string;
+  state?: string;
+  postalCode?: string;
+  rateId: string;
+  rateName: string;
+  ratePrice: number;
+  estimatedDays?: string | null;
+  estimatedTax?: number | null;
+  taxLabel?: string;
+}
+
 interface CartState {
   // State
   cartId: string | null;
@@ -39,6 +55,9 @@ interface CartState {
   discount: number;
   total: number;
 
+  // Persisted shipping/tax estimate (set on cart page, reused at checkout)
+  shippingEstimate: ShippingEstimate | null;
+
   // Actions
   initCart: () => Promise<void>;
   initializeCart: () => Promise<void>; // Alias for initCart
@@ -50,6 +69,7 @@ interface CartState {
   clearCart: () => Promise<void>;
   syncCart: () => Promise<void>;
   setCartFromApi: (cart: Cart) => void;
+  setShippingEstimate: (estimate: ShippingEstimate | null) => void;
 }
 
 // Phase 2 W2.8: shared promise so two concurrent initCart() callers (e.g.
@@ -84,6 +104,7 @@ export const useCartStore = create<CartState>()(
       couponCode: null,
       isLoading: false,
       error: null,
+      shippingEstimate: null,
 
       // Computed aliases (getters via get())
       get shipping() { return get().shippingTotal; },
@@ -301,6 +322,11 @@ export const useCartStore = create<CartState>()(
         }
       },
 
+      // Save the user's shipping/tax estimate so checkout can pre-fill.
+      setShippingEstimate: (estimate: ShippingEstimate | null) => {
+        set({ shippingEstimate: estimate });
+      },
+
       // Sync cart with server
       syncCart: async () => {
         const { cartId } = get();
@@ -319,6 +345,7 @@ export const useCartStore = create<CartState>()(
       partialize: (state) => ({
         cartId: state.cartId,
         sessionToken: state.sessionToken,
+        shippingEstimate: state.shippingEstimate,
       }),
     }
   )

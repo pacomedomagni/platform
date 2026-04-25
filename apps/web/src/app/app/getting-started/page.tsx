@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { Suspense, useEffect, useState, useRef, useCallback } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Card } from '@platform/ui';
 import { Store, Truck, Package, PartyPopper, Loader2, Upload, X, Check, Globe, Link2 } from 'lucide-react';
 import Link from 'next/link';
@@ -98,14 +99,23 @@ function StepIndicator({ currentStep }: { currentStep: number }) {
 /*  Main Page                                                          */
 /* ------------------------------------------------------------------ */
 
-export default function GettingStartedPage() {
-  const [step, setStep] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('getting_started_step');
-      return saved ? Math.max(1, Math.min(6, parseInt(saved, 10) || 1)) : 1;
-    }
-    return 1;
-  });
+function GettingStartedInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialStep = Math.max(1, Math.min(6, Number(searchParams.get('step') ?? '1') || 1));
+  const [step, setStepState] = useState<number>(initialStep);
+  const setStep = useCallback(
+    (next: number) => {
+      const clamped = Math.max(1, Math.min(6, next));
+      setStepState(clamped);
+      const sp = new URLSearchParams(searchParams.toString());
+      if (clamped === 1) sp.delete('step');
+      else sp.set('step', String(clamped));
+      const qs = sp.toString();
+      router.replace(qs ? `/app/getting-started?${qs}` : '/app/getting-started', { scroll: false });
+    },
+    [router, searchParams]
+  );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -142,10 +152,8 @@ export default function GettingStartedPage() {
   // Store URL for final step
   const [storeUrl, setStoreUrl] = useState<string | null>(null);
 
-  // Persist step progress to localStorage
-  useEffect(() => {
-    localStorage.setItem('getting_started_step', String(step));
-  }, [step]);
+  // Step progress is persisted to URL via setStep — no localStorage. The dashboard derives "what's done"
+  // from the server checklist, so cross-device coherence is preserved without client-side state.
 
   /* ---------- Fetch existing settings ---------- */
 
@@ -423,13 +431,11 @@ export default function GettingStartedPage() {
 
     setError(null);
     setStep(6);
-    localStorage.setItem('merchant_setup_done', 'true');
   };
 
   const handleSkipProduct = () => {
     setError(null);
     setStep(6);
-    localStorage.setItem('merchant_setup_done', 'true');
   };
 
   /* ---------- Loading state ---------- */
@@ -1098,5 +1104,19 @@ export default function GettingStartedPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function GettingStartedPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+        </div>
+      }
+    >
+      <GettingStartedInner />
+    </Suspense>
   );
 }

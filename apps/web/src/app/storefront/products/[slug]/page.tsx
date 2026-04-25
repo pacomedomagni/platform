@@ -219,10 +219,12 @@ export default async function ProductPage({ params }: ProductPageProps) {
               <AddToCartButton
                 productId={product.id}
                 productSlug={product.slug}
+                productName={product.displayName}
               />
               <AddToCartButton
                 productId={product.id}
                 productSlug={product.slug}
+                productName={product.displayName}
                 buyNow
               />
             </div>

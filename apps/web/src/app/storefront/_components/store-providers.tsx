@@ -4,6 +4,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Toaster } from '@platform/ui';
 import { useCartStore } from '../../../lib/cart-store';
 import { useAuthStore } from '../../../lib/auth-store';
 import { useCurrencyStore } from '../../../lib/currency-store';
@@ -56,6 +57,7 @@ export function StoreProviders({ children }: { children: React.ReactNode }) {
       <FontLoader fonts={['Inter', 'Poppins']} />
       <ThemeStyles />
       {children}
+      <Toaster />
     </ThemeProvider>
   );
 }

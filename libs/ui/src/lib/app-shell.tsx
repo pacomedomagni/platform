@@ -23,6 +23,8 @@ interface NavItem {
     href: string;
     isActive?: boolean;
     section?: string;
+    /** Show a small notification dot next to this item (e.g. amber pip for unfinished setup). */
+    badge?: boolean;
 }
 
 interface AppShellProps {
@@ -124,7 +126,15 @@ export const AppShell = ({
                                                 )}
                                                 aria-current={isActive ? 'page' : undefined}
                                             >
-                                                <item.icon className={cn("h-5 w-5 shrink-0 transition-colors", isActive ? "text-indigo-600" : "text-slate-500")} />
+                                                <span className="relative shrink-0">
+                                                    <item.icon className={cn("h-5 w-5 transition-colors", isActive ? "text-indigo-600" : "text-slate-500")} />
+                                                    {item.badge && (
+                                                        <span
+                                                            aria-hidden="true"
+                                                            className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-amber-400 ring-2 ring-white dark:ring-slate-950"
+                                                        />
+                                                    )}
+                                                </span>
                                                 <span
                                                     className={cn(
                                                         "transition-all duration-300 whitespace-nowrap overflow-hidden",

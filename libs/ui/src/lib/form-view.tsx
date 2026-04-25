@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { DocFieldDefinition, DocTypeDefinition } from './types';
 import { DataField, IntField, DateField, SelectField, TextEditorField, CheckField } from './fields';
 import { LinkField } from './link-field';
@@ -36,7 +36,7 @@ export const FormView = ({ docType, initialData, onSave, onSubmitDoc, onCancelDo
         setIsDirty(true);
     };
 
-    const handleSave = async () => {
+    const handleSave = useCallback(async () => {
         setLoading(true);
         try {
             await onSave(data);
@@ -48,7 +48,41 @@ export const FormView = ({ docType, initialData, onSave, onSubmitDoc, onCancelDo
         } finally {
             setLoading(false);
         }
-    }
+    }, [data, onSave]);
+
+    // Power-user keyboard shortcuts: Cmd/Ctrl+S to save, Esc to navigate back
+    const isDirtyRef = useRef(isDirty);
+    useEffect(() => { isDirtyRef.current = isDirty; }, [isDirty]);
+
+    useEffect(() => {
+        const handler = (e: KeyboardEvent) => {
+            const meta = e.metaKey || e.ctrlKey;
+            if (meta && e.key.toLowerCase() === 's') {
+                e.preventDefault();
+                if (!loading && data.docstatus !== 1) handleSave();
+            }
+            if (e.key === 'Escape' && onNavigateBack) {
+                if (isDirtyRef.current) {
+                    if (!confirm('Discard unsaved changes?')) return;
+                }
+                onNavigateBack();
+            }
+        };
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+    }, [loading, data.docstatus, handleSave, onNavigateBack]);
+
+    // Beforeunload guard while dirty
+    useEffect(() => {
+        const onBeforeUnload = (e: BeforeUnloadEvent) => {
+            if (isDirtyRef.current) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        };
+        window.addEventListener('beforeunload', onBeforeUnload);
+        return () => window.removeEventListener('beforeunload', onBeforeUnload);
+    }, []);
 
     const handleSubmit = async () => {
         if (!onSubmitDoc) return;
@@ -159,7 +193,12 @@ export const FormView = ({ docType, initialData, onSave, onSubmitDoc, onCancelDo
                      
                      <div className="flex-1 sm:flex-none"></div>
 
-                     <Button onClick={handleSave} disabled={loading || actionLoading || (data.docstatus === 1)} size="sm">
+                     <Button
+                        onClick={handleSave}
+                        disabled={loading || actionLoading || data.docstatus === 1}
+                        size="sm"
+                        title="Save (⌘/Ctrl+S)"
+                    >
                         {loading ? 'Saving...' : (
                             <>
                                 <Save className="mr-2 h-4 w-4" /> Save

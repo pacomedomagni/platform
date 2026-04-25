@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
-import { Button, Input } from '@platform/ui';
+import { useCallback, useEffect, useState } from 'react';
 import api from '../../../../lib/api';
-import { ReportAlert, ReportCard, ReportEmpty, ReportFilters, ReportPage, ReportTable } from '../_components/report-shell';
+import { ReportAlert, ReportCard, ReportEmpty, ReportPage, ReportTable } from '../_components/report-shell';
+import { ReportToolbar, downloadCSV, toCSV } from '../_components/report-toolbar';
 
 type CashMovement = {
   posting_date: string;
@@ -46,7 +46,7 @@ export default function CashFlowPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -59,25 +59,34 @@ export default function CashFlowPage() {
     } finally {
       setLoading(false);
     }
+  }, [fromDate, toDate]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleExport = (format: 'csv' | 'pdf') => {
+    if (format === 'pdf') {
+      window.print();
+      return;
+    }
+    if (!data) return;
+    downloadCSV(
+      `cash-flow-${fromDate || 'all'}-${toDate || 'today'}.csv`,
+      toCSV(data.movements, ['posting_date', 'voucher_type', 'voucher_no', 'account', 'debit', 'credit', 'net_change']),
+    );
   };
 
   return (
     <ReportPage title="Cash Flow" description="Cash account movements.">
-      <ReportFilters className="md:grid-cols-3">
-        <Input
-          type="date"
-          value={fromDate}
-          onChange={(e) => setFromDate(e.target.value)}
-        />
-        <Input
-          type="date"
-          value={toDate}
-          onChange={(e) => setToDate(e.target.value)}
-        />
-        <Button onClick={load} disabled={loading}>
-          {loading ? 'Loading...' : 'Load'}
-        </Button>
-      </ReportFilters>
+      <ReportToolbar
+        from={fromDate}
+        to={toDate}
+        onChange={(f, t) => { setFromDate(f); setToDate(t); }}
+        onRefresh={load}
+        loading={loading}
+        onExport={handleExport}
+      />
 
       {error && <ReportAlert>{error}</ReportAlert>}
 

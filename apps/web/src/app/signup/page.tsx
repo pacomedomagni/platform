@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Eye, EyeOff } from 'lucide-react';
 import { unwrapJson } from '@/lib/admin-fetch';
@@ -37,9 +37,11 @@ const steps = [
   { id: 'review', name: 'Review & Create' },
 ] as const;
 
-export default function SignupPage() {
+function SignupForm() {
   const router = useRouter();
-  const [currentStep, setCurrentStep] = useState(0);
+  const searchParams = useSearchParams();
+  const initialStep = Math.min(2, Math.max(0, Number(searchParams.get('step') ?? '0') || 0));
+  const [currentStep, setCurrentStep] = useState<number>(initialStep);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +58,23 @@ export default function SignupPage() {
     },
   });
 
+  // Persist step in URL so browser back/refresh restores position.
+  useEffect(() => {
+    const sp = new URLSearchParams(searchParams.toString());
+    if (currentStep === 0) sp.delete('step');
+    else sp.set('step', String(currentStep));
+    const qs = sp.toString();
+    router.replace(qs ? `/signup?${qs}` : '/signup', { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStep]);
+
+  const goTo = (step: number) => {
+    if (isSubmitting) return;
+    setCurrentStep(step);
+  };
+
   const onSubmit = async (data: SignupFormData) => {
+    if (isSubmitting) return;
     setIsSubmitting(true);
     setError(null);
 
@@ -77,12 +95,12 @@ export default function SignupPage() {
 
       if (accessToken) {
         localStorage.setItem('access_token', accessToken);
-        router.push(`/onboarding/${tenantId}`);
+        // Replace history so back button doesn't return to the signup form post-submit.
+        window.history.replaceState(null, '', `/onboarding/${tenantId}`);
+        router.replace(`/onboarding/${tenantId}`);
         return;
       }
 
-      // Token should always be returned now (user created synchronously).
-      // Fallback: redirect to login if something unexpected happens.
       setError('Account created. Please sign in to continue.');
       setIsSubmitting(false);
     } catch (err: any) {
@@ -94,7 +112,13 @@ export default function SignupPage() {
   const canProceed = () => {
     if (currentStep === 0) {
       const { businessName, email, password, subdomain } = form.getValues();
-      return businessName.length >= 2 && email.includes('@') && password.length >= 8 && /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(password) && subdomain.length >= 3;
+      return (
+        businessName.length >= 2 &&
+        email.includes('@') &&
+        password.length >= 8 &&
+        /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(password) &&
+        subdomain.length >= 3
+      );
     }
     return true;
   };
@@ -128,60 +152,12 @@ export default function SignupPage() {
           </div>
         </div>
 
-        {/* Social Login Options */}
-        {currentStep === 0 && (
-          <div className="border-b px-8 py-5">
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <button
-                type="button"
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                onClick={() => {
-                  // Google OAuth - to be implemented
-                  window.location.href = '/api/auth/google?flow=signup';
-                }}
-              >
-                <svg className="h-5 w-5" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                </svg>
-                Continue with Google
-              </button>
-              <button
-                type="button"
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                onClick={() => {
-                  // Microsoft OAuth - to be implemented
-                  window.location.href = '/api/auth/microsoft?flow=signup';
-                }}
-              >
-                <svg className="h-5 w-5" viewBox="0 0 24 24">
-                  <path fill="#F25022" d="M1 1h10v10H1z"/>
-                  <path fill="#00A4EF" d="M1 13h10v10H1z"/>
-                  <path fill="#7FBA00" d="M13 1h10v10H13z"/>
-                  <path fill="#FFB900" d="M13 13h10v10H13z"/>
-                </svg>
-                Continue with Microsoft
-              </button>
-            </div>
-            <div className="relative mt-5">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-slate-200" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-white px-3 text-slate-400">Or continue with email</span>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Step Indicator */}
-        <div className="border-b bg-slate-50 px-8 py-5">
-          <div className="flex items-center justify-between">
+        <div className="border-b bg-slate-50 px-8 py-5" aria-label="Signup progress">
+          <ol className="flex items-center justify-between">
             {steps.map((step, index) => (
-              <div key={step.id} className="flex flex-1 items-center">
-                <div className="flex flex-col items-center flex-1">
+              <li key={step.id} className="flex flex-1 items-center" aria-current={index === currentStep ? 'step' : undefined}>
+                <div className="flex flex-1 flex-col items-center">
                   <div
                     className={`flex h-9 w-9 items-center justify-center rounded-full border-2 text-sm font-semibold transition-all ${
                       index < currentStep
@@ -206,47 +182,70 @@ export default function SignupPage() {
                 {index < steps.length - 1 && (
                   <div className={`mx-3 h-0.5 flex-1 ${index < currentStep ? 'bg-blue-600' : 'bg-slate-200'}`} />
                 )}
-              </div>
+              </li>
             ))}
-          </div>
+          </ol>
         </div>
 
         {/* Form */}
-        <form onSubmit={form.handleSubmit(onSubmit)} className="p-8">
+        <form onSubmit={form.handleSubmit(onSubmit)} className="p-8" noValidate>
           {/* Step 1: Business Info */}
           {currentStep === 0 && (
             <div className="space-y-5">
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">Business Name</label>
+                <label htmlFor="signup-business" className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Business Name
+                </label>
                 <input
+                  id="signup-business"
                   type="text"
+                  autoComplete="organization"
+                  required
+                  aria-invalid={!!form.formState.errors.businessName}
+                  aria-describedby={form.formState.errors.businessName ? 'signup-business-err' : undefined}
                   {...form.register('businessName')}
                   className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   placeholder="Acme Inc."
                 />
-                {form.formState.errors.businessName && (
-                  <p className="mt-1 text-xs text-red-600">{form.formState.errors.businessName.message}</p>
-                )}
+                <p id="signup-business-err" aria-live="polite" className="mt-1 min-h-[1rem] text-xs text-red-600">
+                  {form.formState.errors.businessName?.message ?? ''}
+                </p>
               </div>
 
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">Email</label>
+                <label htmlFor="signup-email" className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Email
+                </label>
                 <input
+                  id="signup-email"
                   type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  required
+                  aria-invalid={!!form.formState.errors.email}
+                  aria-describedby={form.formState.errors.email ? 'signup-email-err' : undefined}
                   {...form.register('email')}
                   className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                   placeholder="you@example.com"
                 />
-                {form.formState.errors.email && (
-                  <p className="mt-1 text-xs text-red-600">{form.formState.errors.email.message}</p>
-                )}
+                <p id="signup-email-err" aria-live="polite" className="mt-1 min-h-[1rem] text-xs text-red-600">
+                  {form.formState.errors.email?.message ?? ''}
+                </p>
               </div>
 
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">Password</label>
+                <label htmlFor="signup-password" className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Password
+                </label>
                 <div className="relative">
                   <input
+                    id="signup-password"
                     type={showPassword ? 'text' : 'password'}
+                    autoComplete="new-password"
+                    required
+                    minLength={8}
+                    aria-invalid={!!form.formState.errors.password}
+                    aria-describedby="signup-password-help signup-password-err"
                     {...form.register('password')}
                     className="w-full rounded-lg border border-slate-300 px-4 py-2.5 pr-10 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                     placeholder="8+ chars, uppercase, lowercase, number"
@@ -269,13 +268,16 @@ export default function SignupPage() {
                     { label: 'Uppercase letter', met: /[A-Z]/.test(pwd) },
                     { label: 'Number', met: /\d/.test(pwd) },
                   ];
-                  const allMet = requirements.every(r => r.met);
-                  
+                  const allMet = requirements.every((r) => r.met);
+
                   return (
-                    <div className="mt-2 space-y-1">
+                    <div id="signup-password-help" className="mt-2 space-y-1">
                       <div className="grid grid-cols-2 gap-1">
-                        {requirements.map(req => (
-                          <div key={req.label} className={`flex items-center gap-1.5 text-xs ${req.met ? 'text-green-600' : 'text-slate-400'}`}>
+                        {requirements.map((req) => (
+                          <div
+                            key={req.label}
+                            className={`flex items-center gap-1.5 text-xs ${req.met ? 'text-green-600' : 'text-slate-400'}`}
+                          >
                             {req.met ? (
                               <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -289,15 +291,17 @@ export default function SignupPage() {
                           </div>
                         ))}
                       </div>
-                      {/* Password strength bar */}
                       {pwd.length > 0 && (
                         <div className="pt-1">
                           <div className="flex gap-1">
                             {[1, 2, 3, 4].map((i) => {
-                              const score = requirements.filter(r => r.met).length;
+                              const score = requirements.filter((r) => r.met).length;
                               const colors = ['bg-red-500', 'bg-orange-500', 'bg-yellow-500', 'bg-green-500'];
                               return (
-                                <div key={i} className={`h-1 flex-1 rounded-full ${i <= score ? colors[score - 1] || 'bg-slate-200' : 'bg-slate-200'}`} />
+                                <div
+                                  key={i}
+                                  className={`h-1 flex-1 rounded-full ${i <= score ? colors[score - 1] || 'bg-slate-200' : 'bg-slate-200'}`}
+                                />
                               );
                             })}
                           </div>
@@ -309,17 +313,26 @@ export default function SignupPage() {
                     </div>
                   );
                 })()}
-                {form.formState.errors.password && (
-                  <p className="mt-1 text-xs text-red-600">{form.formState.errors.password.message}</p>
-                )}
+                <p id="signup-password-err" aria-live="polite" className="mt-1 min-h-[1rem] text-xs text-red-600">
+                  {form.formState.errors.password?.message ?? ''}
+                </p>
               </div>
 
               <div>
-                <label className="mb-1.5 block text-sm font-medium text-slate-700">Store Subdomain</label>
+                <label htmlFor="signup-subdomain" className="mb-1.5 block text-sm font-medium text-slate-700">
+                  Store Subdomain
+                </label>
                 <p className="mb-1.5 text-xs text-slate-500">This will be your store&apos;s web address</p>
                 <div className="flex">
                   <input
+                    id="signup-subdomain"
                     type="text"
+                    autoComplete="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    required
+                    aria-invalid={!!form.formState.errors.subdomain}
+                    aria-describedby={form.formState.errors.subdomain ? 'signup-subdomain-err' : undefined}
                     {...form.register('subdomain')}
                     className="flex-1 rounded-l-lg border border-slate-300 px-4 py-2.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                     placeholder="my-store"
@@ -328,15 +341,15 @@ export default function SignupPage() {
                     .{PLATFORM_DOMAIN}
                   </span>
                 </div>
-                {form.formState.errors.subdomain && (
-                  <p className="mt-1 text-xs text-red-600">{form.formState.errors.subdomain.message}</p>
-                )}
+                <p id="signup-subdomain-err" aria-live="polite" className="mt-1 min-h-[1rem] text-xs text-red-600">
+                  {form.formState.errors.subdomain?.message ?? ''}
+                </p>
               </div>
 
               <button
                 type="button"
-                onClick={() => canProceed() && setCurrentStep(1)}
-                disabled={!canProceed()}
+                onClick={() => canProceed() && goTo(1)}
+                disabled={!canProceed() || isSubmitting}
                 className="w-full rounded-lg bg-blue-600 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
               >
                 Continue
@@ -350,7 +363,7 @@ export default function SignupPage() {
               <h2 className="text-lg font-semibold text-slate-900">Choose Your Payment Provider</h2>
               <p className="text-sm text-slate-500">Select how your customers will pay. You can change this later.</p>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-4" role="radiogroup" aria-label="Payment provider">
                 <label
                   className={`cursor-pointer rounded-xl border-2 p-5 transition ${
                     form.watch('paymentProvider') === 'stripe'
@@ -403,15 +416,17 @@ export default function SignupPage() {
               <div className="flex gap-3">
                 <button
                   type="button"
-                  onClick={() => setCurrentStep(0)}
-                  className="flex-1 rounded-lg border border-slate-300 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  onClick={() => goTo(0)}
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-lg border border-slate-300 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
                 >
                   Back
                 </button>
                 <button
                   type="button"
-                  onClick={() => setCurrentStep(2)}
-                  className="flex-1 rounded-lg bg-blue-600 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
+                  onClick={() => goTo(2)}
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-lg bg-blue-600 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
                 >
                   Continue
                 </button>
@@ -435,7 +450,9 @@ export default function SignupPage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-slate-500">Store URL</span>
-                  <span className="text-sm font-medium">{form.watch('subdomain')}.{PLATFORM_DOMAIN}</span>
+                  <span className="text-sm font-medium">
+                    {form.watch('subdomain')}.{PLATFORM_DOMAIN}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-slate-500">Payment Provider</span>
@@ -444,14 +461,18 @@ export default function SignupPage() {
               </div>
 
               {error && (
-                <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+                <div role="alert" aria-live="assertive" className="rounded-lg border border-red-200 bg-red-50 p-4">
                   <p className="text-sm text-red-600">{error}</p>
                   {(error.toLowerCase().includes('already registered') || error.toLowerCase().includes('already exists')) && (
                     <p className="mt-2 text-sm text-red-600">
                       Already have an account?{' '}
-                      <Link href="/login" className="font-medium underline">Sign in instead</Link>
+                      <Link href="/login" className="font-medium underline">
+                        Sign in instead
+                      </Link>
                       {' or '}
-                      <Link href="/forgot-password" className="font-medium underline">reset your password</Link>
+                      <Link href="/forgot-password" className="font-medium underline">
+                        reset your password
+                      </Link>
                     </p>
                   )}
                 </div>
@@ -460,7 +481,7 @@ export default function SignupPage() {
               <div className="flex gap-3">
                 <button
                   type="button"
-                  onClick={() => setCurrentStep(1)}
+                  onClick={() => goTo(1)}
                   disabled={isSubmitting}
                   className="flex-1 rounded-lg border border-slate-300 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
                 >
@@ -469,9 +490,10 @@ export default function SignupPage() {
                 <button
                   type="submit"
                   disabled={isSubmitting}
+                  aria-busy={isSubmitting}
                   className="flex-1 rounded-lg bg-blue-600 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
                 >
-                  {isSubmitting ? 'Creating Store...' : 'Create Store'}
+                  {isSubmitting ? 'Creating Store…' : 'Create Store'}
                 </button>
               </div>
             </div>
@@ -488,5 +510,13 @@ export default function SignupPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense>
+      <SignupForm />
+    </Suspense>
   );
 }

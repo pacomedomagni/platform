@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
-import { Button, Input, Badge } from '@platform/ui';
+import { useCallback, useEffect, useState } from 'react';
+import { Badge } from '@platform/ui';
 import api from '../../../../lib/api';
-import { ReportAlert, ReportCard, ReportEmpty, ReportFilters, ReportPage, ReportTable } from '../_components/report-shell';
+import { ReportAlert, ReportCard, ReportEmpty, ReportPage, ReportTable } from '../_components/report-shell';
+import { ReportToolbar, downloadCSV, toCSV } from '../_components/report-toolbar';
 
 type TrialAccount = {
   account: string;
@@ -39,12 +40,14 @@ const formatCurrency = (amount: number) => {
 };
 
 export default function TrialBalancePage() {
+  // Trial balance is point-in-time; we still use both from/to slots so the toolbar
+  // can stay generic but only as_of_date is sent to the API.
   const [asOfDate, setAsOfDate] = useState('');
   const [data, setData] = useState<TrialBalance | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -57,20 +60,45 @@ export default function TrialBalancePage() {
     } finally {
       setLoading(false);
     }
+  }, [asOfDate]);
+
+  // Auto-fire on date change so presets feel instantaneous; no manual Load click required.
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleExport = (format: 'csv' | 'pdf') => {
+    if (format === 'pdf') {
+      window.print();
+      return;
+    }
+    if (!data) return;
+    const csv = toCSV(
+      data.accounts.map((r) => ({
+        account: r.account,
+        root_type: r.root_type,
+        account_type: r.account_type,
+        debit: r.total_debit,
+        credit: r.total_credit,
+        balance: r.balance,
+      })),
+      ['account', 'root_type', 'account_type', 'debit', 'credit', 'balance'],
+    );
+    downloadCSV(`trial-balance-${asOfDate || 'latest'}.csv`, csv);
   };
 
   return (
     <ReportPage title="Trial Balance" description="Account totals as of a date.">
-      <ReportFilters className="md:grid-cols-3">
-        <Input
-          type="date"
-          value={asOfDate}
-          onChange={(e) => setAsOfDate(e.target.value)}
-        />
-        <Button onClick={load} disabled={loading}>
-          {loading ? 'Loading...' : 'Load'}
-        </Button>
-      </ReportFilters>
+      <ReportToolbar
+        from={asOfDate}
+        to={asOfDate}
+        singleDate
+        singleDateLabel="As of"
+        onChange={(f) => setAsOfDate(f)}
+        onRefresh={load}
+        loading={loading}
+        onExport={handleExport}
+      />
 
       {error && <ReportAlert>{error}</ReportAlert>}
 

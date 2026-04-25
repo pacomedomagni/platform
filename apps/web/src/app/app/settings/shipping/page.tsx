@@ -1,9 +1,34 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { ConfirmDialog } from '@platform/ui';
+import { Badge, ConfirmDialog, toast, toastUndo } from '@platform/ui';
+import { Info, X as XIcon } from 'lucide-react';
 import Link from 'next/link';
 import { unwrapJson } from '@/lib/admin-fetch';
+
+// Curated short list — covers the high-traffic countries; merchants can free-type for the long tail.
+const COMMON_COUNTRIES: { code: string; name: string }[] = [
+  { code: 'US', name: 'United States' },
+  { code: 'CA', name: 'Canada' },
+  { code: 'GB', name: 'United Kingdom' },
+  { code: 'AU', name: 'Australia' },
+  { code: 'DE', name: 'Germany' },
+  { code: 'FR', name: 'France' },
+  { code: 'ES', name: 'Spain' },
+  { code: 'IT', name: 'Italy' },
+  { code: 'NL', name: 'Netherlands' },
+  { code: 'JP', name: 'Japan' },
+  { code: 'IN', name: 'India' },
+  { code: 'BR', name: 'Brazil' },
+  { code: 'MX', name: 'Mexico' },
+];
+
+// Shipping rate type → human label, used on the small badge inside the per-rate row.
+const RATE_TYPE_LABEL: Record<string, string> = {
+  flat: 'Flat',
+  weight: 'Weight',
+  price: 'Price',
+};
 
 interface ShippingZone {
   id: string;
@@ -50,7 +75,10 @@ export default function ShippingTaxPage() {
   const [zones, setZones] = useState<ShippingZone[]>([]);
   const [showAddZone, setShowAddZone] = useState(false);
   const [newZoneName, setNewZoneName] = useState('');
-  const [newZoneCountries, setNewZoneCountries] = useState('');
+  // Switched from a single comma-separated string to a structured chip set so we
+  // can render removable chips and prevent dupes / malformed input on the way in.
+  const [newZoneCountryCodes, setNewZoneCountryCodes] = useState<string[]>([]);
+  const [countryInput, setCountryInput] = useState('');
   const [savingZone, setSavingZone] = useState(false);
 
   // Add rate modal
@@ -121,6 +149,7 @@ export default function ShippingTaxPage() {
       });
       if (!res.ok) throw new Error('Failed to save settings');
       setSuccessMessage('Settings saved successfully.');
+      toast({ title: 'Defaults saved', variant: 'success' });
       setTimeout(() => setSuccessMessage(null), 4000);
     } catch (err: any) {
       setError(err.message);
@@ -129,25 +158,38 @@ export default function ShippingTaxPage() {
     }
   };
 
+  const addCountryCode = (raw: string) => {
+    const code = raw.trim().toUpperCase();
+    if (!code) return;
+    setNewZoneCountryCodes((prev) => (prev.includes(code) ? prev : [...prev, code]));
+    setCountryInput('');
+  };
+
+  const removeCountryCode = (code: string) => {
+    setNewZoneCountryCodes((prev) => prev.filter((c) => c !== code));
+  };
+
   const handleAddZone = async () => {
     if (!newZoneName.trim()) return;
     setSavingZone(true);
     try {
-      const countries = newZoneCountries
-        .split(',')
-        .map((c) => c.trim().toUpperCase())
-        .filter(Boolean);
-
+      // Country codes are already normalised through addCountryCode so we just send them as-is.
       const res = await fetch('/api/v1/store/admin/shipping/zones', {
         method: 'POST',
         headers: getHeaders(),
-        body: JSON.stringify({ name: newZoneName, countries }),
+        body: JSON.stringify({ name: newZoneName, countries: newZoneCountryCodes }),
       });
       if (!res.ok) throw new Error('Failed to create zone');
       setNewZoneName('');
-      setNewZoneCountries('');
+      setNewZoneCountryCodes([]);
+      setCountryInput('');
       setShowAddZone(false);
       await fetchZones();
+      toast({
+        title: 'Zone created',
+        description: `Saved ${newZoneCountryCodes.length} countr${newZoneCountryCodes.length === 1 ? 'y' : 'ies'}.`,
+        variant: 'success',
+      });
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -164,15 +206,34 @@ export default function ShippingTaxPage() {
     if (!zoneId) return;
     setDeleteZoneConfirm(null);
 
-    try {
-      await fetch(`/api/v1/store/admin/shipping/zones/${zoneId}`, {
-        method: 'DELETE',
-        headers: getHeaders(),
-      });
-      await fetchZones();
-    } catch (err: any) {
-      setError(err.message);
-    }
+    // Optimistic remove with 5s undo. Server DELETE is deferred so undo is a true no-op.
+    const snapshot = zones.find((z) => z.id === zoneId);
+    if (snapshot) setZones((prev) => prev.filter((z) => z.id !== zoneId));
+
+    let cancelled = false;
+    toastUndo({
+      title: 'Zone deleted',
+      description: snapshot ? `${snapshot.name} — undo within 5 seconds.` : 'Undo within 5 seconds.',
+      windowMs: 5000,
+      onUndo: () => {
+        cancelled = true;
+        if (snapshot) setZones((prev) => [snapshot, ...prev]);
+      },
+    });
+
+    setTimeout(async () => {
+      if (cancelled) return;
+      try {
+        await fetch(`/api/v1/store/admin/shipping/zones/${zoneId}`, {
+          method: 'DELETE',
+          headers: getHeaders(),
+        });
+        await fetchZones();
+      } catch (err: any) {
+        toast({ title: 'Delete failed', description: err?.message ?? 'Restoring.', variant: 'destructive' });
+        await fetchZones();
+      }
+    }, 5000);
   };
 
   const handleAddRate = async () => {
@@ -194,6 +255,7 @@ export default function ShippingTaxPage() {
       setNewRatePrice('');
       setNewRateType('flat');
       await fetchZones();
+      toast({ title: 'Rate added', variant: 'success' });
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -377,6 +439,18 @@ export default function ShippingTaxPage() {
             </button>
           </div>
 
+          {/*
+            Inline note (not a tooltip) — merchants reliably misread the zone-vs-default precedence.
+            Calling it out above the form reduces support tickets noticeably.
+          */}
+          <div className="mb-4 flex items-start gap-2 rounded-lg border border-blue-100 bg-blue-50/60 p-3 text-xs text-blue-900">
+            <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
+            <p>
+              Zone rates <strong>replace</strong> your default rates for matching countries. If a country isn&apos;t in
+              any zone, the default rate applies.
+            </p>
+          </div>
+
           {/* Add Zone Form */}
           {showAddZone && (
             <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4">
@@ -392,16 +466,67 @@ export default function ShippingTaxPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-700">
-                    Countries (comma-separated ISO codes)
-                  </label>
-                  <input
-                    type="text"
-                    value={newZoneCountries}
-                    onChange={(e) => setNewZoneCountries(e.target.value)}
-                    className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                    placeholder="e.g. US, CA, MX"
-                  />
+                  <label className="block text-xs font-medium text-slate-700">Countries</label>
+                  {/*
+                    Selected codes render as removable chips. The free-text input accepts any ISO
+                    code (covering the long tail) and the quick-pick row covers the high-traffic
+                    countries. Typing a code and pressing Enter or comma adds it.
+                  */}
+                  <div className="mt-1 flex flex-wrap gap-1.5 rounded-lg border border-slate-300 bg-white px-2 py-2">
+                    {newZoneCountryCodes.map((code) => (
+                      <span
+                        key={code}
+                        className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700"
+                      >
+                        {code}
+                        <button
+                          type="button"
+                          onClick={() => removeCountryCode(code)}
+                          className="rounded-full p-0.5 text-slate-500 hover:bg-slate-200 hover:text-slate-700"
+                          aria-label={`Remove ${code}`}
+                        >
+                          <XIcon className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                    <input
+                      type="text"
+                      value={countryInput}
+                      onChange={(e) => setCountryInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ',') {
+                          e.preventDefault();
+                          addCountryCode(countryInput);
+                        } else if (e.key === 'Backspace' && !countryInput && newZoneCountryCodes.length > 0) {
+                          // Backspace on an empty field deletes the most recently added chip — standard chip-input UX.
+                          removeCountryCode(newZoneCountryCodes[newZoneCountryCodes.length - 1]);
+                        }
+                      }}
+                      onBlur={() => addCountryCode(countryInput)}
+                      placeholder={newZoneCountryCodes.length === 0 ? 'Type ISO code and press Enter' : ''}
+                      className="flex-1 min-w-[10ch] border-none bg-transparent px-1 py-0.5 text-sm focus:outline-none focus:ring-0"
+                    />
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {COMMON_COUNTRIES.map((c) => {
+                      const selected = newZoneCountryCodes.includes(c.code);
+                      return (
+                        <button
+                          key={c.code}
+                          type="button"
+                          onClick={() => (selected ? removeCountryCode(c.code) : addCountryCode(c.code))}
+                          className={`rounded-full border px-2 py-0.5 text-xs font-medium transition ${
+                            selected
+                              ? 'border-blue-300 bg-blue-100 text-blue-800'
+                              : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                          }`}
+                          title={c.name}
+                        >
+                          {c.code}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
                 <div className="flex gap-2">
                   <button
@@ -474,11 +599,14 @@ export default function ShippingTaxPage() {
                           key={rate.id}
                           className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2"
                         >
-                          <div>
+                          <div className="flex items-center gap-2">
                             <span className="text-sm font-medium text-slate-700">
                               {rate.name}
                             </span>
-                            <span className="ml-2 text-xs text-slate-400">({rate.type})</span>
+                            {/* Outline badge keeps the type label visually consistent with other badges across the app. */}
+                            <Badge variant="outline" className="text-xs">
+                              {RATE_TYPE_LABEL[rate.type] ?? rate.type}
+                            </Badge>
                           </div>
                           <div className="flex items-center gap-3">
                             <span className="text-sm font-semibold text-slate-900">

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Card, Button, Input, Label, Textarea, Badge, toast } from '@platform/ui';
+import { Card, Button, Input, Label, Textarea, Badge, ConfirmDialog, toast } from '@platform/ui';
 import {
   ArrowLeft,
   Mail,
@@ -77,6 +77,8 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
     lastName: '',
     phone: '',
   });
+  const [confirmDeactivate, setConfirmDeactivate] = useState(false);
+  const [togglingActive, setTogglingActive] = useState(false);
 
   const loadCustomer = async () => {
     try {
@@ -206,20 +208,28 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
             <Badge variant="destructive" className="ml-3">Inactive</Badge>
           )}
         </div>
-        {/* M13: Toggle active/inactive button */}
+        {/* M13: Toggle active/inactive — confirm only on Deactivate */}
         <Button
           variant={customer.isActive ? 'destructive' : 'default'}
           size="sm"
+          disabled={togglingActive}
           onClick={async () => {
             if (!customer) return;
+            if (customer.isActive) {
+              setConfirmDeactivate(true);
+              return;
+            }
+            // Activate flows directly
+            setTogglingActive(true);
             try {
               await api.put(`/v1/store/admin/customers/${customer.id}`, {
-                isActive: !customer.isActive,
+                isActive: true,
               });
               await loadCustomer();
               toast({
-                title: 'Success',
-                description: customer.isActive ? 'Customer deactivated' : 'Customer activated',
+                title: 'Customer activated',
+                description: 'Login access and marketing emails restored.',
+                variant: 'success',
               });
             } catch (err: any) {
               toast({
@@ -227,6 +237,8 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
                 description: 'Failed to update customer status',
                 variant: 'destructive',
               });
+            } finally {
+              setTogglingActive(false);
             }
           }}
         >
@@ -234,6 +246,40 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
           {customer.isActive ? 'Deactivate' : 'Activate'}
         </Button>
       </div>
+
+      <ConfirmDialog
+        open={confirmDeactivate}
+        onOpenChange={setConfirmDeactivate}
+        title="Deactivate customer"
+        description="The customer will lose login access and won't receive marketing emails. This can be reversed."
+        confirmLabel="Deactivate"
+        variant="destructive"
+        loading={togglingActive}
+        onConfirm={async () => {
+          if (!customer) return;
+          setTogglingActive(true);
+          try {
+            await api.put(`/v1/store/admin/customers/${customer.id}`, {
+              isActive: false,
+            });
+            await loadCustomer();
+            toast({
+              title: 'Customer deactivated',
+              description: 'They have been signed out and removed from marketing.',
+              variant: 'success',
+            });
+            setConfirmDeactivate(false);
+          } catch (err: any) {
+            toast({
+              title: 'Error',
+              description: 'Failed to update customer status',
+              variant: 'destructive',
+            });
+          } finally {
+            setTogglingActive(false);
+          }
+        }}
+      />
 
       <div className="grid lg:grid-cols-3 gap-6">
         {/* Main Content */}

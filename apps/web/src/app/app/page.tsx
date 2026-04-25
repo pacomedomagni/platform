@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Card, Skeleton, toast } from '@platform/ui';
+import { Card, Skeleton, toast, StatusBadge } from '@platform/ui';
 import { DollarSign, ShoppingCart, Package, Activity, CheckCircle, Circle, ArrowRight, ExternalLink, Loader2, Rocket, X, Mail, FileText, Globe, Plus, CreditCard, Sparkles, Banknote, AlertTriangle, TrendingUp } from 'lucide-react';
 import Link from 'next/link';
 import { unwrapJson } from '@/lib/admin-fetch';
@@ -57,23 +57,7 @@ function formatDate(dateStr: string): string {
   });
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    PENDING: 'bg-amber-50 text-amber-700 border-amber-200',
-    CONFIRMED: 'bg-blue-50 text-blue-700 border-blue-200',
-    PROCESSING: 'bg-blue-50 text-blue-700 border-blue-200',
-    SHIPPED: 'bg-purple-50 text-purple-700 border-purple-200',
-    DELIVERED: 'bg-green-50 text-green-700 border-green-200',
-    CANCELLED: 'bg-red-50 text-red-700 border-red-200',
-    REFUNDED: 'bg-slate-50 text-slate-700 border-slate-200',
-  };
-
-  return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${styles[status] || 'bg-slate-50 text-slate-600 border-slate-200'}`}>
-      {status.charAt(0) + status.slice(1).toLowerCase()}
-    </span>
-  );
-}
+// StatusBadge is imported from @platform/ui — kind="order" gives consistent semantics across screens.
 
 export default function Dashboard() {
   const router = useRouter();
@@ -81,13 +65,14 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [setupBannerDismissed, setSetupBannerDismissed] = useState(true);
+  const [publishing, setPublishing] = useState(false);
 
   useEffect(() => {
-    const done = localStorage.getItem('merchant_setup_done');
+    // Banner visibility is server-derived from the checklist below; this effect just respects
+    // a one-time per-tenant dismissal so the merchant can collapse it without it reappearing on reload.
     const dismissed = localStorage.getItem('merchant_setup_dismissed');
-    if (!done && !dismissed) {
-      setSetupBannerDismissed(false);
-    }
+    if (dismissed) setSetupBannerDismissed(true);
+    else setSetupBannerDismissed(false);
   }, []);
 
   useEffect(() => {
@@ -193,8 +178,6 @@ export default function Dashboard() {
       </div>
     );
   }
-
-  const [publishing, setPublishing] = useState(false);
 
   const showChecklist =
     !data.checklist.emailVerified ||
@@ -321,7 +304,7 @@ export default function Dashboard() {
 
       {/* Email Verification Banner - Always show until verified */}
       {!data.checklist.emailVerified && (
-        <div className="flex items-center gap-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+        <div role="status" className="flex items-center gap-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100">
             <AlertTriangle className="h-5 w-5 text-amber-600" />
           </div>
@@ -351,8 +334,50 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Getting Started Banner */}
-      {!setupBannerDismissed && (
+      {/* Payments not connected — persistent until resolved. Cannot accept orders without this. */}
+      {!data.checklist.paymentsConnected && (
+        <div role="status" className="flex items-center gap-4 rounded-xl border border-rose-200 bg-rose-50 p-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-rose-100">
+            <CreditCard className="h-5 w-5 text-rose-600" />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-semibold text-rose-800">Connect a payment provider</h3>
+            <p className="text-sm text-rose-700">
+              Your store cannot accept payments until Stripe or Square is connected.
+            </p>
+          </div>
+          <Link
+            href="/app/settings/payments"
+            className="shrink-0 rounded-lg border border-rose-300 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
+          >
+            Connect Now
+          </Link>
+        </div>
+      )}
+
+      {/* Payouts disabled — payments connected but Stripe/Square has flagged the account. */}
+      {data.checklist.paymentsConnected && data.paymentStatus !== 'active' && (
+        <div role="status" className="flex items-center gap-4 rounded-xl border border-rose-200 bg-rose-50 p-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-rose-100">
+            <AlertTriangle className="h-5 w-5 text-rose-600" />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-semibold text-rose-800">Payouts are paused</h3>
+            <p className="text-sm text-rose-700">
+              {data.paymentProvider ? data.paymentProvider.charAt(0).toUpperCase() + data.paymentProvider.slice(1) : 'Your provider'} needs additional information before payouts can resume.
+            </p>
+          </div>
+          <Link
+            href="/app/settings/payments"
+            className="shrink-0 rounded-lg border border-rose-300 bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
+          >
+            Resolve
+          </Link>
+        </div>
+      )}
+
+      {/* Getting Started Banner — only visible while server-side checklist still has incomplete items */}
+      {!setupBannerDismissed && showChecklist && (
         <div className="relative overflow-hidden rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-white">
           <button
             onClick={() => {
@@ -632,7 +657,7 @@ export default function Dashboard() {
                       {formatCurrency(order.amount)}
                     </td>
                     <td className="py-3.5 pr-4">
-                      <StatusBadge status={order.status} />
+                      <StatusBadge kind="order" status={order.status} />
                     </td>
                     <td className="py-3.5 text-slate-500">{formatDate(order.createdAt)}</td>
                   </tr>

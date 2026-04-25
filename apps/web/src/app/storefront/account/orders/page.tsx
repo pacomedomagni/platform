@@ -6,17 +6,39 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Card, Badge } from '@platform/ui';
-import { Package, ChevronRight } from 'lucide-react';
+import { Button, Card, Spinner, StatusBadge, ToastAction, toast } from '@platform/ui';
+import { ChevronRight, ExternalLink, Package, Repeat } from 'lucide-react';
 import { useAuthStore } from '../../../../lib/auth-store';
+import { useCartStore } from '../../../../lib/cart-store';
 import { ordersApi, OrderSummary } from '../../../../lib/store-api';
 import { formatCurrency } from '../../_lib/format';
+
+// Carrier -> tracking URL builder. Returns null when carrier is unknown
+// so we render plain text instead of a broken link.
+function trackingUrl(carrier: string | null | undefined, n: string): string | null {
+  if (!carrier) return null;
+  const c = carrier.toLowerCase();
+  const enc = encodeURIComponent(n);
+  if (c.includes('usps')) return `https://tools.usps.com/go/TrackConfirmAction?qtc_tLabels1=${enc}`;
+  if (c === 'ups' || c.includes('united parcel')) return `https://www.ups.com/track?tracknum=${enc}`;
+  if (c.includes('fedex')) return `https://www.fedex.com/fedextrack/?trknbr=${enc}`;
+  if (c.includes('dhl')) return `https://www.dhl.com/en/express/tracking.html?AWB=${enc}`;
+  return null;
+}
+
+// OrderSummary doesn't carry tracking metadata, so widen locally.
+type OrderRow = OrderSummary & {
+  trackingNumber?: string | null;
+  shippingCarrier?: string | null;
+};
 
 export default function OrdersPage() {
   const router = useRouter();
   const { isAuthenticated, isLoading: authLoading } = useAuthStore();
-  const [orders, setOrders] = useState<OrderSummary[]>([]);
+  const { addItem } = useCartStore();
+  const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [reorderingId, setReorderingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -26,7 +48,7 @@ export default function OrdersPage() {
 
     if (isAuthenticated) {
       ordersApi.list({ limit: 50 })
-        .then((res) => setOrders(res.data))
+        .then((res) => setOrders(res.data as OrderRow[]))
         .catch(console.error)
         .finally(() => setLoading(false));
     }
@@ -36,25 +58,46 @@ export default function OrdersPage() {
     return (
       <div className="mx-auto w-full max-w-3xl px-6 py-20">
         <div className="flex items-center justify-center">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
+          <Spinner className="h-8 w-8" aria-hidden="true" />
         </div>
       </div>
     );
   }
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'completed':
-      case 'delivered':
-        return 'bg-green-50 text-green-700 border-green-200';
-      case 'shipped':
-        return 'bg-blue-50 text-blue-700 border-blue-200';
-      case 'processing':
-        return 'bg-yellow-50 text-yellow-700 border-yellow-200';
-      case 'cancelled':
-        return 'bg-red-50 text-red-700 border-red-200';
-      default:
-        return 'bg-slate-50 text-slate-700 border-slate-200';
+  const handleReorder = async (orderId: string) => {
+    setReorderingId(orderId);
+    try {
+      // Fetch full detail so we have the line items.
+      const detail = await ordersApi.get(orderId);
+      let added = 0;
+      for (const item of detail.items) {
+        // eslint-disable-next-line no-await-in-loop
+        await addItem(item.id, item.quantity)
+          .then(() => {
+            added += 1;
+          })
+          .catch(() => {
+            // skip individual failures
+          });
+      }
+      toast({
+        title: `${added} item${added === 1 ? '' : 's'} added to cart`,
+        description: `From order #${detail.orderNumber}`,
+        action: (
+          <ToastAction altText="View cart" onClick={() => router.push('/storefront/cart')}>
+            View cart
+          </ToastAction>
+        ),
+      });
+      router.push('/storefront/cart');
+    } catch {
+      toast({
+        title: 'Could not reorder',
+        description: 'Please try again or contact support.',
+        variant: 'destructive',
+      });
+    } finally {
+      setReorderingId(null);
     }
   };
 
@@ -89,32 +132,83 @@ export default function OrdersPage() {
         </Card>
       ) : (
         <div className="space-y-4">
-          {orders.map((order) => (
-            <Link key={order.id} href={`/storefront/account/orders/${order.id}`}>
-              <Card className="flex items-center justify-between border-slate-200/70 bg-white p-5 shadow-sm transition-all hover:shadow-md">
-                <div className="flex items-center gap-4">
-                  <div className="rounded-full bg-slate-100 p-3">
-                    <Package className="h-5 w-5 text-slate-600" />
-                  </div>
-                  <div>
-                    <p className="font-semibold text-slate-900">#{order.orderNumber}</p>
-                    <p className="text-sm text-slate-500">
-                      {new Date(order.createdAt).toLocaleDateString()} · {order.itemCount} item{order.itemCount !== 1 ? 's' : ''}
-                    </p>
+          {orders.map((order) => {
+            const trackingHref = order.trackingNumber
+              ? trackingUrl(order.shippingCarrier, order.trackingNumber)
+              : null;
+            return (
+              <Card
+                key={order.id}
+                className="border-slate-200/70 bg-white p-5 shadow-sm transition-all hover:shadow-md"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <Link
+                    href={`/storefront/account/orders/${order.id}`}
+                    className="flex items-center gap-4 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded"
+                  >
+                    <div className="rounded-full bg-slate-100 p-3">
+                      <Package className="h-5 w-5 text-slate-600" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-slate-900">#{order.orderNumber}</p>
+                      <p className="text-sm text-slate-500">
+                        {new Date(order.createdAt).toLocaleDateString()} · {order.itemCount} item{order.itemCount !== 1 ? 's' : ''}
+                      </p>
+                    </div>
+                  </Link>
+                  <div className="flex items-center gap-4">
+                    <div className="text-right">
+                      <p className="font-semibold text-slate-900">{formatCurrency(order.grandTotal)}</p>
+                      <StatusBadge kind="order" status={order.status} />
+                    </div>
+                    <ChevronRight className="h-5 w-5 text-slate-400" />
                   </div>
                 </div>
-                <div className="flex items-center gap-4">
-                  <div className="text-right">
-                    <p className="font-semibold text-slate-900">{formatCurrency(order.grandTotal)}</p>
-                    <Badge variant="outline" className={getStatusColor(order.status)}>
-                      {order.status.replace('_', ' ')}
-                    </Badge>
+
+                {/* Tracking row — only when shipped & has a tracking number */}
+                {order.status?.toLowerCase() === 'shipped' && order.trackingNumber && (
+                  <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3 text-sm">
+                    <span className="text-slate-500">Tracking:</span>
+                    {trackingHref ? (
+                      <a
+                        href={trackingHref}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                      >
+                        {order.trackingNumber}
+                        <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                      </a>
+                    ) : (
+                      <span className="font-medium text-slate-700">{order.trackingNumber}</span>
+                    )}
+                    {order.shippingCarrier && (
+                      <span className="text-xs text-slate-400">via {order.shippingCarrier}</span>
+                    )}
                   </div>
-                  <ChevronRight className="h-5 w-5 text-slate-400" />
+                )}
+
+                <div className="mt-3 flex justify-end border-t border-slate-100 pt-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleReorder(order.id)}
+                    disabled={reorderingId === order.id}
+                    aria-busy={reorderingId === order.id}
+                    className="gap-2"
+                  >
+                    {reorderingId === order.id ? (
+                      <Spinner className="h-4 w-4" aria-hidden="true" />
+                    ) : (
+                      <Repeat className="h-4 w-4" aria-hidden="true" />
+                    )}
+                    Reorder
+                  </Button>
                 </div>
               </Card>
-            </Link>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

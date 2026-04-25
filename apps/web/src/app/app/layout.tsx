@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { AppShell } from '@platform/ui';
+import { AppShell, GlobalCommandBar, type CommandRoute } from '@platform/ui';
+import { unwrapJson } from '@/lib/admin-fetch';
 import {
   LayoutDashboard,
   Package,
@@ -33,7 +34,7 @@ const PRIMARY_NAV = [
   { label: 'Orders', icon: ShoppingCart, href: '/app/orders', section: 'Store' },
   { label: 'Customers', icon: Users, href: '/app/customers', section: 'Store' },
   { label: 'Inventory', icon: Warehouse, href: '/app/inventory', section: 'Store' },
-  { label: 'Marketplace', icon: Globe, href: '/app/marketplace/connections', section: 'Marketing' },
+  { label: 'Marketplace', icon: Globe, href: '/app/marketplace', section: 'Marketing' },
   { label: 'Reviews', icon: Star, href: '/app/reviews', section: 'Marketing' },
   { label: 'Operations', icon: Wrench, href: '/app/operations', section: 'Management' },
   { label: 'Reports', icon: BarChart3, href: '/app/reports/analytics', section: 'Management' },
@@ -42,26 +43,30 @@ const PRIMARY_NAV = [
 ];
 
 const ADVANCED_NAV = [
-  { label: 'Items', icon: Package, href: '/app/Item' },
-  { label: 'Warehouses', icon: Warehouse, href: '/app/Warehouse' },
-  { label: 'UOM', icon: Package, href: '/app/UOM' },
-  { label: 'Locations', icon: Warehouse, href: '/app/Location' },
-  { label: 'Purchase Orders', icon: ClipboardList, href: '/app/Purchase%20Order' },
-  { label: 'Purchase Receipts', icon: ClipboardList, href: '/app/Purchase%20Receipt' },
-  { label: 'Sales Orders', icon: ClipboardList, href: '/app/Sales%20Order' },
-  { label: 'Invoices', icon: FileText, href: '/app/Invoice' },
-  { label: 'Delivery Notes', icon: ClipboardList, href: '/app/Delivery%20Note' },
-  { label: 'Stock Transfer', icon: ClipboardList, href: '/app/Stock%20Transfer' },
-  { label: 'Stock Balance', icon: BarChart3, href: '/app/reports/stock-balance' },
-  { label: 'Stock Ledger', icon: BarChart3, href: '/app/reports/stock-ledger' },
-  { label: 'Trial Balance', icon: BarChart3, href: '/app/reports/trial-balance' },
-  { label: 'Profit & Loss', icon: BarChart3, href: '/app/reports/profit-loss' },
-  { label: 'Balance Sheet', icon: BarChart3, href: '/app/reports/balance-sheet' },
-  { label: 'General Ledger', icon: BarChart3, href: '/app/reports/general-ledger' },
-  { label: 'Cash Flow', icon: BarChart3, href: '/app/reports/cash-flow' },
-  { label: 'Studio Builder', icon: Hammer, href: '/app/studio' },
-  { label: 'Users', icon: Users, href: '/app/User' },
-  { label: 'Setup', icon: Settings, href: '/app/setup' },
+  // Masters
+  { label: 'Items', icon: Package, href: '/app/Item', section: 'Masters' },
+  { label: 'Warehouses', icon: Warehouse, href: '/app/Warehouse', section: 'Masters' },
+  { label: 'Locations', icon: Globe, href: '/app/Location', section: 'Masters' },
+  { label: 'UOM', icon: Wrench, href: '/app/UOM', section: 'Masters' },
+  // Transactions
+  { label: 'Purchase Orders', icon: ClipboardList, href: '/app/Purchase%20Order', section: 'Transactions' },
+  { label: 'Purchase Receipts', icon: ClipboardList, href: '/app/Purchase%20Receipt', section: 'Transactions' },
+  { label: 'Sales Orders', icon: ClipboardList, href: '/app/Sales%20Order', section: 'Transactions' },
+  { label: 'Invoices', icon: FileText, href: '/app/Invoice', section: 'Transactions' },
+  { label: 'Delivery Notes', icon: ClipboardList, href: '/app/Delivery%20Note', section: 'Transactions' },
+  { label: 'Stock Transfer', icon: ClipboardList, href: '/app/Stock%20Transfer', section: 'Transactions' },
+  // Reporting
+  { label: 'Stock Balance', icon: BarChart3, href: '/app/reports/stock-balance', section: 'Reporting' },
+  { label: 'Stock Ledger', icon: BarChart3, href: '/app/reports/stock-ledger', section: 'Reporting' },
+  { label: 'Trial Balance', icon: BarChart3, href: '/app/reports/trial-balance', section: 'Reporting' },
+  { label: 'Profit & Loss', icon: BarChart3, href: '/app/reports/profit-loss', section: 'Reporting' },
+  { label: 'Balance Sheet', icon: BarChart3, href: '/app/reports/balance-sheet', section: 'Reporting' },
+  { label: 'General Ledger', icon: BarChart3, href: '/app/reports/general-ledger', section: 'Reporting' },
+  { label: 'Cash Flow', icon: BarChart3, href: '/app/reports/cash-flow', section: 'Reporting' },
+  // Admin
+  { label: 'Studio Builder', icon: Hammer, href: '/app/studio', section: 'Admin' },
+  { label: 'Users', icon: Users, href: '/app/users', section: 'Admin' },
+  { label: 'Setup', icon: Settings, href: '/app/setup', section: 'Admin' },
 ];
 
 export default function AppLayout({
@@ -78,12 +83,60 @@ export default function AppLayout({
     return false;
   });
 
-  const [gettingStartedComplete, setGettingStartedComplete] = useState(false);
+  // Server-derived setup state. We default to "show Getting Started" while loading
+  // (better to over-show during the ~200ms fetch than hide-then-pop-in).
+  const [setupSummary, setSetupSummary] = useState<{
+    hideGettingStarted: boolean;
+    needsAttention: boolean;
+  }>({ hideGettingStarted: false, needsAttention: false });
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      setGettingStartedComplete(localStorage.getItem('getting_started_step') === '6');
-    }
+    if (typeof window === 'undefined') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = localStorage.getItem('access_token');
+        const tenantId = localStorage.getItem('tenantId');
+        if (!token) return;
+        const res = await fetch('/api/v1/store/admin/dashboard', {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'x-tenant-id': tenantId || '',
+          },
+        });
+        if (!res.ok) return;
+        const data = unwrapJson<{
+          totalRevenue?: number;
+          totalOrders?: number;
+          checklist?: {
+            emailVerified?: boolean;
+            paymentsConnected?: boolean;
+            hasProducts?: boolean;
+            hasCustomizedSettings?: boolean;
+            hasLegalPages?: boolean;
+            storePublished?: boolean;
+          };
+        }>(await res.json());
+        if (cancelled) return;
+        const checklist = data.checklist ?? {};
+        const allDone =
+          !!checklist.emailVerified &&
+          !!checklist.paymentsConnected &&
+          !!checklist.hasProducts &&
+          !!checklist.hasCustomizedSettings &&
+          !!checklist.hasLegalPages &&
+          !!checklist.storePublished;
+        const hasActivity = (data.totalRevenue ?? 0) > 0 || (data.totalOrders ?? 0) > 0;
+        const hideGettingStarted = allDone || hasActivity || !!checklist.storePublished;
+        const needsAttention = !checklist.emailVerified || !checklist.paymentsConnected;
+        setSetupSummary({ hideGettingStarted, needsAttention });
+      } catch {
+        // Network/parse error — leave defaults (Getting Started visible, no badge).
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const user = useMemo(() => {
@@ -111,30 +164,61 @@ export default function AppLayout({
   }, [router]);
 
   const navItems = [
-    ...PRIMARY_NAV.filter(
-      (item) => !(item.label === 'Getting Started' && gettingStartedComplete)
-    ),
+    ...PRIMARY_NAV
+      .filter((item) => !(item.label === 'Getting Started' && setupSummary.hideGettingStarted))
+      .map((item) =>
+        item.label === 'Settings' && setupSummary.needsAttention
+          ? { ...item, badge: true }
+          : item
+      ),
     ...(showAdvanced ? ADVANCED_NAV : []),
   ];
 
+  // Build a unified search index for the command palette (Cmd/Ctrl+K).
+  const commandRoutes: CommandRoute[] = useMemo(
+    () => [
+      ...PRIMARY_NAV.map((item) => ({
+        label: item.label,
+        href: item.href,
+        group: item.section || 'Navigate',
+        keywords: [item.label.toLowerCase(), 'go to', 'navigate'],
+      })),
+      ...ADVANCED_NAV.map((item) => ({
+        label: item.label,
+        href: item.href,
+        group: `ERP · ${item.section || 'Other'}`,
+        keywords: [item.label.toLowerCase(), 'erp', 'advanced'],
+      })),
+      // Common settings deeplinks
+      { label: 'Settings · Payments', href: '/app/settings/payments', group: 'Settings', keywords: ['stripe', 'square', 'payouts'] },
+      { label: 'Settings · Shipping & Tax', href: '/app/settings/shipping', group: 'Settings', keywords: ['shipping', 'tax', 'zones'] },
+      { label: 'Settings · Legal Pages', href: '/app/settings/legal', group: 'Settings', keywords: ['terms', 'privacy', 'refund'] },
+      { label: 'New Product', href: '/app/products/new', group: 'Quick Actions', keywords: ['create', 'add'] },
+    ],
+    []
+  );
+
   return (
-    <AppShell
-      navItems={navItems}
-      title="NoSlag"
-      description="Store Admin"
-      user={user}
-      onLogout={handleLogout}
-      navFooter={
-        <button
-          onClick={() => setShowAdvanced(!showAdvanced)}
-          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
-        >
-          {showAdvanced ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-          {showAdvanced ? 'Hide Advanced' : 'Advanced (ERP)'}
-        </button>
-      }
-    >
-      {children}
-    </AppShell>
+    <>
+      <GlobalCommandBar routes={commandRoutes} onSelectRoute={(href) => router.push(href)} />
+      <AppShell
+        navItems={navItems}
+        title="NoSlag"
+        description="Store Admin"
+        user={user}
+        onLogout={handleLogout}
+        navFooter={
+          <button
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-700"
+          >
+            {showAdvanced ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+            {showAdvanced ? 'Hide Advanced' : 'Advanced (ERP)'}
+          </button>
+        }
+      >
+        {children}
+      </AppShell>
+    </>
   );
 }

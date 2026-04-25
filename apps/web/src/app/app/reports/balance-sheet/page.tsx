@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
-import { Button, Input, Badge } from '@platform/ui';
+import { useCallback, useEffect, useState } from 'react';
+import { Badge } from '@platform/ui';
 import api from '../../../../lib/api';
-import { ReportAlert, ReportCard, ReportEmpty, ReportFilters, ReportPage, ReportTable } from '../_components/report-shell';
+import { ReportAlert, ReportCard, ReportEmpty, ReportPage, ReportTable } from '../_components/report-shell';
+import { ReportToolbar, downloadCSV, toCSV } from '../_components/report-toolbar';
 
 type BalanceAccount = {
   account: string;
@@ -49,7 +50,7 @@ export default function BalanceSheetPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -62,6 +63,28 @@ export default function BalanceSheetPage() {
     } finally {
       setLoading(false);
     }
+  }, [asOfDate]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleExport = (format: 'csv' | 'pdf') => {
+    if (format === 'pdf') {
+      window.print();
+      return;
+    }
+    if (!data) return;
+    const rows: Array<Record<string, unknown>> = [];
+    const push = (section: string, src: BalanceSection) => {
+      for (const r of src.accounts) rows.push({ section, account: r.account, balance: r.balance });
+      rows.push({ section, account: 'TOTAL', balance: src.total });
+    };
+    push('Assets', data.assets);
+    push('Liabilities', data.liabilities);
+    push('Equity', data.equity);
+    rows.push({ section: 'Summary', account: 'Liabilities + Equity', balance: data.total_liabilities_and_equity });
+    downloadCSV(`balance-sheet-${asOfDate || 'latest'}.csv`, toCSV(rows, ['section', 'account', 'balance']));
   };
 
   const renderSection = (label: string, section: BalanceSection) => (
@@ -94,16 +117,16 @@ export default function BalanceSheetPage() {
 
   return (
     <ReportPage title="Balance Sheet" description="Assets, liabilities, and equity.">
-      <ReportFilters className="md:grid-cols-3">
-        <Input
-          type="date"
-          value={asOfDate}
-          onChange={(e) => setAsOfDate(e.target.value)}
-        />
-        <Button onClick={load} disabled={loading}>
-          {loading ? 'Loading...' : 'Load'}
-        </Button>
-      </ReportFilters>
+      <ReportToolbar
+        from={asOfDate}
+        to={asOfDate}
+        singleDate
+        singleDateLabel="As of"
+        onChange={(f) => setAsOfDate(f)}
+        onRefresh={load}
+        loading={loading}
+        onExport={handleExport}
+      />
 
       {error && <ReportAlert>{error}</ReportAlert>}
 

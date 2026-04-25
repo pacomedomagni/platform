@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
-import { Button, Input, Badge } from '@platform/ui';
+import { useCallback, useEffect, useState } from 'react';
+import { Badge } from '@platform/ui';
 import api from '../../../../lib/api';
-import { ReportAlert, ReportCard, ReportEmpty, ReportFilters, ReportPage, ReportTable } from '../_components/report-shell';
+import { ReportAlert, ReportCard, ReportEmpty, ReportPage, ReportTable } from '../_components/report-shell';
+import { ReportToolbar, downloadCSV, toCSV } from '../_components/report-toolbar';
 
 type ProfitLoss = {
   from_date: string;
@@ -36,7 +37,7 @@ export default function ProfitLossPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -49,6 +50,26 @@ export default function ProfitLossPage() {
     } finally {
       setLoading(false);
     }
+  }, [fromDate, toDate]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleExport = (format: 'csv' | 'pdf') => {
+    if (format === 'pdf') {
+      window.print();
+      return;
+    }
+    if (!data) return;
+    const rows: Array<Record<string, unknown>> = [];
+    for (const r of data.income.accounts) rows.push({ section: 'Income', account: r.account, balance: r.balance });
+    rows.push({ section: 'Income', account: 'TOTAL', balance: data.income.total });
+    for (const r of data.expenses.accounts) rows.push({ section: 'Expenses', account: r.account, balance: r.balance });
+    rows.push({ section: 'Expenses', account: 'TOTAL', balance: data.expenses.total });
+    rows.push({ section: 'Summary', account: 'Net Profit', balance: data.net_profit });
+    rows.push({ section: 'Summary', account: 'Net Profit Margin %', balance: data.net_profit_margin });
+    downloadCSV(`profit-loss-${fromDate || 'all'}-${toDate || 'today'}.csv`, toCSV(rows, ['section', 'account', 'balance']));
   };
 
   const renderRows = (rows: any[]) => (
@@ -73,21 +94,14 @@ export default function ProfitLossPage() {
 
   return (
     <ReportPage title="Profit & Loss" description="Income and expenses.">
-      <ReportFilters className="md:grid-cols-3">
-        <Input
-          type="date"
-          value={fromDate}
-          onChange={(e) => setFromDate(e.target.value)}
-        />
-        <Input
-          type="date"
-          value={toDate}
-          onChange={(e) => setToDate(e.target.value)}
-        />
-        <Button onClick={load} disabled={loading}>
-          {loading ? 'Loading...' : 'Load'}
-        </Button>
-      </ReportFilters>
+      <ReportToolbar
+        from={fromDate}
+        to={toDate}
+        onChange={(f, t) => { setFromDate(f); setToDate(t); }}
+        onRefresh={load}
+        loading={loading}
+        onExport={handleExport}
+      />
 
       {error && <ReportAlert>{error}</ReportAlert>}
 

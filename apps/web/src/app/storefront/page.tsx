@@ -1,11 +1,11 @@
 import Link from 'next/link';
 import { Metadata } from 'next';
-import { Badge, Button, Card } from '@platform/ui';
-import { ArrowRight, Check, Sparkles } from 'lucide-react';
+import { Button, Card } from '@platform/ui';
+import { ArrowRight, Sparkles } from 'lucide-react';
 import { productsApi } from '@/lib/store-api';
 import { SectionHeader } from './_components/section-header';
 import { ProductCard } from './_components/product-card';
-import { ButtonLink } from './_components/button-link';
+import { LandingHero } from './_components/landing-hero';
 
 export const metadata: Metadata = {
   title: 'Premium Storefront | NoSlag - Inventory-First Shopping',
@@ -27,52 +27,7 @@ export default async function StorefrontLanding() {
 
   return (
     <div className="space-y-20 pb-20">
-      <section className="relative overflow-hidden border-b border-border bg-card">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.12),_transparent_55%)]" />
-        <div className="relative mx-auto grid w-full max-w-7xl gap-12 px-6 py-16 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="space-y-6">
-            <Badge variant="outline" className="bg-card/80 text-muted-foreground">
-              Premium storefront UI · Inventory-first
-            </Badge>
-            <h1 className="text-4xl font-semibold tracking-tight text-foreground md:text-5xl">
-              A storefront that feels premium, yet runs on ERP-grade control.
-            </h1>
-            <p className="text-lg text-muted-foreground">
-              Built for operators who need accuracy, transparency, and a refined shopping experience. Every product here
-              is synced to the NoSlag inventory engine.
-            </p>
-            <div className="flex flex-wrap items-center gap-3">
-              <ButtonLink
-                href="/storefront/products"
-                className="bg-gradient-to-r from-primary via-secondary to-accent text-primary-foreground shadow-md hover:shadow-lg"
-              >
-                Explore the collection
-              </ButtonLink>
-              <Link
-                href="/app"
-                className="inline-flex items-center gap-2 text-sm font-semibold text-muted-foreground hover:text-foreground"
-              >
-                Enter ERP Suite <ArrowRight className="h-4 w-4" />
-              </Link>
-            </div>
-            <div className="flex flex-wrap gap-6 text-sm text-muted-foreground">
-              {['Live stock visibility', 'Multi-location ready', 'Batch + FIFO tracking'].map((item) => (
-                <div key={item} className="flex items-center gap-2">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">
-                    <Check className="h-3.5 w-3.5" />
-                  </span>
-                  {item}
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            {featuredProducts.map((product) => (
-              <ProductCard key={product.id} product={product} compact />
-            ))}
-          </div>
-        </div>
-      </section>
+      <LandingHero featuredProducts={featuredProducts} />
 
       <section id="collections" className="mx-auto w-full max-w-7xl space-y-8 px-6">
         <SectionHeader

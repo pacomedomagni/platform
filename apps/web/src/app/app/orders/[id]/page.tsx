@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Card, Button, Badge, Textarea, ConfirmDialog, toast } from '@platform/ui';
+import { Card, Button, Badge, Textarea, ConfirmDialog, PromptDialog, toast } from '@platform/ui';
 import {
   ArrowLeft,
   Printer,
@@ -78,21 +78,41 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
     }
   };
 
-  const executeStatusUpdate = async (newStatus: string) => {
+  const executeStatusUpdate = async (newStatus: string, opts?: { carrier?: string; trackingNumber?: string }) => {
     if (!order) return;
+
+    const previous = order;
+    // Optimistic UI: flip status + tracking immediately so the merchant sees the action land.
+    setOrder({
+      ...order,
+      status: newStatus,
+      shippingCarrier: newStatus === 'SHIPPED' ? (opts?.carrier ?? order.shippingCarrier) : order.shippingCarrier,
+      trackingNumber: newStatus === 'SHIPPED' ? (opts?.trackingNumber ?? order.trackingNumber) : order.trackingNumber,
+      shippedAt: newStatus === 'SHIPPED' ? new Date().toISOString() : order.shippedAt,
+      deliveredAt: newStatus === 'DELIVERED' ? new Date().toISOString() : order.deliveredAt,
+      cancelledAt: newStatus === 'CANCELLED' ? new Date().toISOString() : order.cancelledAt,
+    });
 
     try {
       const body: any = { status: newStatus };
 
-      if (newStatus === 'SHIPPED' && trackingInfo.carrier && trackingInfo.number) {
-        body.carrier = trackingInfo.carrier;
-        body.trackingNumber = trackingInfo.number;
+      if (newStatus === 'SHIPPED') {
+        const carrier = opts?.carrier ?? trackingInfo.carrier;
+        const trackingNumber = opts?.trackingNumber ?? trackingInfo.number;
+        if (carrier && trackingNumber) {
+          body.carrier = carrier;
+          body.trackingNumber = trackingNumber;
+        }
       }
 
       await api.put(`/v1/store/orders/admin/${order.id}/status`, body);
+      // Re-fetch authoritative state (timestamps, audit trail).
       await loadOrder();
+      toast({ title: 'Status updated', description: `Order marked ${newStatus.toLowerCase()}.`, variant: 'success' });
     } catch (error: any) {
       console.error('Failed to update status:', error);
+      // Roll back optimistic update.
+      setOrder(previous);
       toast({ title: 'Error', description: 'Failed to update order status', variant: 'destructive' });
     }
   };
@@ -117,9 +137,10 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
     executeStatusUpdate(newStatus);
   };
 
-  const confirmShip = async () => {
+  const confirmShip = async (values: Record<string, string>) => {
     setShipConfirm(false);
-    await executeStatusUpdate('SHIPPED');
+    setTrackingInfo({ carrier: values.carrier, number: values.trackingNumber });
+    await executeStatusUpdate('SHIPPED', { carrier: values.carrier, trackingNumber: values.trackingNumber });
   };
 
   const confirmDeliver = async () => {
@@ -465,13 +486,40 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
       />
 
       {/* Status Confirm Dialogs */}
-      <ConfirmDialog
+      <PromptDialog
         open={shipConfirm}
         onOpenChange={setShipConfirm}
         title="Mark as Shipped"
-        description="Mark this order as shipped? The customer will be notified."
+        description="Enter the carrier and tracking number. The customer will be notified with this info."
         confirmLabel="Mark as Shipped"
-        onConfirm={confirmShip}
+        fields={[
+          {
+            name: 'carrier',
+            label: 'Carrier',
+            type: 'select',
+            required: true,
+            defaultValue: trackingInfo.carrier,
+            options: [
+              { value: 'USPS', label: 'USPS' },
+              { value: 'UPS', label: 'UPS' },
+              { value: 'FedEx', label: 'FedEx' },
+              { value: 'DHL', label: 'DHL' },
+              { value: 'Royal Mail', label: 'Royal Mail' },
+              { value: 'Canada Post', label: 'Canada Post' },
+              { value: 'Australia Post', label: 'Australia Post' },
+              { value: 'Other', label: 'Other' },
+            ],
+          },
+          {
+            name: 'trackingNumber',
+            label: 'Tracking Number',
+            required: true,
+            defaultValue: trackingInfo.number,
+            placeholder: 'e.g. 1Z999AA10123456784',
+            helperText: 'The customer can use this to track their shipment.',
+          },
+        ]}
+        onSubmit={confirmShip}
       />
       <ConfirmDialog
         open={deliverConfirm}
