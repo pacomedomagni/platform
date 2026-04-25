@@ -1,7 +1,7 @@
 import { Injectable, Inject, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import { Queue, Worker, Job, JobsOptions, QueueEvents } from 'bullmq';
-import { 
-  QueueModuleOptions, 
+import {
+  QueueModuleOptions,
   QUEUE_MODULE_OPTIONS,
   QueueName,
   EmailJobData,
@@ -13,12 +13,29 @@ import {
   ScheduledJobData,
 } from './queue.types';
 
+/**
+ * Phase 3 W3.1: queue hygiene defaults applied to every queue we create.
+ *
+ * Without `removeOnComplete` / `removeOnFail` BullMQ keeps every job in
+ * Redis forever — Redis OOM is a matter of weeks under any production
+ * load. We retain the last 1 day / 1k completed and 7 days / 10k failed
+ * so debugging is still possible.
+ */
+const DEFAULT_QUEUE_JOB_OPTIONS: JobsOptions = {
+  removeOnComplete: { age: 24 * 60 * 60, count: 1000 },
+  removeOnFail: { age: 7 * 24 * 60 * 60, count: 10_000 },
+};
+
+const DLQ_SUFFIX = '-dlq';
+
 @Injectable()
 export class QueueService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(QueueService.name);
   private queues: Map<string, Queue> = new Map();
   private workers: Map<string, Worker> = new Map();
   private queueEvents: Map<string, QueueEvents> = new Map();
+  /** Phase 3 W3.1: dead-letter queue per primary queue. */
+  private dlqs: Map<string, Queue> = new Map();
 
   constructor(
     @Inject(QUEUE_MODULE_OPTIONS) private readonly options: QueueModuleOptions,
@@ -33,36 +50,49 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy() {
-    // Close all workers first
+    // Phase 3 W3.1: drain workers before closing. close() with the default
+    // wait=true returns once active jobs finish or hit their lock timeout,
+    // which is the safest behaviour during a deploy/rolling restart.
     for (const [name, worker] of this.workers) {
-      this.logger.log(`Closing worker for queue: ${name}`);
-      await worker.close();
+      this.logger.log(`Draining worker for queue: ${name}`);
+      try {
+        await worker.close();
+      } catch (err) {
+        this.logger.error(`Worker ${name} failed to drain: ${(err as Error).message}`);
+      }
     }
 
-    // Close all queue events
     for (const [name, events] of this.queueEvents) {
       this.logger.log(`Closing queue events for: ${name}`);
       await events.close();
     }
 
-    // Close all queues
     for (const [name, queue] of this.queues) {
       this.logger.log(`Closing queue: ${name}`);
       await queue.close();
     }
+
+    for (const [name, dlq] of this.dlqs) {
+      this.logger.log(`Closing DLQ: ${name}`);
+      await dlq.close();
+    }
   }
 
   /**
-   * Get or create a queue by name
+   * Get or create a queue by name. New queues inherit the W3.1 default
+   * removeOnComplete/removeOnFail caps unless the caller supplied their own.
    */
   async getOrCreateQueue(name: string): Promise<Queue> {
     if (!this.queues.has(name)) {
       const queue = new Queue(name, {
         connection: this.options.connection,
-        defaultJobOptions: this.options.defaultJobOptions,
+        defaultJobOptions: {
+          ...DEFAULT_QUEUE_JOB_OPTIONS,
+          ...this.options.defaultJobOptions,
+        },
       });
       this.queues.set(name, queue);
-      
+
       // Set up queue events for monitoring
       const events = new QueueEvents(name, {
         connection: this.options.connection,
@@ -78,6 +108,27 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       });
     }
     return this.queues.get(name)!;
+  }
+
+  /**
+   * Get or create the dead-letter queue for `primaryName`. Jobs that
+   * exhaust their retry attempts get pushed here for human inspection.
+   */
+  private async getOrCreateDlq(primaryName: string): Promise<Queue> {
+    const dlqName = `${primaryName}${DLQ_SUFFIX}`;
+    if (!this.dlqs.has(dlqName)) {
+      const dlq = new Queue(dlqName, {
+        connection: this.options.connection,
+        defaultJobOptions: {
+          // DLQ items are retained longer; they exist precisely so a human
+          // can review them.
+          removeOnComplete: { age: 30 * 24 * 60 * 60, count: 5000 },
+          removeOnFail: { age: 30 * 24 * 60 * 60, count: 5000 },
+        },
+      });
+      this.dlqs.set(dlqName, dlq);
+    }
+    return this.dlqs.get(dlqName)!;
   }
 
   /**
@@ -109,7 +160,11 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Register a worker for a queue
+   * Register a worker for a queue.
+   *
+   * Phase 3 W3.1: when a job exhausts its `attempts` budget, the payload is
+   * pushed to the DLQ (`<queueName>-dlq`) along with the failure reason.
+   * Operators can then inspect, retry, or discard manually.
    */
   registerWorker(
     queueName: string,
@@ -130,8 +185,39 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       this.logger.debug(`Worker completed job ${job.id} in queue ${queueName}`);
     });
 
-    worker.on('failed', (job, err) => {
+    worker.on('failed', async (job, err) => {
       this.logger.error(`Worker failed job ${job?.id} in queue ${queueName}: ${err.message}`);
+
+      // Phase 3 W3.1: push to DLQ once retries are fully exhausted.
+      if (!job) return;
+      const attemptsMade = job.attemptsMade ?? 0;
+      const attemptsConfigured = (job.opts.attempts ?? 1) as number;
+      if (attemptsMade < attemptsConfigured) return;
+
+      try {
+        const dlq = await this.getOrCreateDlq(queueName);
+        await dlq.add(
+          job.name,
+          {
+            originalQueue: queueName,
+            originalJobId: job.id,
+            data: job.data,
+            failedReason: err.message,
+            stack: err.stack,
+            attemptsMade,
+            timestamp: new Date().toISOString(),
+          },
+          // DLQ items don't auto-retry; an operator decides what to do.
+          { attempts: 1 },
+        );
+        this.logger.warn(
+          `Job ${job.id} (${queueName}) exhausted ${attemptsMade}/${attemptsConfigured} attempts → DLQ`,
+        );
+      } catch (dlqErr) {
+        this.logger.error(
+          `Failed to push job ${job.id} to DLQ: ${(dlqErr as Error).message}`,
+        );
+      }
     });
 
     worker.on('error', (err) => {
@@ -142,6 +228,22 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`Registered worker for queue: ${queueName} (concurrency: ${concurrency})`);
 
     return worker;
+  }
+
+  /**
+   * Phase 3 W3.1: get DLQ stats for a primary queue. Operators / dashboards
+   * use this to alert on accumulating dead-letter items.
+   */
+  async getDlqStats(queueName: string): Promise<{
+    waiting: number;
+    failed: number;
+  }> {
+    const dlq = await this.getOrCreateDlq(queueName);
+    const [waiting, failed] = await Promise.all([
+      dlq.getWaitingCount(),
+      dlq.getFailedCount(),
+    ]);
+    return { waiting, failed };
   }
 
   /**
