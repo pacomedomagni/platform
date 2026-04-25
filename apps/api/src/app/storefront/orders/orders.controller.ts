@@ -19,6 +19,7 @@ import { PaymentsService } from '../payments/payments.service';
 import { CustomerAuthService } from '../auth/customer-auth.service';
 import { ListOrdersDto } from './dto';
 import { StoreAdminGuard } from '@platform/auth';
+import { Tenant } from '../../tenant.middleware';
 
 @Controller('store/orders')
 export class OrdersController {
@@ -34,15 +35,10 @@ export class OrdersController {
    */
   @Get()
   async listOrders(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
     @Query() query: ListOrdersDto
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
     const customerId = await this.getCustomerId(authHeader, tenantId);
     return this.ordersService.listOrders(tenantId, customerId, query);
   }
@@ -53,15 +49,10 @@ export class OrdersController {
    */
   @Get(':id')
   async getOrder(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
     @Param('id') orderId: string
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
     const customerId = await this.getCustomerId(authHeader, tenantId);
     return this.ordersService.getOrder(tenantId, orderId, customerId);
   }
@@ -76,15 +67,10 @@ export class OrdersController {
   @Throttle({ short: { limit: 3, ttl: 60000 }, long: { limit: 50, ttl: 24 * 60 * 60 * 1000 } })
   @Get('lookup/:orderNumber')
   async lookupOrder(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('orderNumber') orderNumber: string,
     @Query('email') email: string
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-    if (!email) {
+  ) {    if (!email) {
       throw new BadRequestException('Email required for order lookup');
     }
     return this.ordersService.getOrderByNumber(tenantId, orderNumber, email);
@@ -96,15 +82,10 @@ export class OrdersController {
    */
   @Post(':id/cancel')
   async cancelOrder(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
     @Param('id') orderId: string
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
     const customerId = await this.getCustomerId(authHeader, tenantId);
     // Verify ownership
     await this.ordersService.getOrder(tenantId, orderId, customerId);
@@ -121,13 +102,8 @@ export class OrdersController {
   @Get('admin/stats')
   @UseGuards(StoreAdminGuard)
   async getOrderStats(
-    @Req() req: Request,
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-    return this.ordersService.getOrderStats(tenantId);
+    @Tenant() tenantId: string,
+  ) {    return this.ordersService.getOrderStats(tenantId);
   }
 
   /**
@@ -137,14 +113,9 @@ export class OrdersController {
   @Get('admin/all')
   @UseGuards(StoreAdminGuard)
   async listAllOrders(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Query() query: ListOrdersDto & { search?: string }
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-    return this.ordersService.listAllOrders(tenantId, query);
+  ) {    return this.ordersService.listAllOrders(tenantId, query);
   }
 
   /**
@@ -154,14 +125,9 @@ export class OrdersController {
   @Get('admin/:id')
   @UseGuards(StoreAdminGuard)
   async getOrderAdmin(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') orderId: string
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-    return this.ordersService.getOrder(tenantId, orderId);
+  ) {    return this.ordersService.getOrder(tenantId, orderId);
   }
 
   /**
@@ -171,15 +137,10 @@ export class OrdersController {
   @Put('admin/:id/status')
   @UseGuards(StoreAdminGuard)
   async updateOrderStatus(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') orderId: string,
     @Body() body: { status: string; carrier?: string; trackingNumber?: string; adminNotes?: string }
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-    return this.ordersService.updateOrderStatus(tenantId, orderId, body.status, {
+  ) {    return this.ordersService.updateOrderStatus(tenantId, orderId, body.status, {
       carrier: body.carrier,
       trackingNumber: body.trackingNumber,
       adminNotes: body.adminNotes,
@@ -193,15 +154,10 @@ export class OrdersController {
   @Post('admin/:id/refund')
   @UseGuards(StoreAdminGuard)
   async refundOrder(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') orderId: string,
     @Body() body: { amount?: number; reason?: string }
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
     // Map free-text reason to Stripe's accepted reason enum, defaulting to 'requested_by_customer'
     const reasonMap: Record<string, 'duplicate' | 'fraudulent' | 'requested_by_customer'> = {
       duplicate: 'duplicate',

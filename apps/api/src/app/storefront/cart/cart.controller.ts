@@ -18,6 +18,7 @@ import { CartService } from './cart.service';
 import { CustomerAuthService } from '../auth/customer-auth.service';
 import { StorePublishedGuard } from '../../common/guards/store-published.guard';
 import { AddToCartDto, UpdateCartItemDto, ApplyCouponDto, MergeCartDto } from './dto';
+import { Tenant } from '../../tenant.middleware';
 
 @Controller('store/cart')
 @UseGuards(StorePublishedGuard)
@@ -77,15 +78,10 @@ export class CartController {
   @Get()
   @Throttle({ medium: { limit: 30, ttl: 60000 } }) // 30 requests per minute
   async getCart(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
+  ) {    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     return this.cartService.getOrCreateCart(tenantId, customerId, sessionToken);
   }
 
@@ -96,16 +92,11 @@ export class CartController {
   @Get(':id')
   @Throttle({ medium: { limit: 30, ttl: 60000 } }) // 30 requests per minute
   async getCartById(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') cartId: string,
     @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
     const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     // Verify cart ownership before allowing access
     await this.verifyCartOwnership(tenantId, cartId, customerId, sessionToken);
@@ -120,17 +111,12 @@ export class CartController {
   @Post(':id/items')
   @Throttle({ medium: { limit: 20, ttl: 60000 } }) // 20 requests per minute
   async addItem(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') cartId: string,
     @Body() dto: AddToCartDto,
     @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
     const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     // Verify cart ownership before allowing modifications
     await this.verifyCartOwnership(tenantId, cartId, customerId, sessionToken);
@@ -145,18 +131,13 @@ export class CartController {
   @Put(':id/items/:itemId')
   @Throttle({ medium: { limit: 20, ttl: 60000 } }) // 20 requests per minute
   async updateItem(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') cartId: string,
     @Param('itemId') itemId: string,
     @Body() dto: UpdateCartItemDto,
     @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
     const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     // Verify cart ownership before allowing modifications
     await this.verifyCartOwnership(tenantId, cartId, customerId, sessionToken);
@@ -171,17 +152,12 @@ export class CartController {
   @Delete(':id/items/:itemId')
   @Throttle({ medium: { limit: 20, ttl: 60000 } }) // 20 requests per minute
   async removeItem(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') cartId: string,
     @Param('itemId') itemId: string,
     @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
     const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     // Verify cart ownership before allowing modifications
     await this.verifyCartOwnership(tenantId, cartId, customerId, sessionToken);
@@ -196,17 +172,12 @@ export class CartController {
   @Post(':id/coupon')
   @Throttle({ medium: { limit: 5, ttl: 60000 } }) // 5 requests per minute - strict to prevent coupon brute-forcing
   async applyCoupon(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') cartId: string,
     @Body() dto: ApplyCouponDto,
     @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
     const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     // Verify cart ownership before allowing coupon application
     await this.verifyCartOwnership(tenantId, cartId, customerId, sessionToken);
@@ -221,16 +192,11 @@ export class CartController {
   @Delete(':id/coupon')
   @Throttle({ medium: { limit: 10, ttl: 60000 } }) // 10 requests per minute
   async removeCoupon(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') cartId: string,
     @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
     const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     // Verify cart ownership before allowing modifications
     await this.verifyCartOwnership(tenantId, cartId, customerId, sessionToken);
@@ -245,15 +211,10 @@ export class CartController {
   @Post('merge')
   @Throttle({ medium: { limit: 10, ttl: 60000 } }) // 10 requests per minute
   async mergeCart(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string,
     @Body() dto: MergeCartDto
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
+  ) {    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     if (!customerId) {
       throw new BadRequestException('Authentication required for cart merge');
     }
@@ -270,16 +231,11 @@ export class CartController {
   @Delete(':id')
   @Throttle({ medium: { limit: 10, ttl: 60000 } }) // 10 requests per minute
   async clearCart(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') cartId: string,
     @Headers('authorization') authHeader?: string,
     @Headers('x-cart-session') sessionToken?: string
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
     const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     // Verify cart ownership before allowing deletion
     await this.verifyCartOwnership(tenantId, cartId, customerId, sessionToken);

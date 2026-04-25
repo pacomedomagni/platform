@@ -18,6 +18,7 @@ import { StoreAdminGuard } from '@platform/auth';
 import { SquarePaymentService } from '../../onboarding/square-payment.service';
 import { CustomerAuthService } from '../auth/customer-auth.service';
 import { CustomerAuthGuard } from '../auth/customer-auth.guard';
+import { Tenant } from '../../tenant.middleware';
 
 @Controller('store/payments')
 export class PaymentsController {
@@ -32,8 +33,7 @@ export class PaymentsController {
    * GET /api/v1/store/payments/config
    */
   @Get('config')
-  async getConfig(@Req() req: Request) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
+  async getConfig(@Tenant() tenantId: string) {
     return this.paymentsService.getConfig(tenantId);
   }
 
@@ -61,18 +61,13 @@ export class PaymentsController {
    */
   @Get('order/:orderId')
   async getOrderPayments(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('orderId') orderId: string,
-    @Headers('authorization') authHeader?: string
+    @Headers('authorization') authHeader?: string,
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
     if (!authHeader) {
       throw new BadRequestException('Authentication required');
     }
-    // Verify order ownership to prevent IDOR
     const [type, token] = (authHeader || '').split(' ');
     if (type !== 'Bearer' || !token) {
       throw new UnauthorizedException('Invalid authorization header');
@@ -91,18 +86,14 @@ export class PaymentsController {
   @Post('refund')
   @UseGuards(StoreAdminGuard)
   async createRefund(
-    @Req() req: Request,
-    @Body() dto: CreateRefundDto
+    @Tenant() tenantId: string,
+    @Body() dto: CreateRefundDto,
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
     return this.paymentsService.createRefund(
       tenantId,
       dto.orderId,
       dto.amount,
-      dto.reason
+      dto.reason,
     );
   }
 
@@ -113,13 +104,9 @@ export class PaymentsController {
   @Post('square')
   @UseGuards(CustomerAuthGuard)
   async processSquarePayment(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Body() dto: SquarePaymentDto,
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
     return this.paymentsService.processSquarePayment(tenantId, dto.orderId, dto.sourceId);
   }
 }

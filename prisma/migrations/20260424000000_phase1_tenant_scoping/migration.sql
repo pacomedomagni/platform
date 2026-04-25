@@ -231,15 +231,28 @@ CREATE UNIQUE INDEX "marketplace_listings_tenantId_externalListingId_key"
   ON "marketplace_listings" ("tenantId", "externalListingId");
 
 -- =================================================================
--- RLS on the 7 newly-tenantId'd tables
--- (same permissive-until-set policy as the existing enable_tenant_rls
--- function uses, so queries still work until Phase 2 wires `app.tenant`
--- at connection checkout.)
--- =================================================================
-SELECT enable_tenant_rls('product_variant_attributes');
-SELECT enable_tenant_rls('review_votes');
-SELECT enable_tenant_rls('wishlist_items');
-SELECT enable_tenant_rls('marketplace_messages');
-SELECT enable_tenant_rls('webhook_deliveries');
-SELECT enable_tenant_rls('processed_webhook_events');
-SELECT enable_tenant_rls('merchant_email_verification_tokens');
+-- RLS on the 7 newly-tenantId'd tables: DEFERRED to Phase 3.
+--
+-- enable_tenant_rls() installs `tenantId = current_setting('app.tenant',
+-- true)` policies. When the connection has not run
+-- `SET LOCAL app.tenant = ...`, that comparison is `tenantId = NULL`,
+-- which is FALSE, and every SELECT returns 0 rows.
+--
+-- Today only inventory and accounting services set app.tenant inside their
+-- transactions. The services that read these new tables (reviews, wishlist,
+-- marketplace messaging, webhook delivery audit, merchant email verification)
+-- do not, so enabling RLS here would silently break those reads.
+--
+-- Phase 3 (W3.1+ in REMEDIATION_PLAN.md) wires `app.tenant` at connection
+-- checkout via a Prisma client extension, after which a follow-up migration
+-- will run these calls. Until then we rely on the application-layer
+-- `where: { tenantId }` filters, which the new schema columns make
+-- enforceable.
+--
+-- SELECT enable_tenant_rls('product_variant_attributes');
+-- SELECT enable_tenant_rls('review_votes');
+-- SELECT enable_tenant_rls('wishlist_items');
+-- SELECT enable_tenant_rls('marketplace_messages');
+-- SELECT enable_tenant_rls('webhook_deliveries');
+-- SELECT enable_tenant_rls('processed_webhook_events');
+-- SELECT enable_tenant_rls('merchant_email_verification_tokens');

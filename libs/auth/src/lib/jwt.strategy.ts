@@ -14,7 +14,15 @@ export interface AuthenticatedUser {
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor() {
     const devSecret = process.env.JWT_SECRET;
-    const useDevJwt = process.env.ENABLE_DEV_PASSWORD_LOGIN === 'true' && Boolean(devSecret);
+    // Phase 3 hardening: even if env-validator regresses or someone explicitly
+    // sets ENABLE_DEV_PASSWORD_LOGIN=true in production, the strategy itself
+    // refuses to ever accept HS256 in prod. The only path that should ever
+    // reach the dev JWKS fallback is non-production with the flag explicitly on.
+    const isProd = process.env.NODE_ENV === 'production';
+    const useDevJwt =
+      !isProd &&
+      process.env.ENABLE_DEV_PASSWORD_LOGIN === 'true' &&
+      Boolean(devSecret);
 
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),

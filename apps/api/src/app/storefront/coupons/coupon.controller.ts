@@ -15,6 +15,7 @@ import { Request } from 'express';
 import { StoreAdminGuard } from '@platform/auth';
 import { CouponService } from './coupon.service';
 import { CreateCouponDto, UpdateCouponDto, ListCouponsDto } from './coupon.dto';
+import { Tenant } from '../../tenant.middleware';
 
 @Controller('store/admin/coupons')
 @UseGuards(StoreAdminGuard)
@@ -27,12 +28,9 @@ export class CouponController {
    */
   @Get()
   async listCoupons(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Query() query: ListCouponsDto,
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) throw new BadRequestException('Tenant ID required');
-    return this.couponService.listCoupons(tenantId, query);
+  ) {    return this.couponService.listCoupons(tenantId, query);
   }
 
   /**
@@ -41,12 +39,9 @@ export class CouponController {
    */
   @Get(':id')
   async getCoupon(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') id: string,
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) throw new BadRequestException('Tenant ID required');
-    return this.couponService.getCoupon(tenantId, id);
+  ) {    return this.couponService.getCoupon(tenantId, id);
   }
 
   /**
@@ -55,12 +50,9 @@ export class CouponController {
    */
   @Post()
   async createCoupon(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Body() dto: CreateCouponDto,
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) throw new BadRequestException('Tenant ID required');
-    return this.couponService.createCoupon(tenantId, dto);
+  ) {    return this.couponService.createCoupon(tenantId, dto);
   }
 
   /**
@@ -69,13 +61,10 @@ export class CouponController {
    */
   @Put(':id')
   async updateCoupon(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') id: string,
     @Body() dto: UpdateCouponDto,
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) throw new BadRequestException('Tenant ID required');
-    return this.couponService.updateCoupon(tenantId, id, dto);
+  ) {    return this.couponService.updateCoupon(tenantId, id, dto);
   }
 
   /**
@@ -84,11 +73,8 @@ export class CouponController {
    */
   @Delete(':id')
   async deleteCoupon(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') id: string,
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) throw new BadRequestException('Tenant ID required');
-    return this.couponService.deleteCoupon(tenantId, id);
+  ) {    return this.couponService.deleteCoupon(tenantId, id);
   }
 }

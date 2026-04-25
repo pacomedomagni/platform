@@ -5,11 +5,8 @@ import {
   Param,
   Query,
   Body,
-  Req,
-  BadRequestException,
   UseGuards,
 } from '@nestjs/common';
-import { Request } from 'express';
 import {
   IsOptional,
   IsString,
@@ -17,6 +14,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { StoreAdminGuard } from '@platform/auth';
+import { Tenant } from '../../tenant.middleware';
 import { AdminCustomersService } from './admin-customers.service';
 
 /**
@@ -62,22 +60,14 @@ export class UpdateCustomerNotesDto {
 export class AdminCustomersController {
   constructor(private readonly customersService: AdminCustomersService) {}
 
-  /**
-   * List all customers (admin)
-   * GET /api/v1/store/admin/customers
-   */
   @Get()
   async listCustomers(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Query('search') search?: string,
     @Query('segment') segment?: string,
     @Query('page') page?: string,
-    @Query('limit') limit?: string
+    @Query('limit') limit?: string,
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
     return this.customersService.listCustomers(tenantId, {
       search,
       segment,
@@ -86,69 +76,34 @@ export class AdminCustomersController {
     });
   }
 
-  /**
-   * Get single customer detail (admin)
-   * GET /api/v1/store/admin/customers/:id
-   */
   @Get(':id')
-  async getCustomer(
-    @Req() req: Request,
-    @Param('id') customerId: string
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
+  async getCustomer(@Tenant() tenantId: string, @Param('id') customerId: string) {
     return this.customersService.getCustomer(tenantId, customerId);
   }
 
-  /**
-   * Get customer's orders (admin)
-   * GET /api/v1/store/admin/customers/:id/orders
-   */
   @Get(':id/orders')
   async getCustomerOrders(
-    @Req() req: Request,
-    @Param('id') customerId: string
+    @Tenant() tenantId: string,
+    @Param('id') customerId: string,
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
     return this.customersService.getCustomerOrders(tenantId, customerId);
   }
 
-  /**
-   * Update customer info (admin)
-   * PUT /api/v1/store/admin/customers/:id
-   */
   @Put(':id')
   async updateCustomer(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') customerId: string,
-    @Body() body: UpdateCustomerDto
+    @Body() body: UpdateCustomerDto,
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
     return this.customersService.updateCustomer(tenantId, customerId, body);
   }
 
-  /**
-   * Update customer notes (admin)
-   * PUT /api/v1/store/admin/customers/:id/notes
-   */
   @Put(':id/notes')
   async updateCustomerNotes(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') customerId: string,
-    @Body() body: UpdateCustomerNotesDto
+    @Body() body: UpdateCustomerNotesDto,
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
     return this.customersService.updateCustomerNotes(tenantId, customerId, body.notes);
   }
 }

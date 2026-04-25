@@ -14,6 +14,7 @@ import { Request } from 'express';
 import { ThemesService } from './themes.service';
 import { CreateThemeDto, UpdateThemeDto } from './dto';
 import { StoreAdminGuard } from '@platform/auth';
+import { Tenant } from '../../tenant.middleware';
 
 @Controller('store')
 export class ThemesController {
@@ -24,12 +25,7 @@ export class ThemesController {
    * GET /api/v1/store/themes
    */
   @Get('themes')
-  async listThemes(@Req() req: Request) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-    return this.themesService.getThemes(tenantId);
+  async listThemes(@Tenant() tenantId: string) {    return this.themesService.getThemes(tenantId);
   }
 
   /**
@@ -37,12 +33,7 @@ export class ThemesController {
    * GET /api/v1/store/themes/active
    */
   @Get('themes/active')
-  async getActiveTheme(@Req() req: Request) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-    return this.themesService.getActiveTheme(tenantId);
+  async getActiveTheme(@Tenant() tenantId: string) {    return this.themesService.getActiveTheme(tenantId);
   }
 
   /**
@@ -74,14 +65,9 @@ export class ThemesController {
    */
   @Get('themes/:id')
   async getThemeById(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') id: string
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-    return this.themesService.getThemeById(id, tenantId);
+  ) {    return this.themesService.getThemeById(id, tenantId);
   }
 
   // ============ ADMIN ENDPOINTS ============
@@ -93,14 +79,9 @@ export class ThemesController {
   @Post('admin/themes')
   @UseGuards(StoreAdminGuard)
   async createTheme(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Body() dto: CreateThemeDto
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-    return this.themesService.createTheme(tenantId, dto);
+  ) {    return this.themesService.createTheme(tenantId, dto);
   }
 
   /**
@@ -110,12 +91,9 @@ export class ThemesController {
   @Post('admin/themes/validate')
   @UseGuards(StoreAdminGuard)
   async validateTheme(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Body() dto: CreateThemeDto
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) throw new BadRequestException('Tenant ID required');
-    // Validation is done by the global validation pipe on CreateThemeDto
+  ) {    // Validation is done by the global validation pipe on CreateThemeDto
     return { valid: true };
   }
 
@@ -126,13 +104,10 @@ export class ThemesController {
   @Post('admin/themes/from-preset/:presetType')
   @UseGuards(StoreAdminGuard)
   async createFromPreset(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('presetType') presetType: string,
     @Body() body: { name?: string }
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) throw new BadRequestException('Tenant ID required');
-    return this.themesService.resetToPreset(tenantId, presetType);
+  ) {    return this.themesService.resetToPreset(tenantId, presetType);
   }
 
   /**
@@ -142,15 +117,10 @@ export class ThemesController {
   @Put('admin/themes/:id')
   @UseGuards(StoreAdminGuard)
   async updateTheme(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') id: string,
     @Body() dto: UpdateThemeDto
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-    return this.themesService.updateTheme(id, tenantId, dto);
+  ) {    return this.themesService.updateTheme(id, tenantId, dto);
   }
 
   /**
@@ -160,14 +130,9 @@ export class ThemesController {
   @Delete('admin/themes/:id')
   @UseGuards(StoreAdminGuard)
   async deleteTheme(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') id: string
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-    return this.themesService.deleteTheme(id, tenantId);
+  ) {    return this.themesService.deleteTheme(id, tenantId);
   }
 
   /**
@@ -177,14 +142,9 @@ export class ThemesController {
   @Post('admin/themes/:id/activate')
   @UseGuards(StoreAdminGuard)
   async activateTheme(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') id: string
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-    return this.themesService.activateTheme(id, tenantId);
+  ) {    return this.themesService.activateTheme(id, tenantId);
   }
 
   /**
@@ -195,15 +155,10 @@ export class ThemesController {
   @Post('admin/themes/:id/duplicate')
   @UseGuards(StoreAdminGuard)
   async duplicateTheme(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') id: string,
     @Body('name') name: string
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-    if (!name) {
+  ) {    if (!name) {
       throw new BadRequestException('Theme name is required');
     }
     return this.themesService.duplicateTheme(id, tenantId, name);
@@ -216,12 +171,9 @@ export class ThemesController {
   @Post('admin/themes/:id/reset')
   @UseGuards(StoreAdminGuard)
   async resetTheme(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') id: string
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) throw new BadRequestException('Tenant ID required');
-    const theme = await this.themesService.getThemeById(id, tenantId);
+  ) {    const theme = await this.themesService.getThemeById(id, tenantId);
     if (!theme) throw new BadRequestException('Theme not found');
     // Reset by activating the preset version
     const presetSlug = (theme as any).presetSlug || (theme as any).slug || 'modern';
@@ -236,14 +188,9 @@ export class ThemesController {
   @Post('admin/themes/reset-preset')
   @UseGuards(StoreAdminGuard)
   async resetToPreset(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Body('presetSlug') presetSlug: string
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-    if (!presetSlug) {
+  ) {    if (!presetSlug) {
       throw new BadRequestException('Preset slug is required');
     }
     return this.themesService.resetToPreset(tenantId, presetSlug);

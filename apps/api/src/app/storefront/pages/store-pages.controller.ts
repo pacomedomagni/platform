@@ -4,6 +4,7 @@ import { StorePagesService } from './store-pages.service';
 import { UpsertStorePageDto } from './store-pages.dto';
 import { StoreAdminGuard } from '@platform/auth';
 import { StorePublishedGuard } from '../../common/guards/store-published.guard';
+import { Tenant } from '../../tenant.middleware';
 
 @Controller('store')
 export class StorePagesController {
@@ -14,10 +15,7 @@ export class StorePagesController {
    */
   @Get('pages')
   @UseGuards(StorePublishedGuard)
-  async listPages(@Req() req: Request) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) throw new BadRequestException('Tenant ID required');
-    return this.pagesService.listPages(tenantId, true);
+  async listPages(@Tenant() tenantId: string) {    return this.pagesService.listPages(tenantId, true);
   }
 
   /**
@@ -26,12 +24,9 @@ export class StorePagesController {
   @Get('pages/:slug')
   @UseGuards(StorePublishedGuard)
   async getPage(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('slug') slug: string,
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) throw new BadRequestException('Tenant ID required');
-    return this.pagesService.getPage(tenantId, slug);
+  ) {    return this.pagesService.getPage(tenantId, slug);
   }
 
   /**
@@ -40,13 +35,10 @@ export class StorePagesController {
   @Put('admin/pages/:slug')
   @UseGuards(StoreAdminGuard)
   async upsertPage(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('slug') slug: string,
     @Body() dto: UpsertStorePageDto,
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) throw new BadRequestException('Tenant ID required');
-    return this.pagesService.upsertPage(tenantId, slug, dto);
+  ) {    return this.pagesService.upsertPage(tenantId, slug, dto);
   }
 
   /**
@@ -54,10 +46,7 @@ export class StorePagesController {
    */
   @Get('admin/pages')
   @UseGuards(StoreAdminGuard)
-  async listAllPages(@Req() req: Request) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) throw new BadRequestException('Tenant ID required');
-    return this.pagesService.listPages(tenantId, false);
+  async listAllPages(@Tenant() tenantId: string) {    return this.pagesService.listPages(tenantId, false);
   }
 
   /**
@@ -66,11 +55,8 @@ export class StorePagesController {
   @Delete('admin/pages/:slug')
   @UseGuards(StoreAdminGuard)
   async deletePage(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('slug') slug: string,
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) throw new BadRequestException('Tenant ID required');
-    return this.pagesService.deletePage(tenantId, slug);
+  ) {    return this.pagesService.deletePage(tenantId, slug);
   }
 }

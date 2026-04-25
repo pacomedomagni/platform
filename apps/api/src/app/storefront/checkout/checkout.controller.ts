@@ -18,6 +18,7 @@ import { CheckoutService } from './checkout.service';
 import { CustomerAuthService } from '../auth/customer-auth.service';
 import { StorePublishedGuard } from '../../common/guards/store-published.guard';
 import { CreateCheckoutDto, UpdateCheckoutDto } from './dto';
+import { Tenant } from '../../tenant.middleware';
 
 @Controller('store/checkout')
 @UseGuards(StorePublishedGuard)
@@ -72,15 +73,10 @@ export class CheckoutController {
   @Post()
   @Throttle({ medium: { limit: 10, ttl: 60000 } }) // 10 checkouts per minute - strict to prevent abuse
   async createCheckout(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Headers('authorization') authHeader: string | undefined,
     @Body() dto: CreateCheckoutDto
-  ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
+  ) {    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     return this.checkoutService.createCheckout(tenantId, dto, customerId);
   }
 
@@ -91,16 +87,11 @@ export class CheckoutController {
   @Get(':id')
   @Throttle({ medium: { limit: 30, ttl: 60000 } }) // 30 requests per minute
   async getCheckout(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') orderId: string,
     @Headers('authorization') authHeader?: string,
     @Headers('x-customer-email') email?: string
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
     const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     // Verify order ownership before allowing access
     await this.verifyOrderOwnership(tenantId, orderId, customerId, email);
@@ -115,16 +106,11 @@ export class CheckoutController {
   @Get('order/:orderNumber')
   @Throttle({ medium: { limit: 30, ttl: 60000 } }) // 30 requests per minute
   async getCheckoutByOrderNumber(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('orderNumber') orderNumber: string,
     @Headers('authorization') authHeader?: string,
     @Headers('x-customer-email') email?: string
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
     const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     const order = await this.checkoutService.getCheckoutByOrderNumber(tenantId, orderNumber);
 
@@ -146,17 +132,12 @@ export class CheckoutController {
   @Put(':id')
   @Throttle({ medium: { limit: 10, ttl: 60000 } }) // 10 requests per minute
   async updateCheckout(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') orderId: string,
     @Body() dto: UpdateCheckoutDto,
     @Headers('authorization') authHeader?: string,
     @Headers('x-customer-email') email?: string
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
     const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     // Verify order ownership before allowing modifications
     await this.verifyOrderOwnership(tenantId, orderId, customerId, email);
@@ -171,16 +152,11 @@ export class CheckoutController {
   @Post(':id/retry-payment')
   @Throttle({ medium: { limit: 5, ttl: 60000 } })
   async retryPaymentIntent(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') orderId: string,
     @Headers('authorization') authHeader?: string,
     @Headers('x-customer-email') email?: string
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
     const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     await this.verifyOrderOwnership(tenantId, orderId, customerId, email);
 
@@ -194,16 +170,11 @@ export class CheckoutController {
   @Delete(':id')
   @Throttle({ medium: { limit: 5, ttl: 60000 } }) // 5 requests per minute - strict for cancellations
   async cancelCheckout(
-    @Req() req: Request,
+    @Tenant() tenantId: string,
     @Param('id') orderId: string,
     @Headers('authorization') authHeader?: string,
     @Headers('x-customer-email') email?: string
   ) {
-    const tenantId = (req as any).resolvedTenantId || req.headers['x-tenant-id'] as string;
-    if (!tenantId) {
-      throw new BadRequestException('Tenant ID required');
-    }
-
     const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
     // Verify order ownership before allowing cancellation
     await this.verifyOrderOwnership(tenantId, orderId, customerId, email);
