@@ -186,3 +186,18 @@ export function journeyAdminHeaders(tenantId: string, accessToken: string) {
     'x-tenant-id': tenantId,
   };
 }
+
+/**
+ * Re-login a journey user to get a fresh access token. Use this after
+ * mutating the user's roles via PATCH /admin/users/:id — the existing
+ * JWT keeps the OLD roles claim, so any guard that reads `user.roles`
+ * (PermissionsGuard especially) won't see the update until a new token
+ * is minted.
+ */
+export async function reloginJourneyUser(email: string, password: string): Promise<string> {
+  const res = await axios.post('/auth/login', { email, password });
+  if (res.status !== 200 && res.status !== 201) {
+    throw new Error(`Re-login failed: ${res.status} ${JSON.stringify(res.data)}`);
+  }
+  return res.data.access_token;
+}

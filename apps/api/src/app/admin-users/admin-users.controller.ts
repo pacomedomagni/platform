@@ -13,27 +13,29 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import { AuthGuard, Roles, RolesGuard } from '@platform/auth';
+import { AuthGuard, PermissionsGuard, RequirePermission, Roles, RolesGuard } from '@platform/auth';
 import { Tenant } from '../tenant.middleware';
 import { AdminUsersService, ROLE_DEFINITIONS } from './admin-users.service';
 
 /**
- * AuthGuard validates JWT + tenant match. RolesGuard then enforces that the caller
- * has the required role for each endpoint. The combo: anonymous → 401, wrong tenant → 401,
- * authenticated but not owner/admin → 403.
+ * Guard stack:
+ *   1. AuthGuard (JwtTenantGuard) — validates JWT + tenant header match.
+ *   2. RolesGuard — coarse role gate; ensures only owner/admin reach this controller
+ *      (defence in depth so a misconfigured @RequirePermission can't slip past).
+ *   3. PermissionsGuard — fine-grained per-method check using @RequirePermission.
  *
- * Note on role hierarchy: RolesGuard treats `admin` as a tenant-wide superuser, so endpoints
- * marked @Roles('owner') are accessible to admins too within the same tenant. Use @Roles('owner')
- * sparingly — only for actions that should be restricted to the tenant owner specifically.
+ * Net behaviour: anonymous → 401; tenant mismatch → 401; correct tenant
+ * but wrong role → 403; correct role but missing permission → 403.
  */
 @Controller('admin/users')
-@UseGuards(AuthGuard, RolesGuard)
+@UseGuards(AuthGuard, RolesGuard, PermissionsGuard)
+@Roles('owner', 'admin')
 @Throttle({ short: { limit: 30, ttl: 1000 }, medium: { limit: 200, ttl: 60000 } })
 export class AdminUsersController {
   constructor(private readonly users: AdminUsersService) {}
 
   @Get('roles')
-  @Roles('owner', 'admin', 'staff', 'viewer')
+  @RequirePermission('users:read')
   listRoles() {
     return ROLE_DEFINITIONS;
   }
@@ -43,13 +45,13 @@ export class AdminUsersController {
   // by /:id.
 
   @Get('invites')
-  @Roles('owner', 'admin')
+  @RequirePermission('users:read')
   listInvites(@Tenant() tenantId: string, @Query('status') status?: string) {
     return this.users.listInvites(tenantId, { status });
   }
 
   @Post('invite')
-  @Roles('owner', 'admin')
+  @RequirePermission('users:invite')
   async invite(
     @Tenant() tenantId: string,
     @Req() req: any,
@@ -67,13 +69,13 @@ export class AdminUsersController {
   }
 
   @Post('invites/:id/resend')
-  @Roles('owner', 'admin')
+  @RequirePermission('users:invite')
   resendInvite(@Tenant() tenantId: string, @Param('id') id: string) {
     return this.users.resendInvite(tenantId, id);
   }
 
   @Delete('invites/:id')
-  @Roles('owner', 'admin')
+  @RequirePermission('users:invite')
   revokeInvite(@Tenant() tenantId: string, @Param('id') id: string) {
     return this.users.revokeInvite(tenantId, id);
   }
@@ -81,19 +83,19 @@ export class AdminUsersController {
   // ─── Active users ─────────────────────────────────────────────────────────
 
   @Get()
-  @Roles('owner', 'admin')
+  @RequirePermission('users:read')
   list(@Tenant() tenantId: string, @Query('q') q?: string, @Query('role') role?: string) {
     return this.users.list(tenantId, { q, role });
   }
 
   @Get(':id')
-  @Roles('owner', 'admin')
+  @RequirePermission('users:read')
   get(@Tenant() tenantId: string, @Param('id') id: string) {
     return this.users.get(tenantId, id);
   }
 
   @Patch(':id')
-  @Roles('owner', 'admin')
+  @RequirePermission('users:write')
   update(
     @Tenant() tenantId: string,
     @Param('id') id: string,
@@ -103,7 +105,7 @@ export class AdminUsersController {
   }
 
   @Delete(':id')
-  @Roles('owner', 'admin')
+  @RequirePermission('users:delete')
   remove(@Tenant() tenantId: string, @Param('id') id: string) {
     return this.users.remove(tenantId, id);
   }

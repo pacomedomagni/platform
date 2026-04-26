@@ -11,7 +11,7 @@
  * The full invite → accept flow lives in 31-admin-users-invites.spec.ts.
  */
 import axios from 'axios';
-import { signupJourneyTenant, journeyAdminHeaders } from '../support/auth-helper';
+import { signupJourneyTenant, journeyAdminHeaders, reloginJourneyUser } from '../support/auth-helper';
 
 interface SignupContext {
   tenantId: string;
@@ -21,19 +21,24 @@ interface SignupContext {
 
 async function freshTenant(prefix: string): Promise<SignupContext> {
   const ts = Date.now() + Math.floor(Math.random() * 10_000);
-  const { tenantId, accessToken } = await signupJourneyTenant(
+  const email = `${prefix.toLowerCase()}-${ts}@admin-users.test`;
+  const password = 'AdminUserPass123';
+  const { tenantId, accessToken: bootstrap } = await signupJourneyTenant(
     `${prefix} Co ${ts}`,
-    `${prefix.toLowerCase()}-${ts}@admin-users.test`,
-    'AdminUserPass123',
+    email,
+    password,
     `${prefix.toLowerCase()}${ts}`,
   );
-  const list = await axios.get('/admin/users', { headers: journeyAdminHeaders(tenantId, accessToken) });
+  const list = await axios.get('/admin/users', { headers: journeyAdminHeaders(tenantId, bootstrap) });
   const ownerUserId = list.data.data[0].id;
   await axios.patch(
     `/admin/users/${ownerUserId}`,
     { roles: ['owner', 'admin'] },
-    { headers: journeyAdminHeaders(tenantId, accessToken) },
+    { headers: journeyAdminHeaders(tenantId, bootstrap) },
   );
+  // Re-login: PermissionsGuard reads roles from the JWT claim, so the
+  // pre-promotion token wouldn't include 'owner'.
+  const accessToken = await reloginJourneyUser(email, password);
   return { tenantId, accessToken, ownerUserId };
 }
 
