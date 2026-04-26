@@ -229,6 +229,8 @@ export interface Cart {
   discountAmount: number;
   grandTotal: number;
   couponCode: string | null;
+  /** Persisted cart-page shipping estimate. Null when never set or cleared. */
+  shippingEstimate: Record<string, unknown> | null;
 }
 
 export const cartApi = {
@@ -270,6 +272,21 @@ export const cartApi = {
   removeCoupon: (cartId: string): Promise<Cart> => {
     return apiFetch(`/v1/store/cart/${cartId}/coupon`, {
       method: 'DELETE',
+    });
+  },
+
+  /**
+   * Persist (or clear) the cart-page shipping estimate. Pass null to clear.
+   * Server side this writes to carts.shippingEstimate (JSONB) so the value
+   * survives device-switch and feeds checkout pre-fill.
+   */
+  setShippingEstimate: (
+    cartId: string,
+    estimate: Record<string, unknown> | null,
+  ): Promise<{ success: boolean; shippingEstimate: Record<string, unknown> | null }> => {
+    return apiFetch(`/v1/store/cart/${cartId}/shipping-estimate`, {
+      method: 'PUT',
+      body: JSON.stringify(estimate),
     });
   },
 

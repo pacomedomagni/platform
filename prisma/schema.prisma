@@ -1427,6 +1427,12 @@ model Cart {
 
   expiresAt DateTime?
 
+  // Shipping estimate from the cart-page estimator (country/state/zip + chosen rate).
+  // Persisted server-side so it survives device-switch / re-login. Checkout reads
+  // this to pre-fill the shipping address + selected rate without re-prompting.
+  // Shape: { country, state?, postalCode?, rateId, ratePrice, estimatedTax?, estimatedTotal? }
+  shippingEstimate Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

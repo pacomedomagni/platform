@@ -630,6 +630,37 @@ export class CartService {
   }
 
   /**
+   * Persist (or clear) the cart-page shipping estimate. Pass null to clear.
+   * Loose shape — the renderer accepts any JSON, but the storefront sends:
+   *   { country, state?, postalCode?, rateId, ratePrice, estimatedTax?, estimatedTotal? }
+   */
+  async setShippingEstimate(tenantId: string, cartId: string, estimate: Record<string, unknown> | null) {
+    const cart = await this.prisma.cart.findFirst({
+      where: { id: cartId, tenantId, status: 'active' },
+    });
+    if (!cart) {
+      throw new NotFoundException('Cart not found');
+    }
+
+    // Light validation: if non-null, must be an object with at minimum a country.
+    if (estimate !== null) {
+      if (typeof estimate !== 'object' || Array.isArray(estimate)) {
+        throw new BadRequestException('shippingEstimate must be a JSON object or null');
+      }
+      if (typeof estimate['country'] !== 'string' || !estimate['country']) {
+        throw new BadRequestException('shippingEstimate.country (string) is required');
+      }
+    }
+
+    await this.prisma.cart.update({
+      where: { id: cartId },
+      data: { shippingEstimate: estimate as any, lastActivityAt: new Date() },
+    });
+
+    return { success: true, shippingEstimate: estimate };
+  }
+
+  /**
    * Merge anonymous cart into customer cart
    * Uses atomic upsert to prevent race conditions
    */
@@ -1325,6 +1356,10 @@ export class CartService {
       discountAmount: Number(cart.discountAmount),
       grandTotal: Number(cart.grandTotal),
       couponCode: cart.couponCode,
+      // Persisted cart-page shipping estimate (null when never set or cleared).
+      // Frontend cart store hydrates from this on cart fetch so the estimate
+      // survives device-switch and refresh.
+      shippingEstimate: (cart as any).shippingEstimate ?? null,
       // Help frontend show "Add $X more for free shipping!" using tenant-configured threshold
       freeShippingThreshold: Number(cart.shippingTotal) > 0 ? freeThreshold : null,
       freeShippingRemaining: Number(cart.shippingTotal) > 0

@@ -138,6 +138,12 @@ export const useCartStore = create<CartState>()(
           discountAmount: cart.discountAmount,
           grandTotal: cart.grandTotal,
           couponCode: cart.couponCode,
+          // Hydrate the persisted shipping estimate from the server cart so it
+          // survives device-switch / refresh. The local store still keeps a
+          // copy via partialize for snappy UI on first paint.
+          ...(cart.shippingEstimate
+            ? { shippingEstimate: cart.shippingEstimate as unknown as ShippingEstimate }
+            : {}),
           error: null,
         });
       },
@@ -323,8 +329,20 @@ export const useCartStore = create<CartState>()(
       },
 
       // Save the user's shipping/tax estimate so checkout can pre-fill.
+      // Local set is synchronous (snappy UI). The server-side persist is
+      // fire-and-forget — failure is logged but doesn't block: the local
+      // store still has the estimate so checkout pre-fill works in this
+      // session even if the network call lost. Cross-device persistence
+      // requires the server-side write to land.
       setShippingEstimate: (estimate: ShippingEstimate | null) => {
         set({ shippingEstimate: estimate });
+        const { cartId } = get();
+        if (!cartId) return;
+        void cartApi
+          .setShippingEstimate(cartId, estimate as Record<string, unknown> | null)
+          .catch((err) => {
+            console.warn('Failed to persist shipping estimate server-side:', err);
+          });
       },
 
       // Sync cart with server

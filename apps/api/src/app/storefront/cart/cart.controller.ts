@@ -205,6 +205,26 @@ export class CartController {
   }
 
   /**
+   * Set or clear the cart-page shipping estimate. Persisted on the cart row so
+   * it survives device-switch and feeds checkout pre-fill.
+   * PUT /api/v1/store/cart/:id/shipping-estimate
+   * Body: { country, state?, postalCode?, rateId, ratePrice, estimatedTax?, estimatedTotal? } | null to clear
+   */
+  @Put(':id/shipping-estimate')
+  @Throttle({ medium: { limit: 30, ttl: 60_000 } })
+  async setShippingEstimate(
+    @Tenant() tenantId: string,
+    @Param('id') cartId: string,
+    @Body() body: Record<string, unknown> | null,
+    @Headers('authorization') authHeader?: string,
+    @Headers('x-cart-session') sessionToken?: string,
+  ) {
+    const customerId = await this.getOptionalCustomerId(authHeader, tenantId);
+    await this.verifyCartOwnership(tenantId, cartId, customerId, sessionToken);
+    return this.cartService.setShippingEstimate(tenantId, cartId, body);
+  }
+
+  /**
    * Merge anonymous cart into customer cart
    * POST /api/v1/store/cart/merge
    */
