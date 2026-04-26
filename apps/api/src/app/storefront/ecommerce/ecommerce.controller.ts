@@ -8,6 +8,7 @@ import {
   Query,
   Body,
   Headers,
+  Req,
   BadRequestException,
   UnauthorizedException,
   UseGuards,
@@ -380,10 +381,12 @@ export class EcommerceController {
   @UseGuards(StoreAdminGuard)
   async deleteReview(
     @Tenant() tenantId: string,
-    @Param('reviewId') reviewId: string
+    @Param('reviewId') reviewId: string,
+    @Req() req: any,
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
-    return this.reviewsService.deleteReview(tenantId, reviewId);
+    const actorId = req.user?.userId ?? req.user?.sub ?? req.user?.id ?? undefined;
+    return this.reviewsService.deleteReview(tenantId, reviewId, actorId);
   }
 
   /**
@@ -394,10 +397,12 @@ export class EcommerceController {
   @UseGuards(StoreAdminGuard)
   async restoreReview(
     @Tenant() tenantId: string,
-    @Param('reviewId') reviewId: string
+    @Param('reviewId') reviewId: string,
+    @Req() req: any,
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
-    return this.reviewsService.restoreReview(tenantId, reviewId);
+    const actorId = req.user?.userId ?? req.user?.sub ?? req.user?.id ?? undefined;
+    return this.reviewsService.restoreReview(tenantId, reviewId, actorId);
   }
 
   // ============ GIFT CARDS - PUBLIC ============

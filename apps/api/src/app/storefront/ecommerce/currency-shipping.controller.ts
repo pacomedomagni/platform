@@ -219,9 +219,11 @@ export class CurrencyShippingController {
   @UseGuards(StoreAdminGuard)
   async deleteZone(
     @Tenant() tenantId: string,
+    @Req() req: Request,
     @Param('id') id: string
   ) {
-    return this.shippingService.deleteZone(tenantId, id);
+    const actorId = (req as any).user?.userId ?? (req as any).user?.sub ?? (req as any).user?.id ?? undefined;
+    return this.shippingService.deleteZone(tenantId, id, actorId);
   }
 
   /**
@@ -231,9 +233,11 @@ export class CurrencyShippingController {
   @UseGuards(StoreAdminGuard)
   async restoreZone(
     @Tenant() tenantId: string,
+    @Req() req: Request,
     @Param('id') id: string
   ) {
-    return this.shippingService.restoreZone(tenantId, id);
+    const actorId = (req as any).user?.userId ?? (req as any).user?.sub ?? (req as any).user?.id ?? undefined;
+    return this.shippingService.restoreZone(tenantId, id, actorId);
   }
 
   // ============ SHIPPING RATES - ADMIN ============

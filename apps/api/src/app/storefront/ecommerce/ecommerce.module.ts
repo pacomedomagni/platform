@@ -10,9 +10,10 @@ import { ShippingService } from './shipping.service';
 import { DbModule } from '@platform/db';
 import { StorageModule } from '@platform/storage';
 import { CustomerAuthModule } from '../auth/customer-auth.module';
+import { OperationsModule } from '../../operations/operations.module';
 
 @Module({
-  imports: [DbModule, CustomerAuthModule, StorageModule],
+  imports: [DbModule, CustomerAuthModule, StorageModule, OperationsModule],
   controllers: [EcommerceController, CurrencyShippingController],
   providers: [
     VariantsService,

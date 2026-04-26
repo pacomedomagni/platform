@@ -5,6 +5,7 @@ import {
   ConflictException,
   BadRequestException,
   OnModuleInit,
+  Optional,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
@@ -13,6 +14,7 @@ import * as postcss from 'postcss';
 import { CreateThemeDto, UpdateThemeDto } from './dto';
 import { validateThemeColors } from './interfaces/theme-colors.interface';
 import { getAllPresets, getPresetBySlug } from './presets';
+import { AuditLogService } from '../../operations/audit-log.service';
 
 @Injectable()
 export class ThemesService implements OnModuleInit {
@@ -20,7 +22,10 @@ export class ThemesService implements OnModuleInit {
   private activeThemeCache = new Map<string, { data: any; timestamp: number }>();
   private readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly auditLog?: AuditLogService,
+  ) {}
 
   /**
    * Seed preset themes on module initialization
@@ -266,7 +271,7 @@ export class ThemesService implements OnModuleInit {
   /**
    * Delete a custom theme
    */
-  async deleteTheme(id: string, tenantId: string) {
+  async deleteTheme(id: string, tenantId: string, actorId?: string) {
     const existing = await this.prisma.storeTheme.findFirst({
       where: { id, tenantId, deletedAt: null },
     });
@@ -291,6 +296,11 @@ export class ThemesService implements OnModuleInit {
       data: { deletedAt: new Date() },
     });
 
+    await this.writeAudit(tenantId, actorId, 'theme.deleted', 'StoreTheme', id, {
+      name: existing.name,
+      slug: existing.slug,
+    });
+
     return { success: true, message: 'Theme deleted successfully', deletedAt: new Date().toISOString() };
   }
 
@@ -298,7 +308,7 @@ export class ThemesService implements OnModuleInit {
    * Restore a soft-deleted theme. Used by the frontend's Undo toast within
    * the ~5s window. Idempotent: no-op for active themes.
    */
-  async restoreTheme(id: string, tenantId: string) {
+  async restoreTheme(id: string, tenantId: string, actorId?: string) {
     const existing = await this.prisma.storeTheme.findFirst({
       where: { id, tenantId },
     });
@@ -315,7 +325,33 @@ export class ThemesService implements OnModuleInit {
       data: { deletedAt: null },
     });
 
+    await this.writeAudit(tenantId, actorId, 'theme.restored', 'StoreTheme', id, {
+      name: existing.name,
+      slug: existing.slug,
+    });
+
     return { success: true };
+  }
+
+  /**
+   * Optional fire-and-forget audit write. The injected AuditLogService is
+   * marked @Optional so unit tests don't have to wire it; if the operations
+   * module isn't loaded this call is a no-op.
+   */
+  private async writeAudit(
+    tenantId: string,
+    actorId: string | undefined,
+    action: string,
+    docType: string,
+    docName: string,
+    meta?: Record<string, unknown>,
+  ) {
+    if (!this.auditLog) return;
+    try {
+      await this.auditLog.log({ tenantId, userId: actorId }, { action, docType, docName, meta });
+    } catch (e) {
+      this.logger.warn(`Theme audit write swallowed: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   /**

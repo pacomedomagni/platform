@@ -25,7 +25,11 @@ export class AuditLogQueryDto {
   @IsOptional()
   docName?: string;
 
-  @IsEnum(['create', 'update', 'delete', 'login', 'logout', 'export', 'import', 'other'])
+  // Free-form action string. The audit catalog includes domain-specific actions like
+  // 'user.invited', 'user.role_changed', 'theme.deleted', etc. Constraining to a fixed
+  // enum here would mean every new auditable event needs a DTO change — that's why this
+  // is just @IsString.
+  @IsString()
   @IsOptional()
   action?: string;
 

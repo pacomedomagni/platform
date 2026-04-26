@@ -82,6 +82,18 @@ export interface InviteEmailSender {
   }): Promise<void>;
 }
 
+/**
+ * Subset of AuditLogService we use. Optional so unit tests can omit it.
+ * Calls are fire-and-forget — if the audit write fails the main operation
+ * still returns success (matches the existing AuditLogService.log behaviour).
+ */
+export interface AuditLogger {
+  log(
+    ctx: { tenantId: string; userId?: string },
+    entry: { action: string; docType: string; docName: string; meta?: Record<string, unknown> },
+  ): Promise<void>;
+}
+
 @Injectable()
 export class AdminUsersService {
   private readonly logger = new Logger(AdminUsersService.name);
@@ -89,7 +101,25 @@ export class AdminUsersService {
   constructor(
     private readonly db: DbService,
     private readonly emailSender?: InviteEmailSender,
+    private readonly audit?: AuditLogger,
   ) {}
+
+  private async writeAudit(
+    tenantId: string,
+    actorId: string | undefined,
+    action: string,
+    docType: string,
+    docName: string,
+    meta?: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this.audit) return;
+    try {
+      await this.audit.log({ tenantId, userId: actorId }, { action, docType, docName, meta });
+    } catch (e) {
+      // AuditLogService already logs internally on failure; defence in depth.
+      this.logger.warn(`Audit write swallowed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
 
   // ─── User listing & lifecycle ─────────────────────────────────────────────
 
@@ -124,7 +154,8 @@ export class AdminUsersService {
   async update(
     tenantId: string,
     id: string,
-    body: { firstName?: string; lastName?: string; roles?: string[]; emailVerified?: boolean }
+    body: { firstName?: string; lastName?: string; roles?: string[]; emailVerified?: boolean },
+    actorId?: string,
   ) {
     const existing = await this.db.user.findFirst({ where: { tenantId, id } });
     if (!existing) throw new HttpException('User not found', HttpStatus.NOT_FOUND);
@@ -147,10 +178,20 @@ export class AdminUsersService {
       data.emailVerifiedAt = body.emailVerified ? new Date() : null;
     }
 
-    return this.db.user.update({ where: { id }, data, select: userSelect });
+    const result = await this.db.user.update({ where: { id }, data, select: userSelect });
+
+    // Distinguish role changes from generic updates so the audit log is searchable.
+    const rolesChanged = body.roles !== undefined && !arraysEqual(existing.roles, sanitizeRoles(body.roles));
+    await this.writeAudit(tenantId, actorId, rolesChanged ? 'user.role_changed' : 'user.updated', 'User', id, {
+      email: existing.email,
+      ...(rolesChanged ? { previousRoles: existing.roles, newRoles: sanitizeRoles(body.roles!) } : {}),
+      ...(body.emailVerified !== undefined ? { emailVerified: body.emailVerified } : {}),
+    });
+
+    return result;
   }
 
-  async remove(tenantId: string, id: string) {
+  async remove(tenantId: string, id: string, actorId?: string) {
     const existing = await this.db.user.findFirst({ where: { tenantId, id } });
     if (!existing) throw new HttpException('User not found', HttpStatus.NOT_FOUND);
     if (existing.roles.includes('owner')) {
@@ -160,6 +201,10 @@ export class AdminUsersService {
       }
     }
     await this.db.user.delete({ where: { id } });
+    await this.writeAudit(tenantId, actorId, 'user.deleted', 'User', id, {
+      email: existing.email,
+      roles: existing.roles,
+    });
     return { success: true };
   }
 
@@ -241,6 +286,7 @@ export class AdminUsersService {
     }
     const inviterName = inviter ? [inviter.firstName, inviter.lastName].filter(Boolean).join(' ') || null : null;
 
+    let emailDelivered = !!this.emailSender;
     if (this.emailSender) {
       try {
         await this.emailSender.sendInviteEmail({
@@ -253,8 +299,7 @@ export class AdminUsersService {
         });
       } catch (err) {
         this.logger.error(`Failed to send invite email to ${email}: ${err}`);
-        // Don't fail the request — operator can resend. Surface a flag so callers know.
-        return { ...invite, inviteUrl, emailDelivered: false };
+        emailDelivered = false;
       }
     } else {
       this.logger.warn(
@@ -262,13 +307,19 @@ export class AdminUsersService {
       );
     }
 
+    await this.writeAudit(tenantId, body.invitedById, 'user.invited', 'UserInvite', invite.id, {
+      email,
+      roles: sanitizedRoles,
+      emailDelivered,
+    });
+
     // Return inviteUrl in non-production so operators can copy/paste during dev/smoke;
     // in production we omit it so a logging compromise doesn't leak the token.
     const includeUrl = process.env.NODE_ENV !== 'production';
     return {
       ...invite,
       ...(includeUrl ? { inviteUrl } : {}),
-      emailDelivered: !!this.emailSender,
+      emailDelivered,
     };
   }
 
@@ -283,20 +334,23 @@ export class AdminUsersService {
     return { data: invites, total: invites.length };
   }
 
-  async revokeInvite(tenantId: string, id: string) {
+  async revokeInvite(tenantId: string, id: string, actorId?: string) {
     const invite = await this.db.userInvite.findFirst({ where: { tenantId, id } });
     if (!invite) throw new HttpException('Invite not found', HttpStatus.NOT_FOUND);
     if (invite.status !== 'PENDING') {
       throw new HttpException(`Cannot revoke a ${invite.status.toLowerCase()} invite.`, HttpStatus.BAD_REQUEST);
     }
     await this.db.userInvite.update({ where: { id }, data: { status: 'REVOKED' } });
+    await this.writeAudit(tenantId, actorId, 'user.invite_revoked', 'UserInvite', id, {
+      email: invite.email,
+    });
     return { success: true };
   }
 
   /**
    * Re-issue the email + extend the expiry for an outstanding invite. Token is unchanged.
    */
-  async resendInvite(tenantId: string, id: string, opts?: { acceptUrlBase?: string }) {
+  async resendInvite(tenantId: string, id: string, actorId?: string, opts?: { acceptUrlBase?: string }) {
     const invite = await this.db.userInvite.findFirst({ where: { tenantId, id } });
     if (!invite) throw new HttpException('Invite not found', HttpStatus.NOT_FOUND);
     if (invite.status !== 'PENDING') {
@@ -343,6 +397,11 @@ export class AdminUsersService {
     } else {
       this.logger.warn(`Invite resent but no EmailSender wired. URL: ${inviteUrl}`);
     }
+
+    await this.writeAudit(tenantId, actorId, 'user.invite_resent', 'UserInvite', id, {
+      email: invite.email,
+      resentCount: invite.resentCount + 1,
+    });
 
     const includeUrl = process.env.NODE_ENV !== 'production';
     return {
@@ -441,6 +500,13 @@ export class AdminUsersService {
       data: { status: 'ACCEPTED', acceptedAt: new Date(), acceptedUserId: user.id },
     });
 
+    // Audit: actor is the new user themselves (they accepted), so userId = user.id.
+    await this.writeAudit(invite.tenantId, user.id, 'user.invite_accepted', 'User', user.id, {
+      email: invite.email,
+      roles: user.roles,
+      inviteId: invite.id,
+    });
+
     return { user, tenantId: invite.tenantId };
   }
 }
@@ -456,6 +522,13 @@ function sanitizeRoles(input?: string[]): string[] {
 
 function hashToken(raw: string): string {
   return createHash('sha256').update(raw).digest('hex');
+}
+
+function arraysEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const sa = [...a].sort();
+  const sb = [...b].sort();
+  return sa.every((v, i) => v === sb[i]);
 }
 
 const userSelect = {

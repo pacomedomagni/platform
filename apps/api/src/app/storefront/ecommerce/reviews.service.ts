@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Optional, Logger } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { Prisma, ProductReview } from '@prisma/client';
 import {
@@ -7,10 +7,31 @@ import {
   ModerateReviewDto,
   AdminRespondDto,
 } from './dto';
+import { AuditLogService } from '../../operations/audit-log.service';
 
 @Injectable()
 export class ReviewsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(ReviewsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly auditLog?: AuditLogService,
+  ) {}
+
+  private async writeAudit(
+    tenantId: string,
+    actorId: string | undefined,
+    action: string,
+    docName: string,
+    meta?: Record<string, unknown>,
+  ) {
+    if (!this.auditLog) return;
+    try {
+      await this.auditLog.log({ tenantId, userId: actorId }, { action, docType: 'ProductReview', docName, meta });
+    } catch (e) {
+      this.logger.warn(`Review audit write swallowed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
 
   // ============ PUBLIC ENDPOINTS ============
 
@@ -372,7 +393,7 @@ export class ReviewsService {
     });
   }
 
-  async deleteReview(tenantId: string, reviewId: string) {
+  async deleteReview(tenantId: string, reviewId: string, actorId?: string) {
     const review = await this.prisma.productReview.findFirst({
       where: { id: reviewId, tenantId, deletedAt: null },
     });
@@ -392,6 +413,11 @@ export class ReviewsService {
     // Update product rating stats — soft-deleted reviews are excluded from aggregates.
     await this.updateProductRatingStats(tenantId, review.productListingId);
 
+    await this.writeAudit(tenantId, actorId, 'review.deleted', reviewId, {
+      productListingId: review.productListingId,
+      rating: review.rating,
+    });
+
     return { success: true, deletedAt: new Date().toISOString() };
   }
 
@@ -400,7 +426,7 @@ export class ReviewsService {
    * toast within the ~5s window. Returns 404 if the review doesn't exist or
    * was never soft-deleted.
    */
-  async restoreReview(tenantId: string, reviewId: string) {
+  async restoreReview(tenantId: string, reviewId: string, actorId?: string) {
     const review = await this.prisma.productReview.findFirst({
       where: { id: reviewId, tenantId },
     });
@@ -419,6 +445,10 @@ export class ReviewsService {
     });
 
     await this.updateProductRatingStats(tenantId, review.productListingId);
+
+    await this.writeAudit(tenantId, actorId, 'review.restored', reviewId, {
+      productListingId: review.productListingId,
+    });
 
     return { success: true };
   }

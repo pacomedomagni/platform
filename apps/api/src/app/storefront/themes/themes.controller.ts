@@ -131,9 +131,11 @@ export class ThemesController {
   @UseGuards(StoreAdminGuard)
   async deleteTheme(
     @Tenant() tenantId: string,
+    @Req() req: Request,
     @Param('id') id: string
   ) {
-    return this.themesService.deleteTheme(id, tenantId);
+    const actorId = (req as any).user?.userId ?? (req as any).user?.sub ?? (req as any).user?.id ?? undefined;
+    return this.themesService.deleteTheme(id, tenantId, actorId);
   }
 
   /**
@@ -144,9 +146,11 @@ export class ThemesController {
   @UseGuards(StoreAdminGuard)
   async restoreTheme(
     @Tenant() tenantId: string,
+    @Req() req: Request,
     @Param('id') id: string
   ) {
-    return this.themesService.restoreTheme(id, tenantId);
+    const actorId = (req as any).user?.userId ?? (req as any).user?.sub ?? (req as any).user?.id ?? undefined;
+    return this.themesService.restoreTheme(id, tenantId, actorId);
   }
 
   /**

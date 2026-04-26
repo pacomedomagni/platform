@@ -64,20 +64,22 @@ export class AdminUsersController {
     },
   ) {
     if (!body?.email) throw new HttpException('Email required', HttpStatus.BAD_REQUEST);
-    const invitedById = req.user?.sub ?? req.user?.id ?? null;
+    const invitedById = req.user?.userId ?? req.user?.sub ?? req.user?.id ?? null;
     return this.users.invite(tenantId, { ...body, invitedById });
   }
 
   @Post('invites/:id/resend')
   @RequirePermission('users:invite')
-  resendInvite(@Tenant() tenantId: string, @Param('id') id: string) {
-    return this.users.resendInvite(tenantId, id);
+  resendInvite(@Tenant() tenantId: string, @Req() req: any, @Param('id') id: string) {
+    const actorId = req.user?.userId ?? req.user?.sub ?? req.user?.id ?? undefined;
+    return this.users.resendInvite(tenantId, id, actorId);
   }
 
   @Delete('invites/:id')
   @RequirePermission('users:invite')
-  revokeInvite(@Tenant() tenantId: string, @Param('id') id: string) {
-    return this.users.revokeInvite(tenantId, id);
+  revokeInvite(@Tenant() tenantId: string, @Req() req: any, @Param('id') id: string) {
+    const actorId = req.user?.userId ?? req.user?.sub ?? req.user?.id ?? undefined;
+    return this.users.revokeInvite(tenantId, id, actorId);
   }
 
   // ─── Active users ─────────────────────────────────────────────────────────
@@ -98,15 +100,18 @@ export class AdminUsersController {
   @RequirePermission('users:write')
   update(
     @Tenant() tenantId: string,
+    @Req() req: any,
     @Param('id') id: string,
     @Body() body: { firstName?: string; lastName?: string; roles?: string[]; emailVerified?: boolean },
   ) {
-    return this.users.update(tenantId, id, body);
+    const actorId = req.user?.userId ?? req.user?.sub ?? req.user?.id ?? undefined;
+    return this.users.update(tenantId, id, body, actorId);
   }
 
   @Delete(':id')
   @RequirePermission('users:delete')
-  remove(@Tenant() tenantId: string, @Param('id') id: string) {
-    return this.users.remove(tenantId, id);
+  remove(@Tenant() tenantId: string, @Req() req: any, @Param('id') id: string) {
+    const actorId = req.user?.userId ?? req.user?.sub ?? req.user?.id ?? undefined;
+    return this.users.remove(tenantId, id, actorId);
   }
 }

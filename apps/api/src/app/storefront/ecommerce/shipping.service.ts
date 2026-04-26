@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Optional, Logger } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
 import { Prisma } from '@prisma/client';
 import {
@@ -14,12 +14,32 @@ import {
   UpdateShipmentDto,
   AddTrackingEventDto,
 } from './currency-shipping.dto';
+import { AuditLogService } from '../../operations/audit-log.service';
 
 @Injectable()
 export class ShippingService {
   private readonly logger = new Logger(ShippingService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly auditLog?: AuditLogService,
+  ) {}
+
+  private async writeAudit(
+    tenantId: string,
+    actorId: string | undefined,
+    action: string,
+    docType: string,
+    docName: string,
+    meta?: Record<string, unknown>,
+  ) {
+    if (!this.auditLog) return;
+    try {
+      await this.auditLog.log({ tenantId, userId: actorId }, { action, docType, docName, meta });
+    } catch (e) {
+      this.logger.warn(`Shipping audit write swallowed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
 
   // ==========================================
   // Carrier Management
@@ -172,7 +192,7 @@ export class ShippingService {
     });
   }
 
-  async deleteZone(tenantId: string, id: string) {
+  async deleteZone(tenantId: string, id: string, actorId?: string) {
     const zone = await this.prisma.shippingZone.findFirst({
       where: { id, tenantId, deletedAt: null },
     });
@@ -186,13 +206,19 @@ export class ShippingService {
       where: { id, tenantId },
       data: { deletedAt: new Date() },
     });
+
+    await this.writeAudit(tenantId, actorId, 'shipping_zone.deleted', 'ShippingZone', id, {
+      name: zone.name,
+      countries: zone.countries,
+    });
+
     return { success: true, deletedAt: new Date().toISOString() };
   }
 
   /**
    * Restore a soft-deleted zone. Idempotent.
    */
-  async restoreZone(tenantId: string, id: string) {
+  async restoreZone(tenantId: string, id: string, actorId?: string) {
     const zone = await this.prisma.shippingZone.findFirst({
       where: { id, tenantId },
     });
@@ -208,6 +234,11 @@ export class ShippingService {
       where: { id, tenantId },
       data: { deletedAt: null },
     });
+
+    await this.writeAudit(tenantId, actorId, 'shipping_zone.restored', 'ShippingZone', id, {
+      name: zone.name,
+    });
+
     return { success: true };
   }
 
