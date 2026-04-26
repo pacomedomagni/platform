@@ -322,4 +322,34 @@ export class AdminCustomersService {
       createdAt: updated.createdAt.toISOString(),
     };
   }
+
+  /**
+   * Bulk set active/inactive on customers. One transactional updateMany call;
+   * tenant scope enforced in WHERE so cross-tenant ids silently no-op.
+   * On deactivation, also increments tokenVersion (revokes all JWTs).
+   */
+  async bulkSetActive(tenantId: string, ids: string[], isActive: boolean) {
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return { ok: 0, failed: 0, ids: [] as string[] };
+    }
+    const targets = await this.prisma.storeCustomer.findMany({
+      where: { id: { in: ids }, tenantId },
+      select: { id: true },
+    });
+    const validIds = targets.map((t) => t.id);
+
+    const result = await this.prisma.storeCustomer.updateMany({
+      where: { id: { in: validIds }, tenantId },
+      data: {
+        isActive,
+        ...(isActive === false ? { tokenVersion: { increment: 1 } } : {}),
+      },
+    });
+
+    return {
+      ok: result.count,
+      failed: ids.length - result.count,
+      ids: validIds,
+    };
+  }
 }

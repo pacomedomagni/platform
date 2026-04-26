@@ -161,6 +161,41 @@ export class ProductsController {
   }
 
   /**
+   * Bulk publish or unpublish products.
+   * POST /api/v1/store/admin/products/bulk/publish
+   * Body: { ids: string[], isPublished: boolean }
+   */
+  @Post('admin/products/bulk/publish')
+  @UseGuards(StoreAdminGuard)
+  async bulkSetPublished(
+    @Tenant() tenantId: string,
+    @Body() body: { ids: string[]; isPublished: boolean }
+  ) {
+    if (!tenantId) throw new BadRequestException('Tenant ID required');
+    if (!Array.isArray(body?.ids)) throw new BadRequestException('ids[] required');
+    if (body.ids.length > 500) throw new BadRequestException('Maximum 500 ids per bulk operation');
+    if (typeof body.isPublished !== 'boolean') throw new BadRequestException('isPublished boolean required');
+    return this.productsService.bulkSetPublished(tenantId, body.ids, body.isPublished);
+  }
+
+  /**
+   * Bulk soft-delete products. Single transactional update; does not fan out.
+   * POST /api/v1/store/admin/products/bulk/delete
+   * Body: { ids: string[] }
+   */
+  @Post('admin/products/bulk/delete')
+  @UseGuards(StoreAdminGuard)
+  async bulkDelete(
+    @Tenant() tenantId: string,
+    @Body() body: { ids: string[] }
+  ) {
+    if (!tenantId) throw new BadRequestException('Tenant ID required');
+    if (!Array.isArray(body?.ids)) throw new BadRequestException('ids[] required');
+    if (body.ids.length > 500) throw new BadRequestException('Maximum 500 ids per bulk operation');
+    return this.productsService.bulkDelete(tenantId, body.ids);
+  }
+
+  /**
    * Simple product creation (merchant-friendly, auto-creates ERP Item)
    * POST /api/v1/store/admin/products/simple
    */

@@ -1,10 +1,12 @@
 import {
+  BadRequestException,
+  Body,
   Controller,
   Get,
-  Put,
   Param,
+  Post,
+  Put,
   Query,
-  Body,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -105,5 +107,27 @@ export class AdminCustomersController {
     @Body() body: UpdateCustomerNotesDto,
   ) {
     return this.customersService.updateCustomerNotes(tenantId, customerId, body.notes);
+  }
+
+  /**
+   * Bulk activate/deactivate customers — single transactional update.
+   * POST /api/v1/store/admin/customers/bulk/active
+   * Body: { ids: string[], isActive: boolean }
+   */
+  @Post('bulk/active')
+  async bulkSetActive(
+    @Tenant() tenantId: string,
+    @Body() body: { ids: string[]; isActive: boolean },
+  ) {
+    if (!Array.isArray(body?.ids)) {
+      throw new BadRequestException('ids[] required');
+    }
+    if (body.ids.length > 500) {
+      throw new BadRequestException('Maximum 500 ids per bulk operation');
+    }
+    if (typeof body.isActive !== 'boolean') {
+      throw new BadRequestException('isActive boolean required');
+    }
+    return this.customersService.bulkSetActive(tenantId, body.ids, body.isActive);
   }
 }

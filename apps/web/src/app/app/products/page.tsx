@@ -310,62 +310,81 @@ function ProductsInner() {
     },
   ];
 
-  // Bulk actions
+  // Bulk actions — single transactional call to the API instead of per-row fan-out.
+  // Server returns { ok, failed, ids } so the toast can stay accurate without us
+  // tallying client-side.
   const runBulkPublish = async (publish: boolean) => {
     if (selectedIds.length === 0) return;
     setBulkBusy(true);
     const verb = publish ? 'Published' : 'Unpublished';
-    const results = await Promise.allSettled(
-      selectedIds.map((id) =>
-        api.put(`/v1/store/admin/products/${id}`, { isPublished: publish }),
-      ),
-    );
-    const ok = results.filter((r) => r.status === 'fulfilled').length;
-    const failed = results.length - ok;
-    if (ok > 0) {
-      toast({
-        title: `${verb} ${ok} product${ok === 1 ? '' : 's'}`,
-        description: failed > 0 ? `${failed} failed.` : undefined,
-        variant: failed > 0 ? 'destructive' : 'success',
+    try {
+      const res = await api.post('/v1/store/admin/products/bulk/publish', {
+        ids: selectedIds,
+        isPublished: publish,
       });
-    } else {
+      const result = res.data?.data ?? res.data;
+      const ok = result?.ok ?? 0;
+      const failed = result?.failed ?? 0;
+      if (ok > 0) {
+        toast({
+          title: `${verb} ${ok} product${ok === 1 ? '' : 's'}`,
+          description: failed > 0 ? `${failed} skipped (not found or wrong tenant).` : undefined,
+          variant: failed > 0 ? 'destructive' : 'success',
+        });
+      } else {
+        toast({
+          title: `Failed to ${publish ? 'publish' : 'unpublish'}`,
+          description: 'No products were updated.',
+          variant: 'destructive',
+        });
+      }
+    } catch (err: any) {
       toast({
         title: `Failed to ${publish ? 'publish' : 'unpublish'}`,
-        description: 'No products were updated.',
+        description: err?.response?.data?.message || err?.message || 'Bulk request failed.',
         variant: 'destructive',
       });
+    } finally {
+      setSelectedIds([]);
+      setBulkBusy(false);
+      setConfirmState(null);
+      loadProducts('refresh');
     }
-    setSelectedIds([]);
-    setBulkBusy(false);
-    setConfirmState(null);
-    loadProducts('refresh');
   };
 
   const runBulkDelete = async () => {
     if (selectedIds.length === 0) return;
     setBulkBusy(true);
-    const results = await Promise.allSettled(
-      selectedIds.map((id) => api.delete(`/v1/store/admin/products/${id}`)),
-    );
-    const ok = results.filter((r) => r.status === 'fulfilled').length;
-    const failed = results.length - ok;
-    if (ok > 0) {
-      toast({
-        title: `Deleted ${ok} product${ok === 1 ? '' : 's'}`,
-        description: failed > 0 ? `${failed} failed.` : undefined,
-        variant: failed > 0 ? 'destructive' : 'success',
-      });
-    } else {
+    try {
+      const res = await api.post('/v1/store/admin/products/bulk/delete', { ids: selectedIds });
+      const result = res.data?.data ?? res.data;
+      const ok = result?.ok ?? 0;
+      const failed = result?.failed ?? 0;
+      if (ok > 0) {
+        toast({
+          title: `Deleted ${ok} product${ok === 1 ? '' : 's'}`,
+          description: failed > 0 ? `${failed} skipped.` : undefined,
+          variant: failed > 0 ? 'destructive' : 'success',
+        });
+      } else {
+        toast({
+          title: 'Failed to delete',
+          description: 'No products were deleted.',
+          variant: 'destructive',
+        });
+      }
+    } catch (err: any) {
       toast({
         title: 'Failed to delete',
-        description: 'No products were deleted.',
+        description: err?.response?.data?.message || err?.message || 'Bulk request failed.',
         variant: 'destructive',
       });
+    } finally {
+      setSelectedIds([]);
+      setBulkBusy(false);
+      setConfirmState(null);
+      loadProducts('refresh');
     }
-    setSelectedIds([]);
-    setBulkBusy(false);
-    setConfirmState(null);
-    loadProducts('refresh');
   };
 
   const confirmAction = async () => {

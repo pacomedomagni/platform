@@ -675,6 +675,74 @@ export class ProductsService {
     return { success: true };
   }
 
+  // ─── Batch operations ────────────────────────────────────────────────────
+  // These replace the old frontend pattern of fanning out per-row mutations
+  // via Promise.allSettled. A single transactional updateMany scopes by
+  // tenantId in the WHERE clause so cross-tenant id leakage is impossible
+  // at the SQL level. The returned `{ ok, failed, ids }` shape mirrors what
+  // the UI used to compute itself.
+
+  /**
+   * Bulk publish/unpublish products by id.
+   * Tenant scope is enforced in the WHERE clause; ids belonging to other tenants
+   * silently no-op (the updateMany count won't include them).
+   */
+  async bulkSetPublished(tenantId: string, ids: string[], isPublished: boolean) {
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return { ok: 0, failed: 0, ids: [] as string[] };
+    }
+    const before = await this.prisma.productListing.findMany({
+      where: { id: { in: ids }, tenantId, deletedAt: null },
+      select: { id: true },
+    });
+    const validIds = before.map((p) => p.id);
+
+    const result = await this.prisma.productListing.updateMany({
+      where: { id: { in: validIds }, tenantId, deletedAt: null },
+      data: { isPublished },
+    });
+
+    return {
+      ok: result.count,
+      failed: ids.length - result.count,
+      ids: validIds,
+    };
+  }
+
+  /**
+   * Bulk soft-delete products by id. Tenant scoped, transactional.
+   */
+  async bulkDelete(tenantId: string, ids: string[]) {
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return { ok: 0, failed: 0, ids: [] as string[] };
+    }
+    const targets = await this.prisma.productListing.findMany({
+      where: { id: { in: ids }, tenantId, deletedAt: null },
+      select: { id: true, slug: true, displayName: true },
+    });
+
+    const now = new Date();
+    const result = await this.prisma.productListing.updateMany({
+      where: { id: { in: targets.map((t) => t.id) }, tenantId, deletedAt: null },
+      data: { isPublished: false, deletedAt: now },
+    });
+
+    // Fire webhooks for each successfully soft-deleted product.
+    for (const t of targets) {
+      this.webhookService.triggerEvent({ tenantId }, {
+        event: 'product.deleted',
+        payload: { productId: t.id, slug: t.slug, displayName: t.displayName },
+        timestamp: now,
+      }).catch(() => { /* silent */ });
+    }
+
+    return {
+      ok: result.count,
+      failed: ids.length - result.count,
+      ids: targets.map((t) => t.id),
+    };
+  }
+
   /**
    * Create a category (admin)
    */

@@ -411,30 +411,39 @@ function CustomersInner() {
   const runBulkDeactivate = async () => {
     if (selectedIds.length === 0) return;
     setBulkBusy(true);
-    const results = await Promise.allSettled(
-      selectedIds.map((id) =>
-        api.put(`/v1/store/admin/customers/${id}`, { isActive: false }),
-      ),
-    );
-    const ok = results.filter((r) => r.status === 'fulfilled').length;
-    const failed = results.length - ok;
-    if (ok > 0) {
-      toast({
-        title: `Deactivated ${ok} customer${ok === 1 ? '' : 's'}`,
-        description: failed > 0 ? `${failed} failed.` : undefined,
-        variant: failed > 0 ? 'destructive' : 'success',
+    try {
+      const res = await api.post('/v1/store/admin/customers/bulk/active', {
+        ids: selectedIds,
+        isActive: false,
       });
-    } else {
+      const result = res.data?.data ?? res.data;
+      const ok = result?.ok ?? 0;
+      const failed = result?.failed ?? 0;
+      if (ok > 0) {
+        toast({
+          title: `Deactivated ${ok} customer${ok === 1 ? '' : 's'}`,
+          description: failed > 0 ? `${failed} skipped (not found or wrong tenant).` : undefined,
+          variant: failed > 0 ? 'destructive' : 'success',
+        });
+      } else {
+        toast({
+          title: 'Failed to deactivate',
+          description: 'No customers were updated.',
+          variant: 'destructive',
+        });
+      }
+    } catch (err: any) {
       toast({
         title: 'Failed to deactivate',
-        description: 'No customers were updated.',
+        description: err?.response?.data?.message || err?.message || 'Bulk request failed.',
         variant: 'destructive',
       });
+    } finally {
+      setSelectedIds([]);
+      setBulkBusy(false);
+      setConfirmDeactivate(false);
+      loadCustomers('refresh');
     }
-    setSelectedIds([]);
-    setBulkBusy(false);
-    setConfirmDeactivate(false);
-    loadCustomers('refresh');
   };
 
   const emptyMessage = (() => {
