@@ -7,6 +7,7 @@ import {
   Post,
   Put,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -118,6 +119,7 @@ export class AdminCustomersController {
   async bulkSetActive(
     @Tenant() tenantId: string,
     @Body() body: { ids: string[]; isActive: boolean },
+    @Req() req: { user?: { userId?: string; sub?: string; id?: string } },
   ) {
     if (!Array.isArray(body?.ids)) {
       throw new BadRequestException('ids[] required');
@@ -128,6 +130,7 @@ export class AdminCustomersController {
     if (typeof body.isActive !== 'boolean') {
       throw new BadRequestException('isActive boolean required');
     }
-    return this.customersService.bulkSetActive(tenantId, body.ids, body.isActive);
+    const actorId = req.user?.userId ?? req.user?.sub ?? req.user?.id ?? undefined;
+    return this.customersService.bulkSetActive(tenantId, body.ids, body.isActive, actorId);
   }
 }

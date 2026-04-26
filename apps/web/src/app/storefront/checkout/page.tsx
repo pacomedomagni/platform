@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useForm } from 'react-hook-form';
@@ -34,7 +34,7 @@ const countries = [
 
 export default function CheckoutPage() {
   const router = useRouter();
-  const { items, itemCount, subtotal, shipping, tax, discount, total, cartId, clearCart, initializeCart } = useCartStore();
+  const { items, itemCount, subtotal, shipping, tax, discount, total, cartId, shippingEstimate, clearCart, initializeCart } = useCartStore();
   const { customer, isAuthenticated } = useAuthStore();
 
   const [orderId, setOrderId] = useState<string | null>(null);
@@ -130,6 +130,29 @@ export default function CheckoutPage() {
     }
   }, [customer, setValue]);
 
+  // Pre-fill shipping destination from the cart-page estimate so users don't
+  // re-enter country/state/postal if they already calculated shipping. The
+  // logged-in customer's saved address takes precedence (more specific —
+  // includes street/city), so we skip seeding when a customer address has
+  // populated the form. Runs once on mount; user edits afterwards always win.
+  // The previously-chosen rate id is remembered so fetchShippingRates can
+  // restore the selection once rates load.
+  const preselectedRateIdRef = useRef<string | null>(shippingEstimate?.rateId ?? null);
+  const didSeedFromEstimateRef = useRef(false);
+  useEffect(() => {
+    if (didSeedFromEstimateRef.current) return;
+    if (!shippingEstimate) return;
+    // Customer's saved address wins. Detect "customer pre-fill ran" by checking
+    // for a populated address line — that field has no default so it's a clean
+    // signal.
+    if (customer?.addresses?.length) return;
+    didSeedFromEstimateRef.current = true;
+    if (shippingEstimate.country) setValue('country', shippingEstimate.country);
+    if (shippingEstimate.state) setValue('state', shippingEstimate.state);
+    if (shippingEstimate.postalCode) setValue('postalCode', shippingEstimate.postalCode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shippingEstimate, customer]);
+
   // Fetch shipping rates when address country/state/postalCode changes
   const fetchShippingRates = async (country: string, state?: string, postalCode?: string) => {
     if (!country) return;
@@ -143,9 +166,19 @@ export default function CheckoutPage() {
         cartTotal: subtotal,
       });
       setShippingRates(result.rates || []);
-      // Auto-select the first rate if none selected
-      if (result.rates?.length > 0 && !selectedShippingRateId) {
-        setSelectedShippingRateId(result.rates[0].id);
+      // Functional updater so back-to-back fetches don't race against a stale
+      // closure (country + state setValue in the same tick each trigger a
+      // fetch). The cart-page rate wins on first auto-select; later refreshes
+      // see a non-null current value and bail out.
+      if (result.rates?.length > 0) {
+        setSelectedShippingRateId((current) => {
+          if (current) return current;
+          const preferred = preselectedRateIdRef.current
+            ? result.rates.find((r) => r.id === preselectedRateIdRef.current)
+            : null;
+          preselectedRateIdRef.current = null;
+          return preferred?.id ?? result.rates[0].id;
+        });
       }
     } catch {
       setShippingRates([]);

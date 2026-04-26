@@ -11,13 +11,33 @@ import {
 } from './dto';
 import { CreateSimpleProductDto } from './simple-product.dto';
 import { WebhookService } from '../../operations/webhook.service';
+import { AuditLogService } from '../../operations/audit-log.service';
+import { Optional, Logger } from '@nestjs/common';
 
 @Injectable()
 export class ProductsService {
+  private readonly logger = new Logger(ProductsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly webhookService: WebhookService,
+    @Optional() private readonly auditLog?: AuditLogService,
   ) {}
+
+  private async writeAudit(
+    tenantId: string,
+    actorId: string | undefined,
+    action: string,
+    docName: string,
+    meta?: Record<string, unknown>,
+  ) {
+    if (!this.auditLog) return;
+    try {
+      await this.auditLog.log({ tenantId, userId: actorId }, { action, docType: 'ProductListing', docName, meta });
+    } catch (e) {
+      this.logger.warn(`Product audit write swallowed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
 
   /**
    * List published products with filtering, sorting, and pagination
@@ -687,7 +707,7 @@ export class ProductsService {
    * Tenant scope is enforced in the WHERE clause; ids belonging to other tenants
    * silently no-op (the updateMany count won't include them).
    */
-  async bulkSetPublished(tenantId: string, ids: string[], isPublished: boolean) {
+  async bulkSetPublished(tenantId: string, ids: string[], isPublished: boolean, actorId?: string) {
     if (!Array.isArray(ids) || ids.length === 0) {
       return { ok: 0, failed: 0, ids: [] as string[] };
     }
@@ -702,6 +722,25 @@ export class ProductsService {
       data: { isPublished },
     });
 
+    // One summary entry per bulk call. docName='bulk' is a sentinel; the meta.ids
+    // array tells you exactly which rows were affected. We skip the audit write
+    // entirely when nothing actually changed (better signal-to-noise).
+    if (result.count > 0) {
+      await this.writeAudit(
+        tenantId,
+        actorId,
+        isPublished ? 'products.bulk_published' : 'products.bulk_unpublished',
+        'bulk',
+        {
+          requestedCount: ids.length,
+          affectedCount: result.count,
+          skippedCount: ids.length - result.count,
+          ids: validIds,
+          isPublished,
+        },
+      );
+    }
+
     return {
       ok: result.count,
       failed: ids.length - result.count,
@@ -712,7 +751,7 @@ export class ProductsService {
   /**
    * Bulk soft-delete products by id. Tenant scoped, transactional.
    */
-  async bulkDelete(tenantId: string, ids: string[]) {
+  async bulkDelete(tenantId: string, ids: string[], actorId?: string) {
     if (!Array.isArray(ids) || ids.length === 0) {
       return { ok: 0, failed: 0, ids: [] as string[] };
     }
@@ -734,6 +773,17 @@ export class ProductsService {
         payload: { productId: t.id, slug: t.slug, displayName: t.displayName },
         timestamp: now,
       }).catch(() => { /* silent */ });
+    }
+
+    if (result.count > 0) {
+      await this.writeAudit(tenantId, actorId, 'products.bulk_deleted', 'bulk', {
+        requestedCount: ids.length,
+        affectedCount: result.count,
+        skippedCount: ids.length - result.count,
+        // Snapshot of what was deleted — display names help operators understand
+        // the audit entry without joining to the (now soft-deleted) rows.
+        items: targets.map((t) => ({ id: t.id, slug: t.slug, displayName: t.displayName })),
+      });
     }
 
     return {

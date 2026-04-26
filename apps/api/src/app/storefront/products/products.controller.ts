@@ -9,6 +9,7 @@ import {
   Body,
   BadRequestException,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import { ProductsService } from './products.service';
 import {
@@ -169,13 +170,15 @@ export class ProductsController {
   @UseGuards(StoreAdminGuard)
   async bulkSetPublished(
     @Tenant() tenantId: string,
-    @Body() body: { ids: string[]; isPublished: boolean }
+    @Body() body: { ids: string[]; isPublished: boolean },
+    @Req() req: { user?: { userId?: string; sub?: string; id?: string } }
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
     if (!Array.isArray(body?.ids)) throw new BadRequestException('ids[] required');
     if (body.ids.length > 500) throw new BadRequestException('Maximum 500 ids per bulk operation');
     if (typeof body.isPublished !== 'boolean') throw new BadRequestException('isPublished boolean required');
-    return this.productsService.bulkSetPublished(tenantId, body.ids, body.isPublished);
+    const actorId = req.user?.userId ?? req.user?.sub ?? req.user?.id ?? undefined;
+    return this.productsService.bulkSetPublished(tenantId, body.ids, body.isPublished, actorId);
   }
 
   /**
@@ -187,12 +190,14 @@ export class ProductsController {
   @UseGuards(StoreAdminGuard)
   async bulkDelete(
     @Tenant() tenantId: string,
-    @Body() body: { ids: string[] }
+    @Body() body: { ids: string[] },
+    @Req() req: { user?: { userId?: string; sub?: string; id?: string } }
   ) {
     if (!tenantId) throw new BadRequestException('Tenant ID required');
     if (!Array.isArray(body?.ids)) throw new BadRequestException('ids[] required');
     if (body.ids.length > 500) throw new BadRequestException('Maximum 500 ids per bulk operation');
-    return this.productsService.bulkDelete(tenantId, body.ids);
+    const actorId = req.user?.userId ?? req.user?.sub ?? req.user?.id ?? undefined;
+    return this.productsService.bulkDelete(tenantId, body.ids, actorId);
   }
 
   /**

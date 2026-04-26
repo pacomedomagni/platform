@@ -1,9 +1,30 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { AuditLogService } from '../../operations/audit-log.service';
 
 @Injectable()
 export class AdminCustomersService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(AdminCustomersService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional() private readonly auditLog?: AuditLogService,
+  ) {}
+
+  private async writeAudit(
+    tenantId: string,
+    actorId: string | undefined,
+    action: string,
+    docName: string,
+    meta?: Record<string, unknown>,
+  ) {
+    if (!this.auditLog) return;
+    try {
+      await this.auditLog.log({ tenantId, userId: actorId }, { action, docType: 'StoreCustomer', docName, meta });
+    } catch (e) {
+      this.logger.warn(`Customer audit write swallowed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
 
   /**
    * List all customers for a tenant with optional search and segment filtering.
@@ -328,7 +349,7 @@ export class AdminCustomersService {
    * tenant scope enforced in WHERE so cross-tenant ids silently no-op.
    * On deactivation, also increments tokenVersion (revokes all JWTs).
    */
-  async bulkSetActive(tenantId: string, ids: string[], isActive: boolean) {
+  async bulkSetActive(tenantId: string, ids: string[], isActive: boolean, actorId?: string) {
     if (!Array.isArray(ids) || ids.length === 0) {
       return { ok: 0, failed: 0, ids: [] as string[] };
     }
@@ -345,6 +366,21 @@ export class AdminCustomersService {
         ...(isActive === false ? { tokenVersion: { increment: 1 } } : {}),
       },
     });
+
+    if (result.count > 0) {
+      await this.writeAudit(
+        tenantId,
+        actorId,
+        isActive ? 'customers.bulk_activated' : 'customers.bulk_deactivated',
+        'bulk',
+        {
+          requestedCount: ids.length,
+          affectedCount: result.count,
+          skippedCount: ids.length - result.count,
+          ids: validIds,
+        },
+      );
+    }
 
     return {
       ok: result.count,

@@ -16,17 +16,24 @@ function makePrismaMock() {
   };
 }
 
+function makeAuditMock() {
+  return { log: jest.fn().mockResolvedValue(undefined) };
+}
+
 const TENANT = 'tenant-bulk-c';
+const ACTOR = 'user-actor-c';
 
 describe('AdminCustomersService — bulkSetActive', () => {
   let service: AdminCustomersService;
   let prisma: ReturnType<typeof makePrismaMock>;
+  let audit: ReturnType<typeof makeAuditMock>;
 
   beforeEach(async () => {
     prisma = makePrismaMock();
+    audit = makeAuditMock();
     const moduleRef = await Test.createTestingModule({ providers: [AdminCustomersService] })
       .overrideProvider(AdminCustomersService)
-      .useFactory({ factory: () => new AdminCustomersService(prisma as any) })
+      .useFactory({ factory: () => new AdminCustomersService(prisma as any, audit as any) })
       .compile();
     service = moduleRef.get(AdminCustomersService);
   });
@@ -61,5 +68,36 @@ describe('AdminCustomersService — bulkSetActive', () => {
 
     await service.bulkSetActive(TENANT, ['c1'], true);
     expect(prisma.storeCustomer.updateMany.mock.calls[0][0].data).toEqual({ isActive: true });
+  });
+
+  it('writes one summary audit entry on deactivate (not per row)', async () => {
+    prisma.storeCustomer.findMany.mockResolvedValue([{ id: 'c1' }, { id: 'c3' }]);
+    prisma.storeCustomer.updateMany.mockResolvedValue({ count: 2 });
+
+    await service.bulkSetActive(TENANT, ['c1', 'c2-other', 'c3'], false, ACTOR);
+
+    expect(audit.log).toHaveBeenCalledTimes(1);
+    const [actor, payload] = audit.log.mock.calls[0];
+    expect(actor).toEqual({ tenantId: TENANT, userId: ACTOR });
+    expect(payload).toMatchObject({
+      action: 'customers.bulk_deactivated',
+      docType: 'StoreCustomer',
+      docName: 'bulk',
+      meta: { requestedCount: 3, affectedCount: 2, skippedCount: 1, ids: ['c1', 'c3'] },
+    });
+  });
+
+  it('uses bulk_activated action when activating', async () => {
+    prisma.storeCustomer.findMany.mockResolvedValue([{ id: 'c1' }]);
+    prisma.storeCustomer.updateMany.mockResolvedValue({ count: 1 });
+    await service.bulkSetActive(TENANT, ['c1'], true, ACTOR);
+    expect(audit.log.mock.calls[0][1].action).toBe('customers.bulk_activated');
+  });
+
+  it('does not write audit when zero rows affected', async () => {
+    prisma.storeCustomer.findMany.mockResolvedValue([]);
+    prisma.storeCustomer.updateMany.mockResolvedValue({ count: 0 });
+    await service.bulkSetActive(TENANT, ['c-other'], false, ACTOR);
+    expect(audit.log).not.toHaveBeenCalled();
   });
 });
