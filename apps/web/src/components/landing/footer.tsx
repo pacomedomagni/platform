@@ -206,8 +206,21 @@ export function Footer() {
           </div>
         </div>
 
-        <div className="mt-8 text-center text-sm text-slate-500">
+        <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 text-sm text-slate-500">
           <p>&copy; {new Date().getFullYear()} NoSlag. All rights reserved.</p>
+          <span className="hidden sm:inline">·</span>
+          <a
+            href="https://flokou.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-xs hover:text-white transition-colors"
+          >
+            <span>Powered by</span>
+            <span className="inline-flex items-baseline">
+              <span className="font-semibold tracking-tight">flokou</span>
+              <span className="w-1 h-1 ml-0.5 rounded-full bg-[#FF5A36] self-end mb-0.5" />
+            </span>
+          </a>
         </div>
       </div>
     </footer>

@@ -276,8 +276,21 @@ export default function StorefrontLayout({ children }: { children: React.ReactNo
               </div>
             </div>
           </div>
-          <div className="border-t border-border py-6 text-center text-xs text-muted-foreground">
-            © 2026 NoSlag. All rights reserved.
+          <div className="border-t border-border py-6 flex flex-col sm:flex-row items-center justify-center gap-3 text-xs text-muted-foreground">
+            <span>© 2026 NoSlag. All rights reserved.</span>
+            <span className="hidden sm:inline">·</span>
+            <a
+              href="https://flokou.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 hover:text-foreground transition-colors"
+            >
+              <span>Powered by</span>
+              <span className="inline-flex items-baseline">
+                <span className="font-semibold tracking-tight">flokou</span>
+                <span className="w-1 h-1 ml-0.5 rounded-full bg-[#FF5A36] self-end mb-0.5" />
+              </span>
+            </a>
           </div>
         </footer>
       </div>
