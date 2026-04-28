@@ -13,6 +13,15 @@ import { PrismaService } from '@platform/db';
 import { EmailService } from '@platform/email';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
+
+// O-8: precomputed bcrypt hash used to equalize timing between
+// "customer not found" and "wrong password" paths in storefront login.
+// Without this, the missing-customer branch is observably faster (no bcrypt
+// call) and an attacker can enumerate registered emails by timing.
+const DUMMY_BCRYPT_HASH = bcrypt.hashSync(
+  'O-8 timing-equalizer dummy — never matches a real password',
+  12,
+);
 import * as jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -168,12 +177,13 @@ export class CustomerAuthService implements OnModuleInit {
       },
     });
 
-    if (!customer || !customer.passwordHash) {
-      throw new UnauthorizedException('Invalid email or password');
-    }
-
-    const isValid = await bcrypt.compare(dto.password, customer.passwordHash);
-    if (!isValid) {
+    // O-8: always run bcrypt against either the real hash or a dummy of
+    // equivalent cost so the response time does not leak whether the email
+    // is registered. Validation result combines bcrypt outcome with customer
+    // existence, so a missing customer always fails — but in the same time.
+    const hashToCheck = customer?.passwordHash || DUMMY_BCRYPT_HASH;
+    const isValid = await bcrypt.compare(dto.password, hashToCheck);
+    if (!customer || !customer.passwordHash || !isValid) {
       throw new UnauthorizedException('Invalid email or password');
     }
 

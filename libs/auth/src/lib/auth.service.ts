@@ -7,6 +7,14 @@ import * as crypto from 'crypto';
 const SALT_ROUNDS = 12;
 const REFRESH_TOKEN_EXPIRY_DAYS = 30;
 
+// O-8: precomputed bcrypt hash used by validateUser() when the email does not
+// exist, so the bcrypt.compare cost is paid on both paths. Generated once at
+// module load with the same cost factor as real password hashes.
+const DUMMY_BCRYPT_HASH = bcrypt.hashSync(
+    'O-8 timing-equalizer dummy — never matches a real password',
+    SALT_ROUNDS,
+);
+
 @Injectable()
 export class AuthService {
     constructor(private readonly db: PrismaService) {}
@@ -27,23 +35,39 @@ export class AuthService {
 
     async validateUser(email: string, pass: string): Promise<any> {
         const user = await this.db.user.findUnique({ where: { email } });
-        if (user && user.password) {
-            // Detect bcrypt format: $2a$, $2b$, $2y$ are all valid prefixes
-            const isBcryptHash = /^\$2[aby]\$/.test(user.password);
 
-            if (!isBcryptHash) {
-                // Legacy plaintext password detected - force password reset
-                throw new UnauthorizedException(
-                    'Your password must be reset. Please use the forgot password flow.'
-                );
-            }
+        // O-8: equalize timing across "user not found" and "wrong password".
+        // The previous code returned immediately on missing user, which made
+        // the missing-user path observably faster (no bcrypt) and allowed an
+        // attacker to enumerate registered emails by timing login attempts.
+        // We always run bcrypt.compare against either the real hash or a
+        // dummy hash of equivalent cost. The dummy is computed once per
+        // process at module load and reused; bcrypt.compare on it always
+        // returns false in roughly the same time as a real wrong-password.
+        const hashToCheck =
+            user?.password && /^\$2[aby]\$/.test(user.password)
+                ? user.password
+                : DUMMY_BCRYPT_HASH;
 
-            const isValid = await this.verifyPassword(pass, user.password);
+        const isValid = await this.verifyPassword(pass, hashToCheck);
 
-            if (isValid) {
-                const { password, ...result } = user;
-                return result;
-            }
+        // Legacy plaintext detection still happens, but only AFTER bcrypt has
+        // run so the timing path is identical. Throws a distinct error only
+        // for genuine logged-in users on the legacy format — not on missing
+        // users where we'd be leaking enumeration via the error type.
+        if (
+            user &&
+            user.password &&
+            !/^\$2[aby]\$/.test(user.password)
+        ) {
+            throw new UnauthorizedException(
+                'Your password must be reset. Please use the forgot password flow.'
+            );
+        }
+
+        if (user && isValid) {
+            const { password, ...result } = user;
+            return result;
         }
         return null;
     }
