@@ -153,6 +153,35 @@ export class StripeConnectService {
   }
 
   /**
+   * List refunds on a connected account. C-3: source-of-truth for prior
+   * refund total when validating a new refund request.
+   */
+  async listConnectedRefunds(
+    paymentIntentId: string,
+    stripeAccount: string,
+  ): Promise<Stripe.Refund[]> {
+    const stripe = this.ensureStripe();
+    const all: Stripe.Refund[] = [];
+    let starting_after: string | undefined;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const page = await stripe.refunds.list(
+        {
+          payment_intent: paymentIntentId,
+          limit: 100,
+          ...(starting_after ? { starting_after } : {}),
+        },
+        { stripeAccount },
+      );
+      all.push(...page.data);
+      if (!page.has_more) break;
+      starting_after = page.data[page.data.length - 1]?.id;
+      if (!starting_after) break;
+    }
+    return all;
+  }
+
+  /**
    * Verify a Connect webhook event signature
    */
   verifyWebhookSignature(

@@ -186,6 +186,34 @@ export class StripeService {
   }
 
   /**
+   * List refunds for a payment intent. C-3: source-of-truth for prior refund
+   * total. Our Payment table can lag a charge.refunded webhook; Stripe is
+   * authoritative.
+   */
+  async listRefunds(paymentIntentId: string): Promise<Stripe.Refund[]> {
+    if (this.mockMode || !this.stripe) {
+      return [];
+    }
+    const all: Stripe.Refund[] = [];
+    let starting_after: string | undefined;
+    // Stripe paginates at 100; an order with >100 refunds is implausible but
+    // loop defensively.
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const page = await this.stripe.refunds.list({
+        payment_intent: paymentIntentId,
+        limit: 100,
+        ...(starting_after ? { starting_after } : {}),
+      });
+      all.push(...page.data);
+      if (!page.has_more) break;
+      starting_after = page.data[page.data.length - 1]?.id;
+      if (!starting_after) break;
+    }
+    return all;
+  }
+
+  /**
    * Retrieve a charge by ID (used to get card details when latest_charge is a string)
    */
   async retrieveCharge(chargeId: string): Promise<Stripe.Charge> {

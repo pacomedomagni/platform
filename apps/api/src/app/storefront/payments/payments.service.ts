@@ -10,7 +10,7 @@ import { FailedOperationsService } from '../../workers/failed-operations.service
 import { NotificationService, NotificationType } from '../../operations/notification.service';
 import { WebhookService } from '../../operations/webhook.service';
 import { MovementType } from '../../inventory-management/inventory-management.dto';
-import { OperationType } from '@prisma/client';
+import { OperationType, Prisma } from '@prisma/client';
 import Stripe from 'stripe';
 
 @Injectable()
@@ -157,9 +157,25 @@ export class PaymentsService {
   }
 
   /**
-   * Phase 2 W2.3: did the downstream effect of `event` actually get persisted?
-   * If yes, a duplicate delivery is safely skipped. If no (e.g. the handler
-   * crashed mid-run the first time), we must re-run.
+   * C-2: did the downstream effect of `event` actually get persisted?
+   *
+   * The previous version read `order.paymentStatus` and `order.status` as
+   * proxies for "fulfillment done". That conflation hid a real bug: a crash
+   * between Order.update(CAPTURED) and processOrderFulfillment() left
+   * paymentStatus=CAPTURED with stock un-deducted, and the next webhook
+   * delivery saw "CAPTURED" → returned true → handler skipped → stock never
+   * got deducted.
+   *
+   * The replacement reads explicit per-side-effect markers stamped by each
+   * handler step as it commits. For payment_intent.succeeded the gate is
+   * (paymentRecordedAt && stockIssuedAt); only when BOTH are set has the full
+   * effect of that webhook actually completed.
+   *
+   * For payment_intent.succeeded retries that arrive AFTER a Square refund or
+   * a charge.refunded webhook has already moved the order to REFUNDED state,
+   * we still want to skip — the legitimate succeeded effect did happen and
+   * we don't want to re-run stock deduction now. paymentRecordedAt covers
+   * that: it's set on the *original* succeeded handler and survives.
    */
   private async isWebhookOutcomePersisted(event: Stripe.Event): Promise<boolean> {
     const obj = event.data.object as {
@@ -174,20 +190,27 @@ export class PaymentsService {
 
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      select: { paymentStatus: true, status: true },
+      select: {
+        paymentStatus: true,
+        paymentRecordedAt: true,
+        stockIssuedAt: true,
+        refundProcessedAt: true,
+      },
     });
     if (!order) return true;
 
     switch (event.type) {
       case 'payment_intent.succeeded':
-        return order.paymentStatus === 'CAPTURED' || order.status === 'CONFIRMED';
+        // Both legs must be done before we skip the retry. If only payment
+        // was recorded but stock wasn't issued, we MUST re-run so
+        // processOrderFulfillment gets another chance. Its own audit-log
+        // idempotency check (deductStockForOrder) prevents double deduction
+        // if it had already partially run.
+        return !!(order.paymentRecordedAt && order.stockIssuedAt);
       case 'payment_intent.payment_failed':
-        return order.paymentStatus === 'FAILED';
+        return !!order.paymentRecordedAt;
       case 'charge.refunded':
-        return (
-          order.paymentStatus === 'REFUNDED' ||
-          order.paymentStatus === 'PARTIALLY_REFUNDED'
-        );
+        return !!order.refundProcessedAt;
       default:
         return true;
     }
@@ -230,9 +253,30 @@ export class PaymentsService {
       return;
     }
 
-    // Idempotency: skip if order already fulfilled (prevents double stock deduction on webhook retry)
-    if (order.paymentStatus === 'CAPTURED' || order.status === 'CONFIRMED') {
-      this.logger.log(`Order ${order.orderNumber} already fulfilled, skipping duplicate webhook`);
+    // C-2: split idempotency into two gates so a partial-completion retry
+    // can resume at the right step. The previous "skip everything if
+    // paymentStatus===CAPTURED" hid crashes between the order update and
+    // stock deduction.
+    //
+    //   paymentRecordedAt set + stockIssuedAt set  → fully done, safe to skip
+    //   paymentRecordedAt set + stockIssuedAt unset → payment captured but
+    //                                                  fulfillment crashed;
+    //                                                  jump to fulfillment
+    //   neither set                                → run from the top
+    const orderFullyHandled = !!(order.paymentRecordedAt && order.stockIssuedAt);
+    if (orderFullyHandled) {
+      this.logger.log(`Order ${order.orderNumber} already fully handled, skipping duplicate webhook`);
+      return;
+    }
+    const paymentAlreadyRecorded = !!order.paymentRecordedAt;
+    if (paymentAlreadyRecorded) {
+      this.logger.warn(
+        `Order ${order.orderNumber} has paymentRecordedAt but no stockIssuedAt — ` +
+        `resuming fulfillment from a prior crash`
+      );
+      // processOrderFulfillment is itself idempotent: deductStockForOrder
+      // checks the audit log for an existing stock movement before issuing.
+      await this.processOrderFulfillment(order);
       return;
     }
 
@@ -279,14 +323,18 @@ export class PaymentsService {
 
     const charges = charge || paymentIntent.latest_charge;
 
-    // Update order and create payment record
+    // Update order and create payment record.
+    // C-2: paymentRecordedAt is stamped here so the webhook idempotency check
+    // can tell that *this* side effect committed, independent of fulfillment.
+    const now = new Date();
     await this.prisma.$transaction([
       this.prisma.order.update({
         where: { id: orderId },
         data: {
           paymentStatus: 'CAPTURED',
           status: 'CONFIRMED',
-          confirmedAt: new Date(),
+          confirmedAt: now,
+          paymentRecordedAt: now,
           stripeChargeId: typeof charges === 'string' ? charges : charges?.id,
         },
       }),
@@ -302,7 +350,7 @@ export class PaymentsService {
           stripeChargeId: typeof charges === 'string' ? charges : charges?.id,
           cardBrand,
           cardLast4,
-          capturedAt: new Date(),
+          capturedAt: now,
         },
       }),
     ]);
@@ -329,7 +377,10 @@ export class PaymentsService {
       Number(order.grandTotal),
     ).catch(err => this.logger.error(`Failed to notify merchant of new order ${order.orderNumber}: ${err.message}`));
 
-    // CRITICAL: Process stock deduction and coupon tracking
+    // CRITICAL: Process stock deduction and coupon tracking.
+    // C-2: stockIssuedAt is stamped INSIDE processOrderFulfillment after the
+    // ISSUE stock movement commits, so a crash here leaves the marker null
+    // and the webhook retry resumes deduction.
     await this.processOrderFulfillment(order);
 
     // Send order confirmation email (async - non-critical)
@@ -490,6 +541,14 @@ export class PaymentsService {
     // Release stock reservations (decrement reservedQty)
     // Stock was reserved during checkout, now we release it since actualQty was already decremented
     await this.releaseStockReservations(order, warehouse.id);
+
+    // C-2: stamp stockIssuedAt so the webhook idempotency check can tell that
+    // this side effect actually completed. Done after both ISSUE and reservation
+    // release have committed.
+    await this.prisma.order.update({
+      where: { id: order.id },
+      data: { stockIssuedAt: new Date() },
+    });
 
     this.logger.log(`Stock deducted and reservations released for order: ${order.orderNumber}`);
   }
@@ -687,13 +746,17 @@ export class PaymentsService {
     }
 
     const lastError = paymentIntent.last_payment_error;
+    const now = new Date();
 
-    // Update order and create payment record
+    // Update order and create payment record.
+    // C-2: paymentRecordedAt also stamped on FAILED so the webhook idempotency
+    // check skips correctly on duplicate failed deliveries.
     await this.prisma.$transaction([
       this.prisma.order.update({
         where: { id: orderId },
         data: {
           paymentStatus: 'FAILED',
+          paymentRecordedAt: now,
         },
       }),
       this.prisma.payment.create({
@@ -707,7 +770,7 @@ export class PaymentsService {
           stripePaymentIntentId: paymentIntent.id,
           errorCode: lastError?.code || null,
           errorMessage: lastError?.message || null,
-          failedAt: new Date(),
+          failedAt: now,
         },
       }),
     ]);
@@ -802,15 +865,20 @@ export class PaymentsService {
 
     const refundAmount = (charge.amount_refunded || 0) / 100;
     const isFullRefund = charge.refunded;
+    const now = new Date();
 
-    // Create a Payment record for the refund and update order status atomically
+    // Create a Payment record for the refund and update order status atomically.
+    // C-2: refundProcessedAt always stamped here so the webhook idempotency
+    // check on charge.refunded retries skips correctly. Distinct from refundedAt,
+    // which is only set on a *full* refund.
     await this.prisma.$transaction([
       this.prisma.order.update({
         where: { id: order.id },
         data: {
           paymentStatus: isFullRefund ? 'REFUNDED' : 'PARTIALLY_REFUNDED',
           status: isFullRefund ? 'REFUNDED' : order.status,
-          refundedAt: isFullRefund ? new Date() : undefined,
+          refundedAt: isFullRefund ? now : undefined,
+          refundProcessedAt: now,
         },
       }),
       this.prisma.payment.create({
@@ -826,7 +894,7 @@ export class PaymentsService {
             ? charge.payment_intent
             : charge.payment_intent?.id,
           stripeChargeId: charge.id,
-          refundedAt: new Date(),
+          refundedAt: now,
         },
       }),
     ]);
@@ -922,7 +990,19 @@ export class PaymentsService {
   }
 
   /**
-   * Create refund for order (supports both Stripe and Square payments)
+   * Create refund for order (supports both Stripe and Square payments).
+   *
+   * C-3: serializes concurrent refund attempts via SELECT ... FOR UPDATE on
+   * the order row. Two simultaneous refund clicks used to both pass the
+   * "totalRefunded + requested <= orderTotal" check because the read happened
+   * outside any transaction. With the row lock, the second attempt sees the
+   * first's committed Payment row (or — for Stripe — its committed refund via
+   * Stripe.listRefunds) and either succeeds for the remaining balance or
+   * refuses.
+   *
+   * Stripe is the source of truth for prior refund total because our Payment
+   * table can lag the charge.refunded webhook. listRefunds survives lost
+   * webhooks, lost create-refund responses, and DB-vs-Stripe drift.
    */
   async createRefund(
     tenantId: string,
@@ -930,129 +1010,187 @@ export class PaymentsService {
     amount?: number,
     reason?: 'duplicate' | 'fraudulent' | 'requested_by_customer'
   ) {
-    const order = await this.prisma.order.findFirst({
-      where: {
-        id: orderId,
-        tenantId,
-      },
-    });
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Lock the order row. Concurrent refund attempts on the same order
+      //    serialize here. Different orders proceed in parallel.
+      const lockedRows = await tx.$queryRaw<Array<{
+        id: string;
+        tenantId: string;
+        grandTotal: Prisma.Decimal;
+        paymentStatus: string;
+        stripePaymentIntentId: string | null;
+        currency: string;
+      }>>`
+        SELECT id, "tenantId", "grandTotal", "paymentStatus",
+               "stripePaymentIntentId", currency
+          FROM orders
+         WHERE id = ${orderId} AND "tenantId" = ${tenantId}
+         FOR UPDATE
+      `;
+      const order = lockedRows[0];
+      if (!order) {
+        throw new NotFoundException('Order not found');
+      }
+      if (!['CAPTURED', 'PARTIALLY_REFUNDED'].includes(order.paymentStatus)) {
+        throw new BadRequestException('Order payment must be captured before refunding');
+      }
 
-    if (!order) {
-      throw new NotFoundException('Order not found');
-    }
-
-    if (!['CAPTURED', 'PARTIALLY_REFUNDED'].includes(order.paymentStatus)) {
-      throw new BadRequestException('Order payment must be captured before refunding');
-    }
-
-    // Validate refund amount
-    const orderTotal = Number(order.grandTotal);
-    if (amount !== undefined) {
-      if (amount <= 0) {
+      // 2. Compute totals in cents end-to-end so a half-cent never silently
+      //    rounds in the attacker's favor.
+      const orderTotalCents = Money.toCents(Money.dec(order.grandTotal as never));
+      const requestedCents = amount != null
+        ? Money.toCents(Money.dec(amount))
+        : orderTotalCents;
+      if (requestedCents <= 0) {
         throw new BadRequestException('Refund amount must be positive');
       }
-      if (amount > orderTotal) {
-        throw new BadRequestException(`Refund amount (${amount}) exceeds order total (${orderTotal})`);
+      if (requestedCents > orderTotalCents) {
+        throw new BadRequestException(
+          `Refund amount (${requestedCents}c) exceeds order total (${orderTotalCents}c)`,
+        );
       }
-    }
 
-    // Track cumulative refunds to prevent exceeding order total
-    // Query by type='REFUND' OR status='REFUNDED' to catch all refund records
-    const existingRefunds = await this.prisma.payment.findMany({
-      where: {
-        orderId,
-        OR: [
-          { type: 'REFUND' },
-          { status: 'REFUNDED' },
-        ],
-      },
-    });
-    const totalRefunded = existingRefunds.reduce((sum, p) => sum + Number(p.amount), 0);
-    const refundAmount = amount ?? orderTotal;
+      // 3. Determine prior refunded total. Stripe is authoritative; fall back
+      //    to our Payment table for Square (no listRefunds equivalent yet).
+      let priorRefundedCents: number;
+      const isStripeOrder = !!order.stripePaymentIntentId;
+      let stripeConnectAccountId: string | null = null;
 
-    if (totalRefunded + refundAmount > orderTotal) {
+      if (isStripeOrder) {
+        const tenant = await tx.tenant.findUnique({
+          where: { id: tenantId },
+          select: { stripeConnectAccountId: true },
+        });
+        stripeConnectAccountId = tenant?.stripeConnectAccountId ?? null;
+
+        const stripeRefunds = stripeConnectAccountId
+          ? await this.stripeConnectService.listConnectedRefunds(
+              order.stripePaymentIntentId!,
+              stripeConnectAccountId,
+            )
+          : await this.stripeService.listRefunds(order.stripePaymentIntentId!);
+
+        priorRefundedCents = stripeRefunds.reduce(
+          (sum, r) => sum + (r.amount || 0),
+          0,
+        );
+      } else {
+        const existing = await tx.payment.findMany({
+          where: {
+            orderId,
+            OR: [{ type: 'REFUND' }, { status: 'REFUNDED' }],
+          },
+        });
+        priorRefundedCents = existing.reduce(
+          (sum, p) => sum + Money.toCents(Money.dec(p.amount as never)),
+          0,
+        );
+      }
+
+      if (priorRefundedCents + requestedCents > orderTotalCents) {
+        throw new BadRequestException(
+          `Refund would exceed order total. ` +
+          `Already refunded: ${priorRefundedCents}c, requested: ${requestedCents}c, ` +
+          `order total: ${orderTotalCents}c`,
+        );
+      }
+
+      // 4. Dispatch to provider. The Stripe call runs INSIDE the tx-await
+      //    chain. If we crash after Stripe processes but before we commit,
+      //    the row lock will be released by Postgres on connection drop and
+      //    a retry will see the prior refund via listRefunds (above) and
+      //    either short-circuit (idempotency-key match) or refuse.
+      if (isStripeOrder) {
+        return this.createStripeRefundLocked(
+          order,
+          tenantId,
+          orderId,
+          amount,
+          reason,
+          priorRefundedCents,
+          requestedCents,
+          stripeConnectAccountId,
+          tx,
+        );
+      }
+
+      const tenant = await tx.tenant.findUnique({
+        where: { id: tenantId },
+        select: { paymentProvider: true },
+      });
+      if (tenant?.paymentProvider === 'square') {
+        return this.createSquareRefundLocked(
+          order,
+          tenantId,
+          orderId,
+          amount,
+          reason,
+          priorRefundedCents,
+          requestedCents,
+          tx,
+        );
+      }
+
       throw new BadRequestException(
-        `Refund would exceed order total. Already refunded: ${totalRefunded}, requested: ${refundAmount}, order total: ${orderTotal}`
+        'Order has no associated payment or unsupported payment provider',
       );
-    }
-
-    // Determine payment provider: Stripe orders have stripePaymentIntentId on the order,
-    // Square orders do not. Fall back to checking the tenant's paymentProvider setting.
-    const isStripeOrder = !!order.stripePaymentIntentId;
-
-    if (isStripeOrder) {
-      return this.createStripeRefund(order, tenantId, orderId, amount, reason, existingRefunds);
-    }
-
-    // Check if this is a Square order by looking at the tenant's payment provider
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: tenantId },
-      select: { paymentProvider: true },
+    }, {
+      // Order-level lock; uncontended in practice for a given order.
+      timeout: 30_000,
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
     });
-
-    if (tenant?.paymentProvider === 'square') {
-      return this.createSquareRefund(order, tenantId, orderId, amount, reason);
-    }
-
-    throw new BadRequestException('Order has no associated payment or unsupported payment provider');
   }
 
   /**
-   * Process a Stripe refund for an order
+   * Process a Stripe refund for an order. Runs INSIDE the
+   * SELECT ... FOR UPDATE transaction opened by createRefund().
+   *
+   * C-3 idempotency key: previously `refund_${orderId}_${amountCents}`. That
+   * was stable for the *same* logical refund, but a partial-success retry
+   * with a different remaining-balance amount changed the key and Stripe
+   * created a second refund. New formula keys on the cumulative refunded
+   * range `${prior}_to_${prior+requested}`: a true retry of the same logical
+   * refund recomputes the same key (same prior, same requested) and Stripe
+   * dedupes; a follow-up refund after a partial success has a different prior
+   * and gets a different key, which is what we want.
    */
-  private async createStripeRefund(
-    order: { stripePaymentIntentId: string | null; grandTotal: any },
+  private async createStripeRefundLocked(
+    order: { stripePaymentIntentId: string | null; grandTotal: Prisma.Decimal },
     tenantId: string,
     orderId: string,
-    amount?: number,
-    reason?: 'duplicate' | 'fraudulent' | 'requested_by_customer',
-    existingRefunds: any[] = []
+    amount: number | undefined,
+    reason: 'duplicate' | 'fraudulent' | 'requested_by_customer' | undefined,
+    priorRefundedCents: number,
+    requestedCents: number,
+    stripeConnectAccountId: string | null,
+    _tx: Prisma.TransactionClient,
   ) {
     if (!order.stripePaymentIntentId) {
       throw new BadRequestException('Order has no Stripe payment intent');
     }
 
-    // Phase 2 W2.3: stable idempotency key — NOT a per-attempt counter.
-    // The prior formula `..._${existingRefundCount + 1}` meant that if the
-    // first call succeeded at Stripe but the response was lost to the network,
-    // a retry would compute a NEW key (count+1 after the committed first row)
-    // and Stripe would create a second, duplicate refund. Keying on
-    // (orderId + amount) makes Stripe return the original refund on replay.
-    // Phase 2 W2.2: convert to cents in Decimal so a half-cent never silently
-    // rounds in the attacker's favor.
-    const amountDecimal = amount != null
-      ? Money.dec(amount)
-      : Money.dec(order.grandTotal as never);
-    const amountCents = Money.toCents(amountDecimal);
-    const idempotencyKey = `refund_${orderId}_${amountCents}`;
-
-    // Check if tenant uses Stripe Connect (has a connected account)
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: tenantId },
-      select: { stripeConnectAccountId: true },
-    });
+    const idempotencyKey =
+      `refund_${orderId}_${priorRefundedCents}_to_${priorRefundedCents + requestedCents}`;
 
     let refund: Stripe.Refund;
-
-    if (tenant?.stripeConnectAccountId) {
-      // Use Stripe Connect service for connected account refunds
+    if (stripeConnectAccountId) {
       refund = await this.stripeConnectService.createConnectedRefund(
         order.stripePaymentIntentId,
-        tenant.stripeConnectAccountId,
+        stripeConnectAccountId,
         amount,
         idempotencyKey,
       );
     } else {
-      // Use direct Stripe service for platform refunds
       refund = await this.stripeService.createRefund(
         order.stripePaymentIntentId,
         amount,
         reason,
-        idempotencyKey
+        idempotencyKey,
       );
     }
 
-    // Record will be created via webhook, but we can return preliminary info
+    // The Payment row will be written by the charge.refunded webhook, but
+    // we return preliminary info to the caller.
     return {
       refundId: refund.id,
       amount: (refund.amount || 0) / 100,
@@ -1061,18 +1199,25 @@ export class PaymentsService {
   }
 
   /**
-   * Process a Square refund for an order
+   * Process a Square refund for an order. Runs INSIDE the row-locked
+   * transaction opened by createRefund(). Square has no webhook for refunds
+   * so we write the Payment row + update Order state synchronously, all
+   * inside the same tx as the row lock so concurrent attempts can't both
+   * succeed.
    */
-  private async createSquareRefund(
-    order: { grandTotal: any; currency?: string },
+  private async createSquareRefundLocked(
+    order: { grandTotal: Prisma.Decimal; currency: string },
     tenantId: string,
     orderId: string,
-    amount?: number,
-    reason?: string,
+    amount: number | undefined,
+    reason: string | undefined,
+    priorRefundedCents: number,
+    requestedCents: number,
+    tx: Prisma.TransactionClient,
   ) {
     // Find the captured Payment record that holds the Square payment ID
-    // (stored in stripePaymentIntentId as a provider-agnostic reference)
-    const capturedPayment = await this.prisma.payment.findFirst({
+    // (stored in stripePaymentIntentId as a provider-agnostic reference).
+    const capturedPayment = await tx.payment.findFirst({
       where: {
         orderId,
         tenantId,
@@ -1097,35 +1242,36 @@ export class PaymentsService {
       reason || 'Requested by merchant',
     );
 
-    // Update order payment status since Square doesn't have webhooks configured for refunds
-    const orderTotal = Number(order.grandTotal);
-    const refundAmount = amount ?? orderTotal;
-    const isFullRefund = !amount || amount >= orderTotal;
+    const orderTotalCents = Money.toCents(Money.dec(order.grandTotal as never));
+    const newCumulativeCents = priorRefundedCents + requestedCents;
+    const isFullRefund = newCumulativeCents >= orderTotalCents;
+    const refundAmount = requestedCents / 100;
+    const now = new Date();
 
-    // Create a Payment record for the Square refund (enables cumulative refund tracking)
-    await this.prisma.$transaction([
-      this.prisma.order.update({
-        where: { id: orderId },
-        data: {
-          paymentStatus: isFullRefund ? 'REFUNDED' : 'PARTIALLY_REFUNDED',
-          status: isFullRefund ? 'REFUNDED' : undefined,
-          refundedAt: isFullRefund ? new Date() : undefined,
-        },
-      }),
-      this.prisma.payment.create({
-        data: {
-          tenantId,
-          orderId,
-          amount: refundAmount,
-          currency: currency,
-          method: 'card',
-          type: 'REFUND',
-          status: 'REFUNDED',
-          stripePaymentIntentId: squarePaymentId,
-          refundedAt: new Date(),
-        },
-      }),
-    ]);
+    await tx.order.update({
+      where: { id: orderId },
+      data: {
+        paymentStatus: isFullRefund ? 'REFUNDED' : 'PARTIALLY_REFUNDED',
+        status: isFullRefund ? 'REFUNDED' : undefined,
+        refundedAt: isFullRefund ? now : undefined,
+        // C-2: Square refund commits the side effect synchronously here, so
+        // mark refundProcessedAt now (no webhook will arrive to set it).
+        refundProcessedAt: now,
+      },
+    });
+    await tx.payment.create({
+      data: {
+        tenantId,
+        orderId,
+        amount: refundAmount,
+        currency,
+        method: 'card',
+        type: 'REFUND',
+        status: 'REFUNDED',
+        stripePaymentIntentId: squarePaymentId,
+        refundedAt: now,
+      },
+    });
 
     return {
       refundId: refund?.id || null,

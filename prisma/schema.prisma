@@ -1572,6 +1572,15 @@ model Order {
   cancelledAt DateTime?
   refundedAt  DateTime?
 
+  // C-2: explicit side-effect markers so webhook retry can resume at the right
+  // step. paymentStatus alone was being used as a proxy for "fulfillment done",
+  // which is incorrect: a crash between Order.update(CAPTURED) and stock
+  // deduction would leave paymentStatus=CAPTURED with stock un-deducted, and
+  // the next webhook delivery would skip the handler entirely.
+  paymentRecordedAt DateTime?
+  stockIssuedAt     DateTime?
+  refundProcessedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
