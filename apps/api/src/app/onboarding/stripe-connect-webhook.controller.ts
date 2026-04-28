@@ -134,7 +134,20 @@ export class StripeConnectWebhookController {
       where: { stripeConnectAccountId: account.id },
     });
 
-    if (!tenant) return;
+    if (!tenant) {
+      // Previously this returned silently. A deauth event with no matching
+      // tenant means our DB is out of sync with Stripe — possibly a
+      // pre-deletion stale account, possibly a misrouted event, possibly
+      // a sign of cross-environment configuration drift. All three deserve
+      // an alert, not silence: a stale `stripeChargesEnabled=true` flag
+      // on a tenant whose Stripe account is actually disabled would let
+      // doomed charge attempts pile up.
+      this.logger.error(
+        `Stripe deauthorization webhook for account ${account.id} did not match any tenant. ` +
+        `Investigate: stale account, misrouted event, or cross-env drift.`,
+      );
+      return;
+    }
 
     await this.prisma.tenant.update({
       where: { id: tenant.id },

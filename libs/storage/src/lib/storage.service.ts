@@ -66,6 +66,17 @@ export class StorageService {
     { mime: 'application/gzip', bytes: [0x1f, 0x8b] },
   ];
 
+  /**
+   * Declared MIME types that we can fingerprint via magic bytes. Mismatches
+   * for these types are rejected (not just warned). Any type we lack a magic
+   * signature for is excluded so legitimate uploads of text/csv, docx, etc.
+   * don't get falsely refused.
+   *
+   * Derived from MAGIC_BYTES at static init so the two stay in sync.
+   */
+  private static readonly FINGERPRINTABLE_MIME_TYPES: ReadonlySet<string> =
+    new Set(StorageService.MAGIC_BYTES.map((s) => s.mime));
+
   constructor(
     @Inject(STORAGE_MODULE_OPTIONS) private readonly options: StorageModuleOptions,
     @Inject(STORAGE_PROVIDER) private readonly provider: StorageProvider,
@@ -181,6 +192,23 @@ export class StorageService {
     // Detect actual MIME type from buffer magic bytes
     const detectedMime = this.detectMimeFromBuffer(data);
     if (detectedMime && detectedMime !== declaredContentType) {
+      // For declared types we have a magic-byte signature for (the
+      // FINGERPRINTABLE_MIME_TYPES set), a mismatch is a hard failure: the
+      // declared type is verifiable and an attacker mislabeling content as
+      // image/png while serving HTML/JS to be fetched by a victim browser
+      // is the canonical content-sniffing exploit. Warn-only is unsafe.
+      //
+      // For declared types we cannot fingerprint (text/csv, docx, etc.),
+      // we keep the legacy warn-only behavior — magic bytes are absent or
+      // ambiguous for those formats and rejecting based on detection of an
+      // unrelated type would create false positives on legitimate uploads.
+      if (StorageService.FINGERPRINTABLE_MIME_TYPES.has(declaredContentType)) {
+        throw new Error(
+          `MIME type mismatch: declared="${declaredContentType}", ` +
+          `detected="${detectedMime}" from file magic bytes. ` +
+          `Refusing upload — declared and actual content do not match.`,
+        );
+      }
       this.logger.warn(
         `MIME type mismatch: declared="${declaredContentType}", detected="${detectedMime}" from file magic bytes. ` +
         `The file may have been mislabeled.`,
