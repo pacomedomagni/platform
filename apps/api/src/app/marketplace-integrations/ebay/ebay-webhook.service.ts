@@ -110,7 +110,15 @@ export class EbayWebhookService {
       return publicKey;
     }
 
-    const url = `https://api.ebay.com/commerce/notification/v1/public_key/${keyId}`;
+    // E-8: respect EBAY_SANDBOX so signature verification works in non-prod
+    // environments. Previously the URL was hardcoded to prod, meaning a
+    // sandbox eBay webhook would fail to verify (and was being papered over
+    // by mockMode in tests).
+    const isSandbox = process.env['EBAY_SANDBOX'] === 'true';
+    const baseUrl = isSandbox
+      ? 'https://api.sandbox.ebay.com'
+      : 'https://api.ebay.com';
+    const url = `${baseUrl}/commerce/notification/v1/public_key/${keyId}`;
 
     this.logger.log(`Fetching eBay public key: ${keyId}`);
 

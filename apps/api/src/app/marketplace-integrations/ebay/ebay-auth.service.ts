@@ -129,6 +129,14 @@ export class EbayAuthService implements OnModuleDestroy {
         // Exchange authorization code for tokens
         const tokens = await this.exchangeCodeForTokens(code);
 
+        // E-9: validate that eBay actually granted the scopes our flows
+        // need. The previous code stored whatever came back, then later
+        // operations would fail mid-flight (or worse, succeed for read but
+        // fail for write) with no clear signal that the user authorized a
+        // subset. Fail fast at OAuth time so the merchant sees a clear
+        // "please re-authorize and grant all permissions" message.
+        this.assertGrantedScopes(tokens.scope);
+
         // Save tokens
         await this.ebayStore.saveTokens(connectionId, {
           refreshToken: tokens.refresh_token,
@@ -227,6 +235,44 @@ export class EbayAuthService implements OnModuleDestroy {
    */
   private generateState(): string {
     return crypto.randomBytes(32).toString('hex');
+  }
+
+  /**
+   * E-9: validate the scopes eBay actually granted contain the minimum set
+   * required for our sync flows. The OAuth response includes a space-
+   * separated `scope` string per RFC 6749 §5.1; if the user de-selected any
+   * permission on the consent screen, those scopes are silently absent from
+   * the response and we'd later see opaque API failures.
+   *
+   * Mock mode skips validation since mock tokens have no real scope set.
+   */
+  private static readonly REQUIRED_EBAY_SCOPES: readonly string[] = [
+    'https://api.ebay.com/oauth/api_scope/sell.inventory',
+    'https://api.ebay.com/oauth/api_scope/sell.fulfillment',
+    'https://api.ebay.com/oauth/api_scope/sell.account',
+  ];
+
+  private assertGrantedScopes(grantedScope: string | undefined): void {
+    if (process.env['MOCK_EXTERNAL_SERVICES'] === 'true') return;
+    if (!grantedScope) {
+      // RFC says scope is OPTIONAL when the granted set equals the requested
+      // set — eBay does include it in practice, but we don't fail-closed if
+      // it's absent. Just log so a regression is visible in observability.
+      this.logger.warn(
+        'eBay token exchange returned no scope field; cannot verify granted permissions',
+      );
+      return;
+    }
+    const granted = new Set(grantedScope.split(/\s+/).filter(Boolean));
+    const missing = EbayAuthService.REQUIRED_EBAY_SCOPES.filter(
+      (s) => !granted.has(s),
+    );
+    if (missing.length > 0) {
+      throw new BadRequestException(
+        `eBay did not grant required scopes: ${missing.join(', ')}. ` +
+        `Please reconnect and accept all requested permissions.`,
+      );
+    }
   }
 
   /**

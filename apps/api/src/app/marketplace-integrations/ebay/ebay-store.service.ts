@@ -578,10 +578,32 @@ export class EbayStoreService implements OnModuleDestroy {
   /**
    * Disconnect (clear tokens).
    * Verifies the connection belongs to the current tenant first.
+   *
+   * E-2: also calls eBay's OAuth revocation endpoint with the refresh token
+   * BEFORE nulling our DB columns. Without revocation the refresh token
+   * remains live on eBay's side until it expires (18 months), so a
+   * compromised DB backup could be replayed to mint fresh access tokens.
+   * The revoke is best-effort: if eBay returns a non-200 we still clear our
+   * local copy — leaving stale credentials in the DB after a user-initiated
+   * disconnect would be worse than failing to revoke remotely.
    */
   async disconnectConnection(connectionId: string) {
-    // Verify connection belongs to the current tenant
-    await this.getConnection(connectionId);
+    const connection = await this.getConnection(connectionId);
+
+    if (connection.refreshToken && !this.mockMode) {
+      try {
+        const refreshToken = this.encryption.decrypt(connection.refreshToken);
+        await this.revokeRefreshToken(refreshToken);
+      } catch (err) {
+        // Best-effort. We log and continue — the user expects disconnection
+        // to succeed even if eBay rejects the revoke request.
+        this.logger.warn(
+          `Failed to revoke refresh token for connection ${connectionId}: ${
+            (err as Error).message
+          }. Local credentials cleared anyway.`,
+        );
+      }
+    }
 
     await this.prisma.marketplaceConnection.update({
       where: { id: connectionId },
@@ -595,6 +617,47 @@ export class EbayStoreService implements OnModuleDestroy {
 
     this.clientCache.delete(connectionId);
     this.logger.log(`Disconnected connection ${connectionId}`);
+  }
+
+  /**
+   * Revoke a refresh token at eBay's OAuth endpoint.
+   * https://developer.ebay.com/api-docs/static/oauth-revoke.html
+   */
+  private async revokeRefreshToken(refreshToken: string): Promise<void> {
+    const { appId, certId } = this.getEbayCredentials();
+    if (!appId || !certId) {
+      throw new Error('eBay credentials not configured; cannot revoke token');
+    }
+
+    const isSandbox = process.env['EBAY_SANDBOX'] === 'true';
+    const revokeEndpoint = isSandbox
+      ? 'https://api.sandbox.ebay.com/identity/v1/oauth2/revoke'
+      : 'https://api.ebay.com/identity/v1/oauth2/revoke';
+
+    const credentials = Buffer.from(`${appId}:${certId}`).toString('base64');
+
+    const body = new URLSearchParams({
+      token: refreshToken,
+      token_type_hint: 'refresh_token',
+    }).toString();
+
+    const response = await fetch(revokeEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization: `Basic ${credentials}`,
+      },
+      body,
+    });
+
+    // Per RFC 7009, the server SHOULD return 200 even for already-invalid
+    // tokens. eBay follows this. We treat any non-2xx as a failure.
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '<no body>');
+      throw new Error(
+        `eBay token revoke failed: ${response.status} - ${errorText}`,
+      );
+    }
   }
 
   /**

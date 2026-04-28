@@ -108,6 +108,8 @@ export interface EbayTokenResponse {
   refresh_token?: string;
   expires_in: number;
   token_type: string;
+  /** Space-separated list of scopes actually granted by eBay (RFC 6749 §5.1). */
+  scope?: string;
 }
 
 export interface EbayBusinessPolicies {
