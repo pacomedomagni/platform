@@ -60,6 +60,7 @@ export class MarketplaceListingsController {
    * GET /api/marketplace/listings
    */
   @Get()
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getListings(
     @Tenant() tenantId: string,
     @Query(ValidationPipe) query: GetListingsQueryDto
@@ -77,6 +78,7 @@ export class MarketplaceListingsController {
    * GET /api/marketplace/listings/:id
    */
   @Get(':id')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getListing(
     @Tenant() tenantId: string,
     @Param('id') id: string
@@ -129,8 +131,10 @@ export class MarketplaceListingsController {
    */
   @Post(':id/publish')
   @Roles('admin', 'System Manager', 'Inventory Manager')
-  async publishListing(@Param('id') id: string) {
-    return this.listingsService.publishListing(id);
+  async publishListing(@Param('id') id: string, @Request() req: any) {
+    const userRoles: string[] = (req.user?.roles || []).map((r: string) => r.toLowerCase());
+    const isPrivileged = userRoles.includes('admin') || userRoles.includes('system manager');
+    return this.listingsService.publishListing(id, { requireApproved: !isPrivileged });
   }
 
   /**

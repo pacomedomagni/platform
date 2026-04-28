@@ -43,6 +43,7 @@ export class EbayCampaignsController {
    * GET /api/marketplace/campaigns?connectionId=...
    */
   @Get()
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getCampaigns(
     @Tenant() tenantId: string,
     @Query('connectionId') connectionId: string
@@ -55,6 +56,7 @@ export class EbayCampaignsController {
    * GET /api/marketplace/campaigns/:id
    */
   @Get(':id')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getCampaign(
     @Tenant() tenantId: string,
     @Param('id') id: string
@@ -144,6 +146,7 @@ export class EbayCampaignsController {
    * GET /api/marketplace/campaigns/:id/report
    */
   @Get(':id/report')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getCampaignReport(
     @Tenant() tenantId: string,
     @Param('id') id: string

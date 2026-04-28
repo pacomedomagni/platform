@@ -126,11 +126,16 @@ export class EbayBulkController {
   }
 
   /**
-   * Bulk update price and/or quantity for multiple SKUs
-   * POST /api/marketplace/bulk/price-quantity
+   * Bulk update price and/or quantity for multiple SKUs.
+   *
+   * High blast radius (touches every listed SKU at once), so we restrict
+   * to admin / System Manager only and apply a stricter rate limit. The
+   * service emits a single audit row capturing the connectionId and the
+   * count + first/last SKU touched.
    */
   @Post('price-quantity')
-  @Roles('admin', 'System Manager', 'Inventory Manager')
+  @Roles('admin', 'System Manager')
+  @Throttle({ short: { limit: 3, ttl: 1000 }, medium: { limit: 10, ttl: 60000 } })
   async bulkUpdatePriceQuantity(
     @Tenant() tenantId: string,
     @Body(ValidationPipe) dto: BulkUpdatePriceQuantityDto

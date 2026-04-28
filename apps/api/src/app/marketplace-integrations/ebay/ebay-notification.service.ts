@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '@platform/db';
+import { PrismaService, bypassTenantGuard, runWithTenant } from '@platform/db';
 import { DistributedLockService } from '@platform/queue';
 import { EbayStoreService } from './ebay-store.service';
 import { EbayOrderSyncService } from './ebay-order-sync.service';
@@ -121,15 +121,20 @@ export class EbayNotificationService {
 
     this.logger.log(`Handling order notification for eBay order ${externalOrderId}`);
 
-    // Try to find the connection via an existing synced order
-    const existingOrder = await this.prisma.marketplaceOrder.findFirst({
-      where: { externalOrderId },
-      select: { connectionId: true, tenantId: true },
-    });
+    // We don't know the tenant yet — bypass for the lookup, then pin the
+    // tenant for the per-order sync work.
+    const existingOrder = await bypassTenantGuard(() =>
+      this.prisma.marketplaceOrder.findFirst({
+        where: { externalOrderId },
+        select: { connectionId: true, tenantId: true },
+      }),
+    );
 
     if (existingOrder) {
       try {
-        await this.orderSync.syncOrders(existingOrder.tenantId, existingOrder.connectionId);
+        await runWithTenant(existingOrder.tenantId, () =>
+          this.orderSync.syncOrders(existingOrder.tenantId, existingOrder.connectionId),
+        );
       } catch (error) {
         this.logger.error(
           `Incremental order sync failed for connection ${existingOrder.connectionId}`,
@@ -139,35 +144,54 @@ export class EbayNotificationService {
       return;
     }
 
-    // Order not yet synced — attempt to find the connection by the eBay username in the payload
-    const username =
-      payload?.resource?.buyer?.username ||
-      payload?.metadata?.username;
+    // Order not yet synced. The notification's `username` is the buyer's
+    // eBay username, NOT the seller's — so it cannot be used to identify
+    // our connection. The seller identity is in `payload.metadata.userId`
+    // (eBay-assigned seller ID, stored as `ebayUserId` in platformConfig
+    // at connect time). Resolve the connection by that exact ID via a
+    // JSONB-path filter so the query plan only touches one row.
+    const sellerUserId =
+      payload?.metadata?.userId ||
+      payload?.resource?.seller?.username;
 
-    if (username) {
-      const connections = await this.prisma.marketplaceConnection.findMany({
+    if (!sellerUserId) {
+      this.logger.warn(
+        `Order notification for unknown order ${externalOrderId} — no seller identifier in payload, dropping`
+      );
+      return;
+    }
+
+    const connection = await bypassTenantGuard(() =>
+      this.prisma.marketplaceConnection.findFirst({
         where: {
           platform: 'EBAY',
           isActive: true,
           isConnected: true,
+          OR: [
+            { platformConfig: { path: ['ebayUserId'], equals: sellerUserId } },
+            { platformConfig: { path: ['userId'], equals: sellerUserId } },
+            { platformConfig: { path: ['username'], equals: sellerUserId } },
+          ],
         },
-      });
+        select: { id: true, tenantId: true },
+      }),
+    );
 
-      // Trigger sync on all active eBay connections (the sync is idempotent)
-      for (const connection of connections) {
-        try {
-          await this.orderSync.syncOrders(connection.tenantId, connection.id);
-        } catch (error) {
-          this.logger.error(
-            `Incremental order sync failed for connection ${connection.id}`,
-            error
-          );
-          // Continue to next connection
-        }
-      }
-    } else {
+    if (!connection) {
       this.logger.warn(
-        `Order notification for unknown order ${externalOrderId} — no matching connection found`
+        `Order notification for order ${externalOrderId}: no eBay connection matches seller ${sellerUserId}`
+      );
+      return;
+    }
+
+    try {
+      await runWithTenant(connection.tenantId, () =>
+        this.orderSync.syncOrders(connection.tenantId, connection.id),
+      );
+    } catch (error) {
+      this.logger.error(
+        `Incremental order sync failed for connection ${connection.id}`,
+        error
       );
     }
   }
@@ -189,16 +213,19 @@ export class EbayNotificationService {
 
     this.logger.log(`Handling item notification for eBay item ${itemId}`);
 
-    // Find the local listing matching this external item
-    const listing = await this.prisma.marketplaceListing.findFirst({
-      where: {
-        OR: [
-          { externalListingId: itemId },
-          { externalListingId: String(itemId) },
-        ],
-        status: 'published',
-      },
-    });
+    // Lookup is cross-tenant (external item id is global on eBay's side);
+    // wrap in bypass for the find, then pin the tenant for the update.
+    const listing = await bypassTenantGuard(() =>
+      this.prisma.marketplaceListing.findFirst({
+        where: {
+          OR: [
+            { externalListingId: itemId },
+            { externalListingId: String(itemId) },
+          ],
+          status: 'published',
+        },
+      }),
+    );
 
     if (!listing) {
       this.logger.warn(`No local listing found for eBay item ${itemId}`);
@@ -226,10 +253,12 @@ export class EbayNotificationService {
     }
 
     if (Object.keys(updateData).length > 0) {
-      await this.prisma.marketplaceListing.update({
-        where: { id: listing.id },
-        data: updateData,
-      });
+      await runWithTenant(listing.tenantId, () =>
+        this.prisma.marketplaceListing.update({
+          where: { id: listing.id },
+          data: updateData,
+        }),
+      );
 
       this.logger.log(
         `Updated listing ${listing.id} from item notification: ${JSON.stringify(updateData)}`
@@ -258,18 +287,22 @@ export class EbayNotificationService {
 
     // If we have an existing return record, update its sync status to trigger re-sync
     if (returnId) {
-      const existingReturn = await this.prisma.marketplaceReturn.findFirst({
-        where: { externalReturnId: String(returnId) },
-      });
+      const existingReturn = await bypassTenantGuard(() =>
+        this.prisma.marketplaceReturn.findFirst({
+          where: { externalReturnId: String(returnId) },
+        }),
+      );
 
       if (existingReturn) {
-        await this.prisma.marketplaceReturn.update({
-          where: { id: existingReturn.id },
-          data: {
-            syncStatus: 'pending',
-            errorMessage: null,
-          },
-        });
+        await runWithTenant(existingReturn.tenantId, () =>
+          this.prisma.marketplaceReturn.update({
+            where: { id: existingReturn.id },
+            data: {
+              syncStatus: 'pending',
+              errorMessage: null,
+            },
+          }),
+        );
 
         this.logger.log(
           `Marked return ${existingReturn.id} for re-sync due to notification`

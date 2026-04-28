@@ -64,6 +64,32 @@ type ActiveTab = 'categories' | 'locations' | 'permissions';
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Read the current admin user's roles from localStorage. Returns lowercased
+ * role names so callers can do case-insensitive comparisons matching the API
+ * RolesGuard. The login flow stores the user payload under "user".
+ */
+function useCurrentUserRoles(): string[] {
+  const [roles, setRoles] = useState<string[]>([]);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = localStorage.getItem('user');
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const list: string[] = Array.isArray(parsed?.roles) ? parsed.roles : [];
+      setRoles(list.map((r) => String(r).trim().toLowerCase()));
+    } catch {
+      // Bad JSON → leave empty so the UI defaults to "no privileged role".
+    }
+  }, []);
+  return roles;
+}
+
+function canManageMarketplaceSettings(roles: string[]): boolean {
+  return roles.includes('admin') || roles.includes('system manager');
+}
+
 const PERMISSION_LABELS: Record<string, string> = {
   'marketplace.view': 'View Marketplace',
   'marketplace.connections.manage': 'Manage Connections',
@@ -108,11 +134,26 @@ export default function MarketplaceSettingsPage() {
     }
   };
 
+  const userRoles = useCurrentUserRoles();
+  const canEditPermissions = canManageMarketplaceSettings(userRoles);
+
+  // Hide the Permissions tab from non-admin users entirely. The API also
+  // rejects them, but hiding it client-side avoids a confusing dead tab.
   const tabs: { id: ActiveTab; label: string; icon: React.ReactNode }[] = [
     { id: 'categories', label: 'Store Categories', icon: <FolderTree className="w-4 h-4" /> },
     { id: 'locations', label: 'Inventory Locations', icon: <MapPin className="w-4 h-4" /> },
-    { id: 'permissions', label: 'Permissions', icon: <ShieldCheck className="w-4 h-4" /> },
+    ...(canEditPermissions
+      ? [{ id: 'permissions' as const, label: 'Permissions', icon: <ShieldCheck className="w-4 h-4" /> }]
+      : []),
   ];
+
+  // If the user landed on the Permissions tab via deeplink without rights,
+  // bounce them to the first allowed tab.
+  useEffect(() => {
+    if (activeTab === 'permissions' && !canEditPermissions) {
+      setActiveTab('categories');
+    }
+  }, [activeTab, canEditPermissions]);
 
   if (loadingConnections) {
     return (
@@ -195,7 +236,7 @@ export default function MarketplaceSettingsPage() {
           {activeTab === 'locations' && (
             <InventoryLocationsSection connectionId={selectedConnectionId} />
           )}
-          {activeTab === 'permissions' && <PermissionsSection />}
+          {activeTab === 'permissions' && canEditPermissions && <PermissionsSection />}
         </>
       )}
     </div>

@@ -7,7 +7,7 @@ import {
   ValidationPipe,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import { AuthGuard, RolesGuard } from '@platform/auth';
+import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayTaxonomyService } from './ebay-taxonomy.service';
 
@@ -26,6 +26,7 @@ export class EbayTaxonomyController {
    * GET /api/marketplace/ebay/taxonomy/categories/search?q=...&marketplaceId=...&connectionId=...
    */
   @Get('categories/search')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async searchCategories(
     @Tenant() tenantId: string,
     @Query('q') query: string,
@@ -44,6 +45,7 @@ export class EbayTaxonomyController {
    * GET /api/marketplace/ebay/taxonomy/categories/:id/subtree?marketplaceId=...&connectionId=...
    */
   @Get('categories/:id/subtree')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getCategorySubtree(
     @Tenant() tenantId: string,
     @Param('id') categoryId: string,
@@ -62,6 +64,7 @@ export class EbayTaxonomyController {
    * GET /api/marketplace/ebay/taxonomy/categories/:id/aspects?marketplaceId=...&connectionId=...
    */
   @Get('categories/:id/aspects')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getItemAspects(
     @Tenant() tenantId: string,
     @Param('id') categoryId: string,
@@ -80,6 +83,7 @@ export class EbayTaxonomyController {
    * GET /api/marketplace/ebay/taxonomy/categories/:id/conditions?marketplaceId=...&connectionId=...
    */
   @Get('categories/:id/conditions')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getConditions(
     @Tenant() tenantId: string,
     @Param('id') categoryId: string,

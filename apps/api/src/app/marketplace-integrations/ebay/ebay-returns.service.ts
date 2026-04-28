@@ -7,6 +7,7 @@ import {
   OnModuleDestroy,
 } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { bypassTenantGuard, runWithTenant } from '@platform/db';
 import { ClsService } from 'nestjs-cls';
 import { EbayStoreService } from './ebay-store.service';
 import { EbayClientService } from './ebay-client.service';
@@ -66,14 +67,16 @@ export class EbayReturnsService implements OnModuleInit, OnModuleDestroy {
   private async syncAllActiveReturns() {
     // M4: Use distributed lock to prevent concurrent return sync across instances
     const result = await this.distributedLock.withLock('ebay:return-sync', 900, async () => {
-      const connections = await this.prisma.marketplaceConnection.findMany({
-        where: {
-          platform: 'EBAY',
-          isActive: true,
-          isConnected: true,
-          autoSyncOrders: true,
-        },
-      });
+      const connections = await bypassTenantGuard(() =>
+        this.prisma.marketplaceConnection.findMany({
+          where: {
+            platform: 'EBAY',
+            isActive: true,
+            isConnected: true,
+            autoSyncOrders: true,
+          },
+        }),
+      );
 
       this.logger.log(
         `Scheduled return sync: found ${connections.length} active connection(s)`
@@ -81,7 +84,9 @@ export class EbayReturnsService implements OnModuleInit, OnModuleDestroy {
 
       for (const connection of connections) {
         try {
-          await this.syncReturns(connection.tenantId, connection.id);
+          await runWithTenant(connection.tenantId, () =>
+            this.syncReturns(connection.tenantId, connection.id),
+          );
         } catch (error) {
           this.logger.error(
             `Scheduled return sync failed for connection ${connection.id} (tenant ${connection.tenantId})`,

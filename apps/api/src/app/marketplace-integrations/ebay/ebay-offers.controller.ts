@@ -29,6 +29,7 @@ export class EbayOffersController {
    * GET /api/marketplace/offers/:listingId?status=...
    */
   @Get(':listingId')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getBestOffers(
     @Tenant() tenantId: string,
     @Param('listingId') listingId: string,

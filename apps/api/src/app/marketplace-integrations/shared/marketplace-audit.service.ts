@@ -31,6 +31,33 @@ export class MarketplaceAuditService {
   }
 
   /**
+   * Pull request-level provenance (IP, user-agent) from CLS where the
+   * tenant middleware stashed them. Returns undefined values when running
+   * outside an HTTP context (scheduled jobs, webhooks).
+   */
+  private getProvenance(): { ipAddress?: string; userAgent?: string } {
+    try {
+      return {
+        ipAddress: this.cls.get('ipAddress'),
+        userAgent: this.cls.get('userAgent'),
+      };
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * Merge caller-supplied meta with the provenance fields. Keeps the
+   * `meta` shape backward compatible — IP / UA are extra keys, not a
+   * required nested object.
+   */
+  private withProvenance(meta: Record<string, unknown> | undefined) {
+    const prov = this.getProvenance();
+    if (!prov.ipAddress && !prov.userAgent) return meta;
+    return { ...(meta || {}), ...prov };
+  }
+
+  /**
    * Log connection created
    */
   async logConnectionCreated(connectionId: string, connectionName: string, platform: string) {
@@ -39,10 +66,10 @@ export class MarketplaceAuditService {
       action: 'CREATE',
       docType: 'MarketplaceConnection',
       docName: connectionName,
-      meta: {
+      meta: this.withProvenance({
         connectionId,
         platform,
-      },
+      }),
     });
   }
 
@@ -55,9 +82,9 @@ export class MarketplaceAuditService {
       action: 'DISCONNECT',
       docType: 'MarketplaceConnection',
       docName: connectionName,
-      meta: {
+      meta: this.withProvenance({
         connectionId,
-      },
+      }),
     });
   }
 
@@ -70,9 +97,9 @@ export class MarketplaceAuditService {
       action: 'DELETE',
       docType: 'MarketplaceConnection',
       docName: connectionName,
-      meta: {
+      meta: this.withProvenance({
         connectionId,
-      },
+      }),
     });
   }
 
@@ -85,10 +112,10 @@ export class MarketplaceAuditService {
       action: 'OAUTH_CONNECTED',
       docType: 'MarketplaceConnection',
       docName: connectionName,
-      meta: {
+      meta: this.withProvenance({
         connectionId,
         platform,
-      },
+      }),
     });
   }
 
@@ -101,10 +128,10 @@ export class MarketplaceAuditService {
       action: 'CREATE',
       docType: 'MarketplaceListing',
       docName: listingTitle,
-      meta: {
+      meta: this.withProvenance({
         listingId,
         connectionName,
-      },
+      }),
     });
   }
 
@@ -122,11 +149,11 @@ export class MarketplaceAuditService {
       action: 'PUBLISH',
       docType: 'MarketplaceListing',
       docName: listingTitle,
-      meta: {
+      meta: this.withProvenance({
         listingId,
         externalListingId,
         platform,
-      },
+      }),
     });
   }
 
@@ -139,10 +166,10 @@ export class MarketplaceAuditService {
       action: 'END_LISTING',
       docType: 'MarketplaceListing',
       docName: listingTitle,
-      meta: {
+      meta: this.withProvenance({
         listingId,
         platform,
-      },
+      }),
     });
   }
 
@@ -155,9 +182,9 @@ export class MarketplaceAuditService {
       action: 'DELETE',
       docType: 'MarketplaceListing',
       docName: listingTitle,
-      meta: {
+      meta: this.withProvenance({
         listingId,
-      },
+      }),
     });
   }
 
@@ -170,10 +197,10 @@ export class MarketplaceAuditService {
       action: 'APPROVE',
       docType: 'MarketplaceListing',
       docName: listingTitle,
-      meta: {
+      meta: this.withProvenance({
         listingId,
         approvedById,
-      },
+      }),
     });
   }
 
@@ -191,11 +218,11 @@ export class MarketplaceAuditService {
       action: 'REJECT',
       docType: 'MarketplaceListing',
       docName: listingTitle,
-      meta: {
+      meta: this.withProvenance({
         listingId,
         rejectedById,
         reason,
-      },
+      }),
     });
   }
 
@@ -208,10 +235,10 @@ export class MarketplaceAuditService {
       action: 'SYNC_INVENTORY',
       docType: 'MarketplaceListing',
       docName: listingTitle,
-      meta: {
+      meta: this.withProvenance({
         listingId,
         newQuantity,
-      },
+      }),
     });
   }
 
@@ -221,7 +248,7 @@ export class MarketplaceAuditService {
       action,
       docType: 'MarketplaceReturn',
       docName: returnId,
-      meta: { returnId, ...details },
+      meta: this.withProvenance({ returnId, ...details }),
     });
   }
 
@@ -231,7 +258,7 @@ export class MarketplaceAuditService {
       action: 'REPLY',
       docType: 'MarketplaceMessage',
       docName: threadId,
-      meta: { threadId, recipient },
+      meta: this.withProvenance({ threadId, recipient }),
     });
   }
 
@@ -241,7 +268,7 @@ export class MarketplaceAuditService {
       action,
       docType: 'MarketplaceCampaign',
       docName: campaignName,
-      meta: { campaignId },
+      meta: this.withProvenance({ campaignId }),
     });
   }
 
@@ -251,7 +278,7 @@ export class MarketplaceAuditService {
       action: 'WEBHOOK_PROCESSED',
       docType: 'EbayWebhook',
       docName: type,
-      meta: details,
+      meta: this.withProvenance(details),
     });
   }
 
@@ -261,7 +288,7 @@ export class MarketplaceAuditService {
       action,
       docType: 'MarketplaceFeedback',
       docName: feedbackId,
-      meta: { feedbackId, ...details },
+      meta: this.withProvenance({ feedbackId, ...details }),
     });
   }
 
@@ -271,7 +298,7 @@ export class MarketplaceAuditService {
       action,
       docType: 'MarketplaceShipment',
       docName: shipmentId,
-      meta: { shipmentId, ...details },
+      meta: this.withProvenance({ shipmentId, ...details }),
     });
   }
 
@@ -281,7 +308,7 @@ export class MarketplaceAuditService {
       action,
       docType: 'MarketplaceBulkTask',
       docName: taskId,
-      meta: { taskId, ...details },
+      meta: this.withProvenance({ taskId, ...details }),
     });
   }
 }

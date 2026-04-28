@@ -78,6 +78,7 @@ export class EbayPromotionsController {
    * GET /api/marketplace/promotions?connectionId=...&marketplaceId=...
    */
   @Get()
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getPromotions(
     @Tenant() tenantId: string,
     @Query('connectionId') connectionId: string,
@@ -94,6 +95,7 @@ export class EbayPromotionsController {
    * "report" being captured as a promotion ID parameter.
    */
   @Get('report')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getPromotionSummaryReport(
     @Tenant() tenantId: string,
     @Query('connectionId') connectionId: string,
@@ -133,6 +135,7 @@ export class EbayPromotionsController {
    * "coupons" being captured as a promotion ID parameter.
    */
   @Get('coupons')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getCodedCoupons(
     @Tenant() tenantId: string,
     @Query('connectionId') connectionId: string
@@ -182,6 +185,7 @@ export class EbayPromotionsController {
    * "volume-pricing" being captured as a promotion ID parameter.
    */
   @Get('volume-pricing')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getVolumePricing(
     @Tenant() tenantId: string,
     @Query('connectionId') connectionId: string
@@ -194,6 +198,7 @@ export class EbayPromotionsController {
    * GET /api/marketplace/promotions/:id?connectionId=...
    */
   @Get(':id')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getPromotion(
     @Tenant() tenantId: string,
     @Param('id') id: string,

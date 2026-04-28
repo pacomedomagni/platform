@@ -531,13 +531,29 @@ export class EbayListingsService {
   }
 
   /**
-   * Publish listing to eBay
+   * Publish listing to eBay.
+   *
+   * `options.requireApproved` enforces the approval workflow for non-admin
+   * roles: an Inventory Manager can publish only listings that have already
+   * been approved (admin/SM can also publish drafts directly to skip the
+   * two-person rule when needed).
    */
-  async publishListing(listingId: string) {
+  async publishListing(
+    listingId: string,
+    options: { requireApproved?: boolean } = {}
+  ) {
     const listing = await this.getListing(listingId);
 
-    if (![ListingStatus.DRAFT, ListingStatus.APPROVED].includes(listing.status as any)) {
-      throw new BadRequestException('Only draft or approved listings can be published');
+    const allowedStatuses = options.requireApproved
+      ? [ListingStatus.APPROVED]
+      : [ListingStatus.DRAFT, ListingStatus.APPROVED];
+
+    if (!allowedStatuses.includes(listing.status as any)) {
+      throw new BadRequestException(
+        options.requireApproved
+          ? 'Only approved listings can be published. Ask an admin to approve this listing first.'
+          : 'Only draft or approved listings can be published'
+      );
     }
 
     // Optimistic lock: atomically claim the listing for publishing.

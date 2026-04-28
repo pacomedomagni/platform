@@ -6,7 +6,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
-import { AuthGuard, RolesGuard } from '@platform/auth';
+import { AuthGuard, RolesGuard, Roles } from '@platform/auth';
 import { Tenant } from '../../tenant.middleware';
 import { EbayCatalogService } from './ebay-catalog.service';
 
@@ -25,6 +25,7 @@ export class EbayCatalogController {
    * GET /api/marketplace/ebay/catalog/search?connectionId=...&q=...&gtin=...&epid=...&limit=...
    */
   @Get('search')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async searchProducts(
     @Tenant() tenantId: string,
     @Query('connectionId') connectionId: string,
@@ -47,6 +48,7 @@ export class EbayCatalogController {
    * Must be defined BEFORE :epid to avoid NestJS route conflict
    */
   @Get(':epid/metadata')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getProductMetadata(
     @Tenant() tenantId: string,
     @Param('epid') epid: string,
@@ -60,6 +62,7 @@ export class EbayCatalogController {
    * GET /api/marketplace/ebay/catalog/:epid?connectionId=...
    */
   @Get(':epid')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getProduct(
     @Tenant() tenantId: string,
     @Param('epid') epid: string,

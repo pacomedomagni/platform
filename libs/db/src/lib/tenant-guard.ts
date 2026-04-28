@@ -28,6 +28,41 @@ export function isTenantGuardBypassed(): boolean {
 }
 
 /**
+ * Storage for the tenantId override we accept when CLS is unavailable
+ * (scheduled jobs, webhook handlers, queue workers). The Prisma RLS
+ * extension reads from this BEFORE consulting nestjs-cls — letting a
+ * caller temporarily impersonate a tenant without standing up a full
+ * Nest CLS context is the cheapest way to make scheduled per-tenant
+ * work behave like a normal request.
+ */
+const tenantOverride = new AsyncLocalStorage<string>();
+
+/**
+ * Run `fn` as if the request came from `tenantId`. Use this in scheduled
+ * jobs / webhook handlers when iterating per-connection so the queries
+ * inside hit the correct RLS policy.
+ *
+ *   for (const conn of connections) {
+ *     await runWithTenant(conn.tenantId, () => syncOrdersForConnection(conn.id));
+ *   }
+ */
+export function runWithTenant<T>(
+  tenantId: string,
+  fn: () => Promise<T>,
+): Promise<T>;
+export function runWithTenant<T>(tenantId: string, fn: () => T): T;
+export function runWithTenant<T>(
+  tenantId: string,
+  fn: () => T | Promise<T>,
+): T | Promise<T> {
+  return tenantOverride.run(tenantId, fn);
+}
+
+export function getTenantOverride(): string | undefined {
+  return tenantOverride.getStore();
+}
+
+/**
  * Assert that a write payload contains a tenantId. Call from service write paths
  * until the Prisma extension is wired in Phase 2.
  */

@@ -31,6 +31,7 @@ export class EbayStoreCategoriesController {
    * GET /api/marketplace/ebay/store-categories?connectionId=...
    */
   @Get()
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getStoreCategories(
     @Tenant() tenantId: string,
     @Query('connectionId') connectionId: string
@@ -43,6 +44,7 @@ export class EbayStoreCategoriesController {
    * GET /api/marketplace/ebay/store-categories/pages?connectionId=...
    */
   @Get('pages')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getCustomPages(
     @Tenant() tenantId: string,
     @Query('connectionId') connectionId: string

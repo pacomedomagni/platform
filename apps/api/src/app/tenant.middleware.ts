@@ -126,6 +126,22 @@ export class TenantMiddleware implements NestMiddleware {
       (req as any)['resolvedTenantId'] = tenantId;
     }
 
+    // Pull request-level metadata into CLS so the audit layer can record the
+    // origin of every privileged action without each callsite having to
+    // thread a Request through. We trust the right-most non-loopback entry
+    // in X-Forwarded-For; if our LB strips/normalizes that header, this
+    // collapses to req.ip. Truncate UA to keep the audit row from blowing
+    // up on bot-style 1KB user-agents.
+    const xff = (req.headers['x-forwarded-for'] as string | undefined) || '';
+    const firstForwarded = xff.split(',')[0]?.trim();
+    const ipAddress = firstForwarded || req.ip || req.socket?.remoteAddress || undefined;
+    if (ipAddress) this.cls.set('ipAddress', ipAddress);
+
+    const userAgentRaw = req.headers['user-agent'];
+    const userAgent =
+      typeof userAgentRaw === 'string' ? userAgentRaw.slice(0, 256) : undefined;
+    if (userAgent) this.cls.set('userAgent', userAgent);
+
     next();
   }
 }

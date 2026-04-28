@@ -5,6 +5,7 @@ import {
   OnModuleDestroy,
 } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { bypassTenantGuard, runWithTenant } from '@platform/db';
 import { ClsService } from 'nestjs-cls';
 import { EbayStoreService } from './ebay-store.service';
 import { MarketplaceAuditService } from '../shared/marketplace-audit.service';
@@ -67,13 +68,15 @@ export class EbayComplianceService implements OnModuleInit, OnModuleDestroy {
     }
     this.isSyncing = true;
     try {
-      const connections = await this.prisma.marketplaceConnection.findMany({
-        where: {
-          platform: 'EBAY',
-          isActive: true,
-          isConnected: true,
-        },
-      });
+      const connections = await bypassTenantGuard(() =>
+        this.prisma.marketplaceConnection.findMany({
+          where: {
+            platform: 'EBAY',
+            isActive: true,
+            isConnected: true,
+          },
+        }),
+      );
 
       this.logger.log(
         `Scheduled compliance sync: found ${connections.length} active connection(s)`
@@ -81,7 +84,9 @@ export class EbayComplianceService implements OnModuleInit, OnModuleDestroy {
 
       for (const connection of connections) {
         try {
-          await this.syncViolations(connection.tenantId, connection.id);
+          await runWithTenant(connection.tenantId, () =>
+            this.syncViolations(connection.tenantId, connection.id),
+          );
         } catch (error) {
           this.logger.error(
             `Scheduled compliance sync failed for connection ${connection.id} (tenant ${connection.tenantId})`,

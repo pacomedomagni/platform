@@ -8,6 +8,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { bypassTenantGuard, runWithTenant } from '@platform/db';
 import { EbayStoreService } from './ebay-store.service';
 import { EbayClientService } from './ebay-client.service';
 import { MarketplaceAuditService } from '../shared/marketplace-audit.service';
@@ -833,14 +834,19 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
   private async syncAllActiveConnections() {
     // M4: Use distributed lock to prevent concurrent order sync across instances
     const result = await this.distributedLock.withLock('ebay:order-sync', 600, async () => {
-      const connections = await this.prisma.marketplaceConnection.findMany({
-        where: {
-          platform: 'EBAY',
-          isActive: true,
-          isConnected: true,
-          autoSyncOrders: true,
-        },
-      });
+      // Cross-tenant scan: legitimately reads every tenant's connections.
+      // Wrap in bypassTenantGuard so the RLS extension doesn't reject it
+      // for lacking a tenant context.
+      const connections = await bypassTenantGuard(() =>
+        this.prisma.marketplaceConnection.findMany({
+          where: {
+            platform: 'EBAY',
+            isActive: true,
+            isConnected: true,
+            autoSyncOrders: true,
+          },
+        }),
+      );
 
       this.logger.log(
         `Scheduled order sync: found ${connections.length} active connection(s)`
@@ -848,7 +854,12 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
 
       for (const connection of connections) {
         try {
-          await this.syncOrders(connection.tenantId, connection.id);
+          // Per-tenant work: pin tenantId so the RLS extension's queries
+          // (and the SET app.tenant in the wrapping transaction) target
+          // this connection's tenant.
+          await runWithTenant(connection.tenantId, () =>
+            this.syncOrders(connection.tenantId, connection.id),
+          );
         } catch (error) {
           this.logger.error(
             `Scheduled order sync failed for connection ${connection.id} (tenant ${connection.tenantId})`,
@@ -924,14 +935,17 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
   private async syncAllActiveInventory() {
     // M4: Use distributed lock to prevent concurrent inventory sync across instances
     const result = await this.distributedLock.withLock('ebay:inventory-sync', 1200, async () => {
-      const connections = await this.prisma.marketplaceConnection.findMany({
-        where: {
-          platform: 'EBAY',
-          isActive: true,
-          isConnected: true,
-          autoSyncInventory: true,
-        },
-      });
+      // Cross-tenant scan — legitimately reads every tenant's connections.
+      const connections = await bypassTenantGuard(() =>
+        this.prisma.marketplaceConnection.findMany({
+          where: {
+            platform: 'EBAY',
+            isActive: true,
+            isConnected: true,
+            autoSyncInventory: true,
+          },
+        }),
+      );
 
       this.logger.log(
         `Scheduled inventory sync: found ${connections.length} active connection(s)`
@@ -939,29 +953,33 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
 
       for (const connection of connections) {
         try {
-          const listings = await this.prisma.marketplaceListing.findMany({
-            where: {
-              connectionId: connection.id,
-              tenantId: connection.tenantId,
-              status: ListingStatus.PUBLISHED,
-              externalOfferId: { not: null },
-              warehouseId: { not: null },
-            },
-            include: {
-              productListing: { select: { itemId: true } },
-            },
-          });
+          // Pin tenantId for the per-connection inner queries so they
+          // satisfy the RLS policy.
+          await runWithTenant(connection.tenantId, async () => {
+            const listings = await this.prisma.marketplaceListing.findMany({
+              where: {
+                connectionId: connection.id,
+                tenantId: connection.tenantId,
+                status: ListingStatus.PUBLISHED,
+                externalOfferId: { not: null },
+                warehouseId: { not: null },
+              },
+              include: {
+                productListing: { select: { itemId: true } },
+              },
+            });
 
-          for (const listing of listings) {
-            try {
-              await this.syncListingInventoryWithLock(connection, listing);
-            } catch (listingError) {
-              this.logger.error(
-                `Scheduled inventory sync failed for listing ${listing.id}`,
-                listingError
-              );
+            for (const listing of listings) {
+              try {
+                await this.syncListingInventoryWithLock(connection, listing);
+              } catch (listingError) {
+                this.logger.error(
+                  `Scheduled inventory sync failed for listing ${listing.id}`,
+                  listingError
+                );
+              }
             }
-          }
+          });
         } catch (error) {
           this.logger.error(
             `Scheduled inventory sync failed for connection ${connection.id} (tenant ${connection.tenantId})`,

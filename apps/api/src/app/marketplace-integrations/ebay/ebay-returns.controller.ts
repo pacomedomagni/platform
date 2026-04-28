@@ -53,6 +53,7 @@ export class EbayReturnsController {
    * GET /api/marketplace/returns
    */
   @Get()
+  @Roles('admin', 'System Manager', 'Inventory Manager', 'Customer Service')
   async getReturns(
     @Tenant() tenantId: string,
     @Query(ValidationPipe) query: GetReturnsQueryDto
@@ -70,6 +71,7 @@ export class EbayReturnsController {
    * GET /api/marketplace/returns/:id
    */
   @Get(':id')
+  @Roles('admin', 'System Manager', 'Inventory Manager', 'Customer Service')
   async getReturn(
     @Tenant() tenantId: string,
     @Param('id') id: string
@@ -111,7 +113,7 @@ export class EbayReturnsController {
    * POST /api/marketplace/returns/:id/refund
    */
   @Post(':id/refund')
-  @Roles('admin', 'System Manager', 'Inventory Manager')
+  @Roles('admin', 'System Manager', 'Customer Service')
   async issueRefund(
     @Tenant() tenantId: string,
     @Param('id') id: string,

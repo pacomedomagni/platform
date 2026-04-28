@@ -52,6 +52,7 @@ export class EbayOrdersController {
    * GET /api/marketplace/orders
    */
   @Get()
+  @Roles('admin', 'System Manager', 'Inventory Manager', 'Customer Service')
   async getOrders(
     @Tenant() tenantId: string,
     @Query(ValidationPipe) query: GetMarketplaceOrdersQueryDto
@@ -70,6 +71,7 @@ export class EbayOrdersController {
    * GET /api/marketplace/orders/:id
    */
   @Get(':id')
+  @Roles('admin', 'System Manager', 'Inventory Manager', 'Customer Service')
   async getOrder(
     @Tenant() tenantId: string,
     @Param('id') id: string
@@ -101,7 +103,7 @@ export class EbayOrdersController {
    * POST /api/marketplace/orders/:id/refund
    */
   @Post(':id/refund')
-  @Roles('admin', 'System Manager')
+  @Roles('admin', 'System Manager', 'Customer Service')
   async issueRefund(
     @Tenant() tenantId: string,
     @Param('id') id: string,

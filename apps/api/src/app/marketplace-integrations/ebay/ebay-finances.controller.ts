@@ -25,7 +25,7 @@ export class EbayFinancesController {
    * GET /api/marketplace/finances/payouts?connectionId=...&limit=...&offset=...&sort=...
    */
   @Get('payouts')
-  @Roles('admin', 'System Manager', 'Inventory Manager')
+  @Roles('admin', 'System Manager')
   async getPayouts(
     @Tenant() tenantId: string,
     @Query('connectionId') connectionId: string,
@@ -47,7 +47,7 @@ export class EbayFinancesController {
    * GET /api/marketplace/finances/payouts/summary?connectionId=...
    */
   @Get('payouts/summary')
-  @Roles('admin', 'System Manager', 'Inventory Manager')
+  @Roles('admin', 'System Manager')
   async getPayoutSummary(
     @Tenant() tenantId: string,
     @Query('connectionId') connectionId: string,
@@ -61,7 +61,7 @@ export class EbayFinancesController {
    * GET /api/marketplace/finances/transactions?connectionId=...&limit=...&offset=...&sort=...
    */
   @Get('transactions')
-  @Roles('admin', 'System Manager', 'Inventory Manager')
+  @Roles('admin', 'System Manager')
   async getTransactions(
     @Tenant() tenantId: string,
     @Query('connectionId') connectionId: string,
@@ -83,7 +83,7 @@ export class EbayFinancesController {
    * GET /api/marketplace/finances/transactions/summary?connectionId=...
    */
   @Get('transactions/summary')
-  @Roles('admin', 'System Manager', 'Inventory Manager')
+  @Roles('admin', 'System Manager')
   async getTransactionSummary(
     @Tenant() tenantId: string,
     @Query('connectionId') connectionId: string,
@@ -97,7 +97,7 @@ export class EbayFinancesController {
    * GET /api/marketplace/finances/funds-summary?connectionId=...
    */
   @Get('funds-summary')
-  @Roles('admin', 'System Manager', 'Inventory Manager')
+  @Roles('admin', 'System Manager')
   async getSellerFundsSummary(
     @Tenant() tenantId: string,
     @Query('connectionId') connectionId: string

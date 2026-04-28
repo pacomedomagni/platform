@@ -312,9 +312,18 @@ export class EbayBulkService {
       );
 
       try {
+        // Cap the SKU sample to keep the audit row's metadata column from
+        // ballooning on huge bulk updates; the full feed file is on eBay
+        // and reachable via task.taskId if forensic detail is needed.
+        const skuSample = items.slice(0, 25).map((i) => i.sku);
+        const truncated = items.length > skuSample.length;
         await this.audit.logBulkOperation(task.taskId, 'BULK_UPDATE_PRICE_QUANTITY', {
           connectionId,
           itemCount: items.length,
+          skuSample,
+          skuSampleTruncated: truncated,
+          firstSku: items[0]?.sku,
+          lastSku: items[items.length - 1]?.sku,
         });
       } catch {
         // Non-critical

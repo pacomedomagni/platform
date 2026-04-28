@@ -1,6 +1,6 @@
 import { Injectable, Logger, BadRequestException, OnModuleDestroy } from '@nestjs/common';
 import * as crypto from 'crypto';
-import { PrismaService } from '@platform/db';
+import { PrismaService, bypassTenantGuard, runWithTenant } from '@platform/db';
 import { EbayStoreService } from './ebay-store.service';
 import { MarketplaceAuditService } from '../shared/marketplace-audit.service';
 
@@ -101,56 +101,66 @@ export class EbayAuthService implements OnModuleDestroy {
    * Handle OAuth callback and exchange code for tokens
    */
   async handleCallback(code: string, state: string) {
-    // Verify state from database
-    const stateData = await this.prisma.oAuthState.findUnique({
-      where: { id: state },
-    });
+    // Verify state from database. The state lookup itself happens before we
+    // know which tenant it belongs to, so it must run with the bypass flag
+    // — otherwise the RLS extension would reject a tenant-scoped query
+    // with no tenant context. The state's tenantId is then used to pin the
+    // remainder of the flow via runWithTenant.
+    const stateData = await bypassTenantGuard(() =>
+      this.prisma.oAuthState.findUnique({
+        where: { id: state },
+      }),
+    );
     if (!stateData) {
       throw new BadRequestException('Invalid or expired OAuth state');
     }
 
+    const { connectionId, tenantId } = stateData;
+
     if (new Date() > stateData.expiresAt) {
-      await this.prisma.oAuthState.delete({ where: { id: state } });
+      await runWithTenant(tenantId, () =>
+        this.prisma.oAuthState.delete({ where: { id: state } }),
+      );
       throw new BadRequestException('OAuth state expired. Please try again.');
     }
 
-    const { connectionId, tenantId } = stateData;
-
-    try {
-      // Exchange authorization code for tokens
-      const tokens = await this.exchangeCodeForTokens(code);
-
-      // Save tokens
-      await this.ebayStore.saveTokens(connectionId, {
-        refreshToken: tokens.refresh_token,
-        accessToken: tokens.access_token,
-        accessTokenExpiry: new Date(Date.now() + tokens.expires_in * 1000),
-      });
-
-      // Fetch and save business policies (pass tenantId explicitly since OAuth callback has no CLS context)
-      await this.ebayStore.fetchAndSaveBusinessPolicies(connectionId, tenantId);
-
-      // Clean up state from database
-      await this.prisma.oAuthState.delete({ where: { id: state } });
-
-      this.logger.log(`Successfully connected eBay store for connection ${connectionId}`);
-
-      // Audit log: OAuth connected
+    return runWithTenant(tenantId, async () => {
       try {
-        const connection = await this.ebayStore.getConnection(connectionId, tenantId);
-        await this.audit.logOAuthConnected(connectionId, connection.name, 'EBAY');
-      } catch {
-        // Non-critical: do not fail the callback if audit logging fails
-      }
+        // Exchange authorization code for tokens
+        const tokens = await this.exchangeCodeForTokens(code);
 
-      return {
-        success: true,
-        connectionId,
-      };
-    } catch (error) {
-      this.logger.error(`OAuth callback failed for connection ${connectionId}`, error);
-      throw new BadRequestException('OAuth connection failed. Please try again.');
-    }
+        // Save tokens
+        await this.ebayStore.saveTokens(connectionId, {
+          refreshToken: tokens.refresh_token,
+          accessToken: tokens.access_token,
+          accessTokenExpiry: new Date(Date.now() + tokens.expires_in * 1000),
+        });
+
+        // Fetch and save business policies (pass tenantId explicitly since OAuth callback has no CLS context)
+        await this.ebayStore.fetchAndSaveBusinessPolicies(connectionId, tenantId);
+
+        // Clean up state from database
+        await this.prisma.oAuthState.delete({ where: { id: state } });
+
+        this.logger.log(`Successfully connected eBay store for connection ${connectionId}`);
+
+        // Audit log: OAuth connected
+        try {
+          const connection = await this.ebayStore.getConnection(connectionId, tenantId);
+          await this.audit.logOAuthConnected(connectionId, connection.name, 'EBAY');
+        } catch {
+          // Non-critical: do not fail the callback if audit logging fails
+        }
+
+        return {
+          success: true,
+          connectionId,
+        };
+      } catch (error) {
+        this.logger.error(`OAuth callback failed for connection ${connectionId}`, error);
+        throw new BadRequestException('OAuth connection failed. Please try again.');
+      }
+    });
   }
 
   /**
@@ -223,8 +233,12 @@ export class EbayAuthService implements OnModuleDestroy {
    * Clean up expired OAuth states
    */
   private async cleanupExpiredStates() {
-    await this.prisma.oAuthState.deleteMany({
-      where: { expiresAt: { lt: new Date() } },
-    });
+    // Cross-tenant sweep — wipes expired OAuth state rows for every
+    // tenant. The bypass tells the RLS extension this is intentional.
+    await bypassTenantGuard(() =>
+      this.prisma.oAuthState.deleteMany({
+        where: { expiresAt: { lt: new Date() } },
+      }),
+    );
   }
 }

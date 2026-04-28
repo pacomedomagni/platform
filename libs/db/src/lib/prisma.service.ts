@@ -2,6 +2,8 @@ import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/commo
 import { PrismaClient } from '@prisma/client';
 import { Pool, PoolConfig } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { ClsService } from 'nestjs-cls';
+import { buildTenantRlsExtension } from './tenant-rls-extension';
 
 // Pool configuration with sensible defaults for production
 const DEFAULT_POOL_CONFIG: Partial<PoolConfig> = {
@@ -17,14 +19,26 @@ const DEFAULT_POOL_CONFIG: Partial<PoolConfig> = {
   statement_timeout: parseInt(process.env['DB_STATEMENT_TIMEOUT'] || '60000', 10),
 };
 
+/**
+ * PrismaService — applies a `$extends` tenant-RLS interceptor on top of the
+ * raw PrismaClient. Every query against a tenant-scoped model is auto-wrapped
+ * in a `$transaction` that first issues `set_config('app.tenant', X, true)`
+ * so Postgres RLS policies see the right tenant. Cross-tenant ops can wrap
+ * their callers in `bypassTenantGuard()` to skip the auto-wrap.
+ *
+ * The constructor extends `this` at runtime (via `Object.setPrototypeOf`)
+ * with the result of `$extends(...)`. This keeps the declared `PrismaClient`
+ * shape (so callers don't need to learn a new type) while routing all model
+ * accesses through the extended client at runtime.
+ */
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
   private pool: Pool;
 
-  constructor() {
+  constructor(private readonly cls: ClsService) {
     const connectionString = process.env['APP_DATABASE_URL'] || process.env['DATABASE_URL'];
-    
+
     if (!connectionString) {
       throw new Error('Database connection string not configured. Set APP_DATABASE_URL or DATABASE_URL environment variable.');
     }
@@ -35,7 +49,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     };
 
     const pool = new Pool(poolConfig);
-    
+
     // Handle pool errors to prevent unhandled rejections
     pool.on('error', (err) => {
       console.error('Unexpected database pool error:', err);
@@ -47,8 +61,25 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
 
     const adapter = new PrismaPg(pool);
     super({ adapter });
-    
+
     this.pool = pool;
+
+    // Apply the tenant-RLS extension. We swap our runtime prototype to the
+    // extended client so the declared `extends PrismaClient` API is
+    // preserved for callers, but every model accessor goes through the
+    // extension's $allOperations interceptor.
+    const extended = this.$extends(
+      buildTenantRlsExtension({
+        getTenantId: () => {
+          try {
+            return this.cls.get('tenantId');
+          } catch {
+            return undefined;
+          }
+        },
+      }),
+    );
+    Object.setPrototypeOf(this, extended);
   }
 
   async onModuleInit() {

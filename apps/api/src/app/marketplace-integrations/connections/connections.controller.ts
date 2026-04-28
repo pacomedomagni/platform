@@ -56,6 +56,7 @@ export class ConnectionsController {
    * GET /api/marketplace/connections
    */
   @Get()
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getConnections(
     @Tenant() tenantId: string,
     @Query('platform') platform?: string
@@ -68,6 +69,7 @@ export class ConnectionsController {
    * GET /api/marketplace/connections/:id
    */
   @Get(':id')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getConnection(
     @Tenant() tenantId: string,
     @Param('id') id: string
@@ -80,6 +82,7 @@ export class ConnectionsController {
    * GET /api/marketplace/connections/:id/status
    */
   @Get(':id/status')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getConnectionStatus(
     @Tenant() tenantId: string,
     @Param('id') id: string

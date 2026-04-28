@@ -60,6 +60,7 @@ export class EbayMediaController {
    * GET /api/marketplace/media/:imageId?connectionId=...
    */
   @Get(':imageId')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
   async getImage(
     @Tenant() tenantId: string,
     @Param('imageId') imageId: string,

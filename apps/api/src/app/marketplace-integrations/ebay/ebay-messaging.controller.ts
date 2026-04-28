@@ -51,6 +51,7 @@ export class EbayMessagingController {
    * GET /api/marketplace/messages
    */
   @Get()
+  @Roles('admin', 'System Manager', 'Inventory Manager', 'Customer Service')
   async getThreads(
     @Tenant() tenantId: string,
     @Query(ValidationPipe) query: GetMessagesQueryDto
@@ -72,6 +73,7 @@ export class EbayMessagingController {
    * "unread-count" being captured as a thread ID parameter.
    */
   @Get('unread-count')
+  @Roles('admin', 'System Manager', 'Inventory Manager', 'Customer Service')
   async getUnreadCount(
     @Tenant() tenantId: string,
     @Query('connectionId') connectionId?: string
@@ -85,6 +87,7 @@ export class EbayMessagingController {
    * GET /api/marketplace/messages/:id
    */
   @Get(':id')
+  @Roles('admin', 'System Manager', 'Inventory Manager', 'Customer Service')
   async getThread(
     @Tenant() tenantId: string,
     @Param('id') id: string
@@ -112,6 +115,7 @@ export class EbayMessagingController {
    * POST /api/marketplace/messages/:id/read
    */
   @Post(':id/read')
+  @Roles('admin', 'System Manager', 'Inventory Manager', 'Customer Service')
   async markAsRead(
     @Tenant() tenantId: string,
     @Param('id') id: string

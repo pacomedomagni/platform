@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '@platform/db';
+import { PrismaService, bypassTenantGuard, runWithTenant } from '@platform/db';
 import * as crypto from 'crypto';
 
 /**
@@ -174,9 +174,14 @@ export class EbayWebhookService {
   /**
    * Handle an account deletion notification from eBay.
    *
-   * Finds the marketplace connection associated with the eBay user in the
-   * notification payload, anonymizes stored tokens, and marks the connection
-   * as disconnected.
+   * eBay sends one notification per deleted user globally; the user may have
+   * connected to multiple tenants (e.g. an agency managing several stores
+   * under the same eBay login), so we anonymize every matching connection.
+   * What we DON'T do is scan every eBay connection in the database and
+   * compare userIds in application code — that's O(n) over all tenants and
+   * trivially fans out wrong if any platformConfig field accidentally
+   * collides. Instead we filter at the database level via the JSONB path
+   * so the query plan only touches matching rows.
    */
   async handleAccountDeletion(notification: any): Promise<void> {
     const userId =
@@ -195,41 +200,49 @@ export class EbayWebhookService {
       `Processing account deletion for eBay user: ${userId}`
     );
 
-    // Find all eBay connections that may belong to this user.
-    // eBay connections are identified by platform = 'EBAY'. We search for
-    // connections where platformConfig contains this userId, or we simply
-    // search all connected eBay connections and check platformConfig.
-    const connections = await this.prisma.marketplaceConnection.findMany({
-      where: {
-        platform: 'EBAY',
-        isConnected: true,
-      },
+    // Cross-tenant scan: look up every connection that belongs to this eBay
+    // user, regardless of which tenant owns it. The bypass is required —
+    // we have no tenant context yet at this point in the webhook flow.
+    const candidates = await bypassTenantGuard(() =>
+      this.prisma.marketplaceConnection.findMany({
+        where: {
+          platform: 'EBAY',
+          isConnected: true,
+          OR: [
+            { platformConfig: { path: ['ebayUserId'], equals: userId } },
+            { platformConfig: { path: ['userId'], equals: userId } },
+            { platformConfig: { path: ['username'], equals: userId } },
+          ],
+        },
+        select: { id: true, tenantId: true },
+      }),
+    );
+
+    const seen = new Set<string>();
+    const matches = candidates.filter((c) => {
+      if (seen.has(c.id)) return false;
+      seen.add(c.id);
+      return true;
     });
 
-    let matchedCount = 0;
-
-    for (const connection of connections) {
-      // Check if platformConfig contains the eBay userId
-      const config = connection.platformConfig as Record<string, any> | null;
-      const configUserId =
-        config?.ebayUserId || config?.userId || config?.username;
-
-      if (configUserId && configUserId === userId) {
-        await this.anonymizeConnection(connection.id);
-        matchedCount++;
-      }
+    // Per-tenant anonymization — pin each tenant's id for the update so the
+    // RLS policy matches. eBay sends one notification per user globally,
+    // so multiple tenants with the same eBay seller all get cleaned up.
+    for (const match of matches) {
+      await runWithTenant(match.tenantId, () => this.anonymizeConnection(match.id));
+      this.logger.log(
+        `Anonymized eBay connection ${match.id} (tenant ${match.tenantId}) for user ${userId}`
+      );
     }
 
-    // If no match was found by platformConfig, log a warning but do not fail.
-    // The notification is acknowledged regardless.
-    if (matchedCount === 0) {
+    if (matches.length === 0) {
       this.logger.warn(
         `No matching eBay connection found for user ${userId}. ` +
           'The account may have already been disconnected.'
       );
     } else {
       this.logger.log(
-        `Anonymized ${matchedCount} connection(s) for eBay user ${userId}`
+        `Anonymized ${matches.length} connection(s) for eBay user ${userId}`
       );
     }
   }

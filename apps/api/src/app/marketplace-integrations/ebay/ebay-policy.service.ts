@@ -54,7 +54,16 @@ export class EbayPolicyService {
 
     const base = await this.ebayClient.getFulfillmentPolicy(client, basePolicyId);
     const overrideHash = this.hashOverride(override);
-    const derivedName = this.deriveName(base.name || 'Policy', overrideHash);
+    // Include the basePolicyId in the derived name so two distinct base
+    // policies that happen to share an override fingerprint can never alias
+    // to the same clone name. Without this, "Standard policy [ovr:abcd]" and
+    // "Heavy-item policy [ovr:abcd]" would collide when both shared a
+    // base name suffix.
+    const derivedName = this.deriveName(
+      base.name || 'Policy',
+      basePolicyId,
+      overrideHash
+    );
 
     // If a derivative with this name already exists, reuse it.
     const existing = await this.ebayClient.getFulfillmentPolicies(client, marketplaceId);
@@ -91,9 +100,15 @@ export class EbayPolicyService {
     return createHash('sha1').update(canonical).digest('hex').slice(0, 8);
   }
 
-  private deriveName(baseName: string, hash: string): string {
-    // eBay policy name max length is 64; truncate the base portion.
-    const tag = ` [ovr:${hash}]`;
+  private deriveName(baseName: string, basePolicyId: string, hash: string): string {
+    // eBay policy name max length is 64; build a tag that fully identifies
+    // the parent policy and the override fingerprint, then truncate the
+    // human-readable prefix to fit. Use the first 6 chars of the policyId
+    // (eBay policy IDs are numeric strings in the 10–13 digit range, so 6
+    // is plenty to disambiguate within a single seller account while
+    // keeping the tag compact).
+    const idSlice = String(basePolicyId).slice(-6);
+    const tag = ` [ovr:${idSlice}:${hash}]`;
     const room = 64 - tag.length;
     const trimmedBase = baseName.length > room ? baseName.slice(0, room) : baseName;
     return `${trimmedBase}${tag}`;
