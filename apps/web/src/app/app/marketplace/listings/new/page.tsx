@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { unwrapJson } from '@/lib/admin-fetch';
+import { VariationMatrix, type VariationMatrixValue } from '../_components/VariationMatrix';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -126,6 +127,7 @@ const DIMENSION_UNITS = [
   { value: 'INCH', label: 'in' },
   { value: 'CENTIMETER', label: 'cm' },
   { value: 'FEET', label: 'ft' },
+  { value: 'METER', label: 'm' },
 ];
 
 const AUCTION_DURATIONS = [
@@ -136,6 +138,118 @@ const AUCTION_DURATIONS = [
   { value: 'DAYS_10', label: '10 days' },
   { value: 'DAYS_21', label: '21 days' },
   { value: 'DAYS_30', label: '30 days' },
+];
+
+// eBay's Inventory API accepts only GTC for fixed-price listings on every
+// marketplace — `DAYS_*` values are auction-only. Keeping a single-option
+// list documents this constraint to the seller without offering values
+// the Sell API would reject.
+// See https://developer.ebay.com/api-docs/sell/inventory/types/slr:ListingDurationEnum
+const FIXED_PRICE_DURATIONS = [
+  { value: 'GTC', label: 'Good ‘Til Cancelled' },
+];
+
+const HANDLING_TIME_OPTIONS = [
+  { value: '', label: 'Use policy default' },
+  { value: '0', label: 'Same business day' },
+  { value: '1', label: '1 business day' },
+  { value: '2', label: '2 business days' },
+  { value: '3', label: '3 business days' },
+  { value: '4', label: '4 business days' },
+  { value: '5', label: '5 business days' },
+  { value: '10', label: '10 business days' },
+  { value: '15', label: '15 business days' },
+  { value: '20', label: '20 business days' },
+  { value: '30', label: '30 business days' },
+];
+
+const US_STATES = [
+  { value: '', label: '— Select state —' },
+  { value: 'AL', label: 'Alabama' },
+  { value: 'AK', label: 'Alaska' },
+  { value: 'AZ', label: 'Arizona' },
+  { value: 'AR', label: 'Arkansas' },
+  { value: 'CA', label: 'California' },
+  { value: 'CO', label: 'Colorado' },
+  { value: 'CT', label: 'Connecticut' },
+  { value: 'DE', label: 'Delaware' },
+  { value: 'DC', label: 'District of Columbia' },
+  { value: 'FL', label: 'Florida' },
+  { value: 'GA', label: 'Georgia' },
+  { value: 'HI', label: 'Hawaii' },
+  { value: 'ID', label: 'Idaho' },
+  { value: 'IL', label: 'Illinois' },
+  { value: 'IN', label: 'Indiana' },
+  { value: 'IA', label: 'Iowa' },
+  { value: 'KS', label: 'Kansas' },
+  { value: 'KY', label: 'Kentucky' },
+  { value: 'LA', label: 'Louisiana' },
+  { value: 'ME', label: 'Maine' },
+  { value: 'MD', label: 'Maryland' },
+  { value: 'MA', label: 'Massachusetts' },
+  { value: 'MI', label: 'Michigan' },
+  { value: 'MN', label: 'Minnesota' },
+  { value: 'MS', label: 'Mississippi' },
+  { value: 'MO', label: 'Missouri' },
+  { value: 'MT', label: 'Montana' },
+  { value: 'NE', label: 'Nebraska' },
+  { value: 'NV', label: 'Nevada' },
+  { value: 'NH', label: 'New Hampshire' },
+  { value: 'NJ', label: 'New Jersey' },
+  { value: 'NM', label: 'New Mexico' },
+  { value: 'NY', label: 'New York' },
+  { value: 'NC', label: 'North Carolina' },
+  { value: 'ND', label: 'North Dakota' },
+  { value: 'OH', label: 'Ohio' },
+  { value: 'OK', label: 'Oklahoma' },
+  { value: 'OR', label: 'Oregon' },
+  { value: 'PA', label: 'Pennsylvania' },
+  { value: 'RI', label: 'Rhode Island' },
+  { value: 'SC', label: 'South Carolina' },
+  { value: 'SD', label: 'South Dakota' },
+  { value: 'TN', label: 'Tennessee' },
+  { value: 'TX', label: 'Texas' },
+  { value: 'UT', label: 'Utah' },
+  { value: 'VT', label: 'Vermont' },
+  { value: 'VA', label: 'Virginia' },
+  { value: 'WA', label: 'Washington' },
+  { value: 'WV', label: 'West Virginia' },
+  { value: 'WI', label: 'Wisconsin' },
+  { value: 'WY', label: 'Wyoming' },
+  { value: 'AS', label: 'American Samoa' },
+  { value: 'GU', label: 'Guam' },
+  { value: 'MP', label: 'Northern Mariana Islands' },
+  { value: 'PR', label: 'Puerto Rico' },
+  { value: 'VI', label: 'U.S. Virgin Islands' },
+];
+
+const SHIPPING_COST_TYPES = [
+  { value: '', label: 'Use policy default' },
+  { value: 'FLAT_RATE', label: 'Flat rate' },
+  { value: 'CALCULATED', label: 'Calculated (carrier rates)' },
+  { value: 'NOT_SPECIFIED', label: 'Local pickup only' },
+  { value: 'FREIGHT', label: 'Freight' },
+];
+
+// US shipping services exposed in eBay's listing form.
+const US_SHIPPING_SERVICES = [
+  { value: 'USPSGroundAdvantage', label: 'USPS Ground Advantage' },
+  { value: 'USPSPriority', label: 'USPS Priority Mail' },
+  { value: 'USPSPriorityMailExpress', label: 'USPS Priority Mail Express' },
+  { value: 'USPSMedia', label: 'USPS Media Mail' },
+  { value: 'UPSGround', label: 'UPS Ground' },
+  { value: 'UPS3rdDay', label: 'UPS 3 Day Select' },
+  { value: 'UPS2ndDay', label: 'UPS 2nd Day Air' },
+  { value: 'UPSNextDay', label: 'UPS Next Day Air' },
+  { value: 'FedExHomeDelivery', label: 'FedEx Home Delivery' },
+  { value: 'FedExGround', label: 'FedEx Ground' },
+  { value: 'FedEx2Day', label: 'FedEx 2Day' },
+  { value: 'FedExExpressSaver', label: 'FedEx Express Saver' },
+  { value: 'ShippingMethodStandard', label: 'Standard Shipping' },
+  { value: 'ShippingMethodExpedited', label: 'Expedited Shipping' },
+  { value: 'EconomyShippingFromOutsideUS', label: 'Economy Shipping' },
+  { value: 'Other', label: 'Other (see description)' },
+  { value: 'LocalDelivery', label: 'Local pickup' },
 ];
 
 const PACKAGE_TYPES = [
@@ -240,6 +354,7 @@ export default function CreateListingPage() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showListingOptions, setShowListingOptions] = useState(false);
   const [showItemLocation, setShowItemLocation] = useState(false);
+  const [showShippingOverrides, setShowShippingOverrides] = useState(false);
 
   // ---- Form data ----
   const [formData, setFormData] = useState({
@@ -263,7 +378,7 @@ export default function CreateListingPage() {
     startPrice: '',
     reservePrice: '',
     buyItNowPrice: '',
-    listingDuration: 'DAYS_7',
+    listingDuration: 'GTC',
     brand: '',
     mpn: '',
     upc: '',
@@ -287,8 +402,24 @@ export default function CreateListingPage() {
     paymentPolicyId: '',
     returnPolicyId: '',
     merchantLocationKey: '',
+    // P0: Shipping overrides
+    handlingTimeDays: '',
+    shippingCostType: '',
     scheduledStartTime: '',
     autoPublish: false,
+  });
+
+  // Per-listing shipping services (P0-5). Empty array = use policy default.
+  const [shippingServices, setShippingServices] = useState<
+    Array<{ serviceCode: string; cost: string; additionalCost: string; freeShipping: boolean }>
+  >([]);
+
+  // P0-4: Variation matrix
+  const [isVariationListing, setIsVariationListing] = useState(false);
+  const [variation, setVariation] = useState<VariationMatrixValue>({
+    variantAspectNames: [],
+    aspectValues: {},
+    variants: [],
   });
 
   // ---- Convenience updater ----
@@ -536,7 +667,27 @@ export default function CreateListingPage() {
       toast({ title: 'Validation Error', description: 'Category is required', variant: 'destructive' });
       return false;
     }
-    if (formData.format === 'FIXED_PRICE') {
+    if (isVariationListing) {
+      if (formData.format !== 'FIXED_PRICE') {
+        toast({ title: 'Validation Error', description: 'Variation listings must use Fixed Price format', variant: 'destructive' });
+        return false;
+      }
+      if (variation.variants.length === 0) {
+        toast({ title: 'Validation Error', description: 'Add at least one variant before submitting', variant: 'destructive' });
+        return false;
+      }
+      const bad = variation.variants.find(
+        (v) => !v.sku.trim() || !v.price || parseFloat(v.price) <= 0 || !v.quantity || parseInt(v.quantity) < 0,
+      );
+      if (bad) {
+        toast({ title: 'Validation Error', description: 'Every variant needs a SKU, price, and quantity', variant: 'destructive' });
+        return false;
+      }
+      if (!formData.fulfillmentPolicyId || !formData.paymentPolicyId || !formData.returnPolicyId) {
+        toast({ title: 'Validation Error', description: 'Variation listings require all three business policies', variant: 'destructive' });
+        return false;
+      }
+    } else if (formData.format === 'FIXED_PRICE') {
       if (!formData.price || parseFloat(formData.price) <= 0) {
         toast({ title: 'Validation Error', description: 'Valid price is required for Fixed Price listing', variant: 'destructive' });
         return false;
@@ -600,7 +751,7 @@ export default function CreateListingPage() {
         categoryId: formData.categoryId,
         secondaryCategoryId: formData.secondaryCategoryId || undefined,
         format: formData.format,
-        listingDuration: formData.format === 'AUCTION' ? formData.listingDuration : 'GTC',
+        listingDuration: formData.listingDuration,
         bestOfferEnabled: formData.format === 'FIXED_PRICE' ? formData.bestOfferEnabled : false,
         autoAcceptPrice: formData.bestOfferEnabled && formData.autoAcceptPrice ? parseFloat(formData.autoAcceptPrice) : undefined,
         autoDeclinePrice: formData.bestOfferEnabled && formData.autoDeclinePrice ? parseFloat(formData.autoDeclinePrice) : undefined,
@@ -627,6 +778,21 @@ export default function CreateListingPage() {
         paymentPolicyId: formData.paymentPolicyId || undefined,
         returnPolicyId: formData.returnPolicyId || undefined,
         merchantLocationKey: formData.merchantLocationKey || undefined,
+        // P0 shipping overrides
+        handlingTimeDays:
+          formData.handlingTimeDays !== '' ? parseInt(formData.handlingTimeDays) : undefined,
+        shippingCostType: formData.shippingCostType || undefined,
+        shippingServices: shippingServices.length
+          ? shippingServices
+              .filter((s) => s.serviceCode)
+              .map((s, idx) => ({
+                serviceCode: s.serviceCode,
+                cost: s.freeShipping ? 0 : parseFloat(s.cost || '0'),
+                additionalCost: s.additionalCost ? parseFloat(s.additionalCost) : undefined,
+                freeShipping: s.freeShipping || undefined,
+                priority: idx + 1,
+              }))
+          : undefined,
         platformData: {
           brand: formData.brand || undefined,
           mpn: formData.mpn || undefined,
@@ -636,15 +802,65 @@ export default function CreateListingPage() {
         },
       };
 
-      const res = await fetch('/api/v1/marketplace/ebay/listings/direct', {
+      // Variation listings post to the dedicated variations endpoint, which
+      // creates an inventory item group + N child offers. The single-SKU path
+      // uses /direct as before.
+      const isVariationSubmission =
+        isVariationListing && variation.variants.length > 0 && formData.format === 'FIXED_PRICE';
+
+      const url = isVariationSubmission
+        ? '/api/v1/marketplace/ebay/listings/variations'
+        : '/api/v1/marketplace/ebay/listings/direct';
+
+      const submitBody = isVariationSubmission
+        ? {
+            connectionId: formData.connectionId,
+            productListingId: formData.productListingId,
+            warehouseId: formData.warehouseId || undefined,
+            groupTitle: formData.title,
+            description: formData.description,
+            categoryId: formData.categoryId,
+            variantAspects: variation.variantAspectNames,
+            variants: variation.variants.map((v) => ({
+              sku: v.sku,
+              title: formData.title,
+              price: parseFloat(v.price || formData.price || '0'),
+              quantity: parseInt(v.quantity || '1'),
+              condition: formData.condition,
+              aspects: Object.fromEntries(
+                Object.entries(v.aspects).map(([k, val]) => [k, [val]]),
+              ),
+              photos: v.imageUrl ? [v.imageUrl] : photos,
+            })),
+            fulfillmentPolicyId: formData.fulfillmentPolicyId,
+            paymentPolicyId: formData.paymentPolicyId,
+            returnPolicyId: formData.returnPolicyId,
+          }
+        : body;
+
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(body),
+        body: JSON.stringify(submitBody),
       });
 
       if (res.ok) {
-        const listing = unwrapJson<{ id: string }>(await res.json());
+        // Variation submissions return an array of created listings; the
+        // direct path returns a single listing object. Use the first listing
+        // for any subsequent schedule / publish call.
+        const parsed = unwrapJson<unknown>(await res.json());
+        const firstListing = Array.isArray(parsed) ? (parsed[0] as { id: string }) : (parsed as { id: string });
+
+        if (isVariationSubmission) {
+          // Variation listings publish synchronously inside the create call,
+          // so skip the schedule / auto-publish branches and head back to the list.
+          toast({ title: 'Success', description: `Variation listing created with ${variation.variants.length} variants.` });
+          router.push('/app/marketplace/listings');
+          return;
+        }
+
+        const listing = firstListing;
 
         // Handle scheduling
         if (formData.scheduledStartTime) {
@@ -1191,6 +1407,40 @@ export default function CreateListingPage() {
         <div className="bg-white border border-gray-200 rounded-lg p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Pricing &amp; Format</h2>
 
+          {/* P0-4: Multi-variation toggle */}
+          <div className="flex items-start gap-3 p-3 mb-4 bg-purple-50 border border-purple-200 rounded-lg">
+            <input
+              type="checkbox"
+              id="isVariationListing"
+              checked={isVariationListing}
+              onChange={(e) => setIsVariationListing(e.target.checked)}
+              className="mt-0.5 w-4 h-4 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+            />
+            <label htmlFor="isVariationListing" className="flex-1 cursor-pointer">
+              <span className="block text-sm font-medium text-gray-900">
+                This is a multi-variation listing
+              </span>
+              <span className="block text-xs text-gray-600 mt-0.5">
+                Use a single listing for items that come in multiple sizes, colors, or other
+                aspects. Each combination becomes its own SKU with its own price and quantity.
+                Auctions don&apos;t support variations.
+              </span>
+            </label>
+          </div>
+
+          {isVariationListing && (
+            <div className="border border-purple-200 rounded-lg p-4 mb-4 bg-purple-50/30">
+              <VariationMatrix
+                value={variation}
+                onChange={setVariation}
+                baseSku={formData.sku}
+                basePrice={formData.price}
+                baseQuantity={formData.quantity}
+                baseCondition={formData.condition}
+              />
+            </div>
+          )}
+
           <div className="space-y-4">
             {/* Format toggle */}
             <div>
@@ -1204,7 +1454,10 @@ export default function CreateListingPage() {
                     name="format"
                     value="FIXED_PRICE"
                     checked={formData.format === 'FIXED_PRICE'}
-                    onChange={() => updateField('format', 'FIXED_PRICE')}
+                    onChange={() => {
+                      updateField('format', 'FIXED_PRICE');
+                      updateField('listingDuration', 'GTC');
+                    }}
                     className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
                   />
                   <span className="text-sm text-gray-900">Fixed Price</span>
@@ -1215,7 +1468,10 @@ export default function CreateListingPage() {
                     name="format"
                     value="AUCTION"
                     checked={formData.format === 'AUCTION'}
-                    onChange={() => updateField('format', 'AUCTION')}
+                    onChange={() => {
+                      updateField('format', 'AUCTION');
+                      updateField('listingDuration', 'DAYS_7');
+                    }}
                     className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
                   />
                   <span className="text-sm text-gray-900">Auction</span>
@@ -1226,6 +1482,15 @@ export default function CreateListingPage() {
             {/* Fixed Price fields */}
             {formData.format === 'FIXED_PRICE' && (
               <>
+                <div className="flex items-start gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                  <Info className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                  <div className="text-xs text-blue-700">
+                    <strong>Listing duration:</strong> Good ’Til Cancelled (GTC). eBay
+                    requires GTC for every fixed-price listing — the listing stays live
+                    until you end it or inventory hits zero, and renews automatically
+                    every calendar month.
+                  </div>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1781,13 +2046,27 @@ export default function CreateListingPage() {
                 {/* State/Province */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">State/Province</label>
-                  <input
-                    type="text"
-                    value={formData.itemLocationState}
-                    onChange={(e) => updateField('itemLocationState', e.target.value)}
-                    placeholder="e.g. CA"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  />
+                  {(formData.itemLocationCountry === 'US' || !formData.itemLocationCountry) ? (
+                    <select
+                      value={formData.itemLocationState}
+                      onChange={(e) => updateField('itemLocationState', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    >
+                      {US_STATES.map((s) => (
+                        <option key={s.value} value={s.value}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={formData.itemLocationState}
+                      onChange={(e) => updateField('itemLocationState', e.target.value)}
+                      placeholder="State / Province / Region"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    />
+                  )}
                 </div>
 
                 {/* Postal Code */}
@@ -1903,6 +2182,213 @@ export default function CreateListingPage() {
                   </p>
                 </div>
               )}
+            </div>
+          )}
+        </div>
+
+        {/* ================================================================ */}
+        {/* Section 9b: Shipping overrides (handling time + cost + services)  */}
+        {/* ================================================================ */}
+        <div className="bg-white border border-gray-200 rounded-lg">
+          <button
+            type="button"
+            onClick={() => setShowShippingOverrides(!showShippingOverrides)}
+            className="w-full flex items-center justify-between p-6 text-left"
+          >
+            <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <Package className="w-5 h-5 text-gray-500" />
+              Shipping Overrides
+              <span className="text-sm font-normal text-gray-500">(optional)</span>
+            </h2>
+            {showShippingOverrides ? (
+              <ChevronUp className="w-5 h-5 text-gray-400" />
+            ) : (
+              <ChevronDown className="w-5 h-5 text-gray-400" />
+            )}
+          </button>
+
+          {showShippingOverrides && (
+            <div className="px-6 pb-6 space-y-4">
+              <p className="text-xs text-gray-500">
+                Override the linked fulfillment policy for this listing only. We&apos;ll
+                clone the base policy on eBay&apos;s side so your saved policies stay untouched.
+              </p>
+
+              {/* Handling time (P0-2) */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Handling time
+                </label>
+                <select
+                  value={formData.handlingTimeDays}
+                  onChange={(e) => updateField('handlingTimeDays', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                >
+                  {HANDLING_TIME_OPTIONS.map((h) => (
+                    <option key={h.value} value={h.value}>
+                      {h.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  How quickly you&apos;ll dispatch this item once paid. Counted in eBay business days.
+                </p>
+              </div>
+
+              {/* Shipping cost type (P0-6) */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Shipping cost type
+                </label>
+                <select
+                  value={formData.shippingCostType}
+                  onChange={(e) => updateField('shippingCostType', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                >
+                  {SHIPPING_COST_TYPES.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Pick &ldquo;Calculated&rdquo; if you want eBay to use carrier rates based on
+                  your package weight and the buyer&apos;s ZIP. &ldquo;Local pickup only&rdquo;
+                  hides shipping entirely.
+                </p>
+              </div>
+
+              {/* Shipping services repeater (P0-5) */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Domestic shipping services
+                  </label>
+                  {shippingServices.length < 4 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setShippingServices((prev) => [
+                          ...prev,
+                          { serviceCode: 'USPSGroundAdvantage', cost: '', additionalCost: '', freeShipping: false },
+                        ])
+                      }
+                      className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                    >
+                      <Plus className="w-3 h-3" />
+                      Add service
+                    </button>
+                  )}
+                </div>
+
+                {shippingServices.length === 0 ? (
+                  <p className="text-xs text-gray-500">
+                    No overrides — uses the linked fulfillment policy.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {shippingServices.map((svc, idx) => (
+                      <div
+                        key={idx}
+                        className="grid grid-cols-12 gap-2 items-start border border-gray-200 rounded-lg p-3"
+                      >
+                        <div className="col-span-12 md:col-span-5">
+                          <label className="block text-xs text-gray-500 mb-1">Service</label>
+                          <select
+                            value={svc.serviceCode}
+                            onChange={(e) =>
+                              setShippingServices((prev) =>
+                                prev.map((s, i) =>
+                                  i === idx ? { ...s, serviceCode: e.target.value } : s,
+                                ),
+                              )
+                            }
+                            className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                          >
+                            {US_SHIPPING_SERVICES.map((s) => (
+                              <option key={s.value} value={s.value}>
+                                {s.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="col-span-6 md:col-span-2">
+                          <label className="block text-xs text-gray-500 mb-1">Cost</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={svc.cost}
+                            disabled={svc.freeShipping}
+                            onChange={(e) =>
+                              setShippingServices((prev) =>
+                                prev.map((s, i) =>
+                                  i === idx ? { ...s, cost: e.target.value } : s,
+                                ),
+                              )
+                            }
+                            placeholder="0.00"
+                            className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm disabled:bg-gray-100"
+                          />
+                        </div>
+                        <div className="col-span-6 md:col-span-2">
+                          <label className="block text-xs text-gray-500 mb-1">Add&apos;l item</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={svc.additionalCost}
+                            disabled={svc.freeShipping}
+                            onChange={(e) =>
+                              setShippingServices((prev) =>
+                                prev.map((s, i) =>
+                                  i === idx ? { ...s, additionalCost: e.target.value } : s,
+                                ),
+                              )
+                            }
+                            placeholder="0.00"
+                            className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm disabled:bg-gray-100"
+                          />
+                        </div>
+                        <div className="col-span-12 md:col-span-2 flex items-end gap-2 h-full">
+                          <label className="flex items-center gap-1 text-xs text-gray-700 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={svc.freeShipping}
+                              onChange={(e) =>
+                                setShippingServices((prev) =>
+                                  prev.map((s, i) =>
+                                    i === idx
+                                      ? { ...s, freeShipping: e.target.checked, cost: e.target.checked ? '0' : s.cost }
+                                      : s,
+                                  ),
+                                )
+                              }
+                            />
+                            Free
+                          </label>
+                        </div>
+                        <div className="col-span-12 md:col-span-1 flex items-end justify-end h-full">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setShippingServices((prev) => prev.filter((_, i) => i !== idx))
+                            }
+                            className="text-red-500 hover:text-red-700"
+                            title="Remove"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <p className="text-xs text-gray-500 mt-2">
+                  Up to 4 domestic shipping services. The first row is shown to buyers as the
+                  default option.
+                </p>
+              </div>
             </div>
           )}
         </div>

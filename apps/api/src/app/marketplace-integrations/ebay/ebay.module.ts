@@ -63,6 +63,7 @@ import { EbayInventoryLocationsService } from './ebay-inventory-locations.servic
 import { EbayInventoryLocationsController } from './ebay-inventory-locations.controller';
 import { EbayMediaService } from './ebay-media.service';
 import { EbayMediaController } from './ebay-media.controller';
+import { EbayPolicyService } from './ebay-policy.service';
 
 /**
  * eBay Integration Module
@@ -135,6 +136,7 @@ import { EbayMediaController } from './ebay-media.controller';
     EbayKeywordsService,
     EbayInventoryLocationsService,
     EbayMediaService,
+    EbayPolicyService,
   ],
   exports: [
     EbayClientService,
@@ -168,6 +170,7 @@ import { EbayMediaController } from './ebay-media.controller';
     EbayKeywordsService,
     EbayInventoryLocationsService,
     EbayMediaService,
+    EbayPolicyService,
   ],
 })
 export class EbayModule {}

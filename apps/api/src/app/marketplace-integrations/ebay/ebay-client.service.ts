@@ -756,6 +756,47 @@ export class EbayClientService implements OnModuleDestroy {
   }
 
   /**
+   * Get a single fulfillment policy by ID
+   */
+  async getFulfillmentPolicy(client: eBayApi, policyId: string): Promise<EbayFulfillmentPolicy> {
+    if (this.mockMode) {
+      return { fulfillmentPolicyId: policyId, name: 'Mock Fulfillment Policy' };
+    }
+    return this.withRetry(async () => {
+      try {
+        const response = await (client.sell.account as any).getFulfillmentPolicy(policyId);
+        return response;
+      } catch (error) {
+        this.logger.error(`Failed to fetch fulfillment policy ${policyId}`, error);
+        throw error;
+      }
+    });
+  }
+
+  /**
+   * Create a fulfillment policy. Used by the lazy-clone path that
+   * applies per-listing handling-time / shipping-service overrides
+   * without touching the seller's saved policies.
+   */
+  async createFulfillmentPolicy(
+    client: eBayApi,
+    body: Record<string, unknown>
+  ): Promise<EbayFulfillmentPolicy> {
+    if (this.mockMode) {
+      return { fulfillmentPolicyId: `mock_fp_${Date.now()}`, name: (body as any).name };
+    }
+    return this.withRetry(async () => {
+      try {
+        const response = await (client.sell.account as any).createFulfillmentPolicy(body);
+        return response;
+      } catch (error) {
+        this.logger.error('Failed to create fulfillment policy', error);
+        throw error;
+      }
+    });
+  }
+
+  /**
    * Get payment policies
    */
   async getPaymentPolicies(client: eBayApi, marketplaceId: string): Promise<EbayPaymentPolicy[]> {

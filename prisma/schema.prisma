@@ -2721,6 +2721,12 @@ model MarketplaceListing {
   paymentPolicyId     String?
   returnPolicyId      String?
 
+  // Per-listing shipping overrides (when set, the publish flow lazily
+  // clones the base fulfillment policy and overrides these fields).
+  handlingTimeDays Int?    // 0–30 business days
+  shippingCostType String? // FLAT_RATE | CALCULATED | NOT_SPECIFIED | FREIGHT
+  shippingServices Json?   // [{ serviceCode, cost, additionalCost, freeShipping, priority }]
+
   // Status
   status       String // draft, pending_approval, approved, publishing, published, ended, error
   syncStatus   String  @default("pending") // synced, pending, error

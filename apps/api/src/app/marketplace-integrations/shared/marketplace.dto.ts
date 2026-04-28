@@ -100,6 +100,30 @@ export class CreateListingDto {
   overrides?: ListingOverridesDto;
 }
 
+export class ShippingServiceOverrideDto {
+  @IsString()
+  @IsNotEmpty()
+  serviceCode!: string;
+
+  @IsNumber()
+  @Min(0)
+  cost!: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  additionalCost?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  freeShipping?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  priority?: number;
+}
+
 export class CreateDirectListingDto {
   @IsUUID()
   connectionId!: string;
@@ -293,6 +317,25 @@ export class CreateDirectListingDto {
   @IsOptional()
   @IsString()
   merchantLocationKey?: string;
+
+  // P0 shipping overrides — drive a lazy clone of the fulfillment policy
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(30)
+  handlingTimeDays?: number;
+
+  @IsOptional()
+  @IsEnum(['FLAT_RATE', 'CALCULATED', 'NOT_SPECIFIED', 'FREIGHT'], {
+    message: 'shippingCostType must be FLAT_RATE, CALCULATED, NOT_SPECIFIED, or FREIGHT',
+  })
+  shippingCostType?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ShippingServiceOverrideDto)
+  shippingServices?: ShippingServiceOverrideDto[];
 }
 
 export class UpdateListingDto {
@@ -461,6 +504,23 @@ export class UpdateListingDto {
   @IsOptional()
   @IsString()
   returnPolicyId?: string;
+
+  // P0 shipping overrides
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(30)
+  handlingTimeDays?: number;
+
+  @IsOptional()
+  @IsEnum(['FLAT_RATE', 'CALCULATED', 'NOT_SPECIFIED', 'FREIGHT'])
+  shippingCostType?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ShippingServiceOverrideDto)
+  shippingServices?: ShippingServiceOverrideDto[];
 }
 
 export class RejectListingDto {

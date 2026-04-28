@@ -5,6 +5,7 @@ import { EbayStoreService } from './ebay-store.service';
 import { EbayClientService } from './ebay-client.service';
 import { EbayMediaService } from './ebay-media.service';
 import { EbayTaxonomyService } from './ebay-taxonomy.service';
+import { EbayPolicyService } from './ebay-policy.service';
 import { MarketplaceAuditService } from '../shared/marketplace-audit.service';
 import { ListingStatus, SyncStatus } from '../shared/marketplace.types';
 import { Prisma } from '@prisma/client';
@@ -41,6 +42,7 @@ export class EbayListingsService {
     private ebayClient: EbayClientService,
     private mediaService: EbayMediaService,
     private taxonomyService: EbayTaxonomyService,
+    private policyService: EbayPolicyService,
     private audit: MarketplaceAuditService
   ) {}
 
@@ -198,6 +200,16 @@ export class EbayListingsService {
     paymentPolicyId?: string;
     returnPolicyId?: string;
     merchantLocationKey?: string;
+    // P0 shipping overrides
+    handlingTimeDays?: number;
+    shippingCostType?: string;
+    shippingServices?: Array<{
+      serviceCode: string;
+      cost: number;
+      additionalCost?: number;
+      freeShipping?: boolean;
+      priority?: number;
+    }>;
   }) {
     const tenantId = this.cls.get('tenantId');
 
@@ -271,6 +283,10 @@ export class EbayListingsService {
         fulfillmentPolicyId: data.fulfillmentPolicyId,
         paymentPolicyId: data.paymentPolicyId,
         returnPolicyId: data.returnPolicyId,
+        // Shipping overrides — applied at publish time via lazy policy clone
+        handlingTimeDays: data.handlingTimeDays,
+        shippingCostType: data.shippingCostType,
+        shippingServices: data.shippingServices ? (data.shippingServices as any) : undefined,
         platformData: JSON.stringify({
           ...(data.platformData || {}),
           merchantLocationKey: data.merchantLocationKey,
@@ -388,6 +404,16 @@ export class EbayListingsService {
     fulfillmentPolicyId?: string;
     paymentPolicyId?: string;
     returnPolicyId?: string;
+    // P0 shipping overrides
+    handlingTimeDays?: number;
+    shippingCostType?: string;
+    shippingServices?: Array<{
+      serviceCode: string;
+      cost: number;
+      additionalCost?: number;
+      freeShipping?: boolean;
+      priority?: number;
+    }>;
   }) {
     const listing = await this.getListing(listingId);
 
@@ -440,6 +466,10 @@ export class EbayListingsService {
         ...(data.fulfillmentPolicyId !== undefined && { fulfillmentPolicyId: data.fulfillmentPolicyId || null }),
         ...(data.paymentPolicyId !== undefined && { paymentPolicyId: data.paymentPolicyId || null }),
         ...(data.returnPolicyId !== undefined && { returnPolicyId: data.returnPolicyId || null }),
+        // Shipping overrides
+        ...(data.handlingTimeDays !== undefined && { handlingTimeDays: data.handlingTimeDays ?? null }),
+        ...(data.shippingCostType !== undefined && { shippingCostType: data.shippingCostType || null }),
+        ...(data.shippingServices !== undefined && { shippingServices: data.shippingServices as any }),
         ...(data.platformData && {
           platformData: JSON.stringify({
             ...JSON.parse(listing.platformData as string),
@@ -665,9 +695,35 @@ export class EbayListingsService {
         pricingSummary.price = { value: listing.price.toString(), currency };
       }
 
+      // Resolve fulfillment policy — applying any per-listing shipping
+      // overrides (handling time, cost type, shipping services) by lazily
+      // cloning the base policy. If no overrides are set, this is a
+      // no-op pass-through.
+      const baseFulfillmentPolicyId =
+        listing.fulfillmentPolicyId || connection.fulfillmentPolicyId!;
+      const overrideShippingServices = Array.isArray((listing as any).shippingServices)
+        ? ((listing as any).shippingServices as Array<{
+            serviceCode: string;
+            cost: number;
+            additionalCost?: number;
+            freeShipping?: boolean;
+            priority?: number;
+          }>)
+        : undefined;
+      const resolvedFulfillmentPolicyId = await this.policyService.ensureFulfillmentPolicyMatching(
+        client,
+        marketplaceId,
+        baseFulfillmentPolicyId,
+        {
+          handlingTimeDays: (listing as any).handlingTimeDays ?? undefined,
+          shippingCostType: (listing as any).shippingCostType ?? undefined,
+          shippingServices: overrideShippingServices,
+        }
+      );
+
       // Build listing policies with best offer
       const listingPolicies: any = {
-        fulfillmentPolicyId: listing.fulfillmentPolicyId || connection.fulfillmentPolicyId!,
+        fulfillmentPolicyId: resolvedFulfillmentPolicyId,
         paymentPolicyId: listing.paymentPolicyId || connection.paymentPolicyId!,
         returnPolicyId: listing.returnPolicyId || connection.returnPolicyId!,
       };
