@@ -24,8 +24,9 @@ import {
   MapPin,
 } from 'lucide-react';
 import Link from 'next/link';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 import { VariationMatrix, type VariationMatrixValue } from '../_components/VariationMatrix';
+import { useUnsavedChangesWarning } from '@/lib/hooks/use-unsaved-changes-warning';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -319,6 +320,30 @@ export default function CreateListingPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
+  // M33: derive the right currency prefix from the selected eBay
+  // marketplace. Previously every price input showed `$` regardless of
+  // EBAY_UK / EBAY_DE etc. — listings ended up being displayed to
+  // sellers in the wrong currency.
+  const currencySymbol = (() => {
+    const conn = connections.find((c) => c.id === formData.connectionId);
+    switch (conn?.marketplaceId) {
+      case 'EBAY_GB':
+      case 'EBAY_UK':
+        return '£';
+      case 'EBAY_DE':
+      case 'EBAY_FR':
+      case 'EBAY_IT':
+      case 'EBAY_ES':
+        return '€';
+      case 'EBAY_CA':
+        return 'CA$';
+      case 'EBAY_AU':
+        return 'A$';
+      default:
+        return '$';
+    }
+  })();
+
   // ---- Category search ----
   const [categoryQuery, setCategoryQuery] = useState('');
   const [categoryResults, setCategoryResults] = useState<CategorySearchResult[]>([]);
@@ -430,6 +455,17 @@ export default function CreateListingPage() {
     [],
   );
 
+  // M31: warn before tab close / refresh when the form has unsaved edits.
+  // Snapshot the initial formData once via a ref so the dirty check stays
+  // accurate even after the auto-fill effect mutates the form.
+  const initialFormSnapshotRef = useRef<string | null>(null);
+  if (initialFormSnapshotRef.current === null) {
+    initialFormSnapshotRef.current = JSON.stringify(formData);
+  }
+  const isDirty =
+    !submitting && JSON.stringify(formData) !== initialFormSnapshotRef.current;
+  useUnsavedChangesWarning(isDirty);
+
   // ---- Initial data load ----
   useEffect(() => {
     loadData();
@@ -438,23 +474,19 @@ export default function CreateListingPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [connectionsRes, productsRes, warehousesRes] = await Promise.all([
-        fetch('/api/v1/marketplace/connections', { credentials: 'include' }),
-        fetch('/api/v1/products/listings', { credentials: 'include' }),
-        fetch('/api/v1/warehouses', { credentials: 'include' }),
+      const [connectionsRes, productsRes, warehousesRes] = await Promise.allSettled([
+        api.get<Connection[]>('/v1/marketplace/connections'),
+        api.get<ProductListing[]>('/v1/products/listings'),
+        api.get<Warehouse[]>('/v1/warehouses'),
       ]);
-
-      if (connectionsRes.ok) {
-        const data = unwrapJson<Connection[]>(await connectionsRes.json());
-        setConnections(data.filter((c) => c.isConnected));
+      if (connectionsRes.status === 'fulfilled') {
+        setConnections(connectionsRes.value.data.filter((c) => c.isConnected));
       }
-      if (productsRes.ok) {
-        const data = unwrapJson<ProductListing[]>(await productsRes.json());
-        setProducts(data);
+      if (productsRes.status === 'fulfilled') {
+        setProducts(productsRes.value.data);
       }
-      if (warehousesRes.ok) {
-        const data = unwrapJson<Warehouse[]>(await warehousesRes.json());
-        setWarehouses(data);
+      if (warehousesRes.status === 'fulfilled') {
+        setWarehouses(warehousesRes.value.data);
       }
     } catch (error) {
       console.error('Failed to load data:', error);
@@ -497,15 +529,10 @@ export default function CreateListingPage() {
   const loadPolicies = async (connectionId: string) => {
     setPoliciesLoading(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/connections/${connectionId}/status`, {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = unwrapJson<ConnectionStatus>(await res.json());
-        setFulfillmentPolicies(data.fulfillmentPolicies || []);
-        setPaymentPolicies(data.paymentPolicies || []);
-        setReturnPolicies(data.returnPolicies || []);
-      }
+      const res = await api.get<ConnectionStatus>(`/v1/marketplace/connections/${connectionId}/status`);
+      setFulfillmentPolicies(res.data.fulfillmentPolicies || []);
+      setPaymentPolicies(res.data.paymentPolicies || []);
+      setReturnPolicies(res.data.returnPolicies || []);
     } catch (error) {
       console.error('Failed to load policies:', error);
     } finally {
@@ -516,14 +543,10 @@ export default function CreateListingPage() {
   const loadInventoryLocations = async (connectionId: string) => {
     setLocationsLoading(true);
     try {
-      const res = await fetch(
-        `/api/v1/marketplace/inventory-locations?connectionId=${connectionId}`,
-        { credentials: 'include' },
-      );
-      if (res.ok) {
-        const data = unwrapJson<InventoryLocation[]>(await res.json());
-        setInventoryLocations(data);
-      }
+      const res = await api.get<InventoryLocation[]>('/v1/marketplace/inventory-locations', {
+        params: { connectionId },
+      });
+      setInventoryLocations(res.data);
     } catch (error) {
       console.error('Failed to load inventory locations:', error);
     } finally {
@@ -543,15 +566,12 @@ export default function CreateListingPage() {
   const searchCategories = async (query: string) => {
     setCategorySearching(true);
     try {
-      const res = await fetch(
-        `/api/v1/marketplace/ebay/taxonomy/categories/search?connectionId=${formData.connectionId}&q=${encodeURIComponent(query)}`,
-        { credentials: 'include' },
+      const res = await api.get<CategorySearchResult[]>(
+        '/v1/marketplace/ebay/taxonomy/categories/search',
+        { params: { connectionId: formData.connectionId, q: query } },
       );
-      if (res.ok) {
-        const data = unwrapJson<CategorySearchResult[]>(await res.json());
-        setCategoryResults(data);
-        setShowCategoryDropdown(true);
-      }
+      setCategoryResults(res.data);
+      setShowCategoryDropdown(true);
     } catch (error) {
       console.error('Failed to search categories:', error);
     } finally {
@@ -569,20 +589,17 @@ export default function CreateListingPage() {
     // Fetch aspects for the selected category
     setAspectsLoading(true);
     try {
-      const res = await fetch(
-        `/api/v1/marketplace/ebay/taxonomy/categories/${category.categoryId}/aspects?connectionId=${formData.connectionId}`,
-        { credentials: 'include' },
+      const res = await api.get<Aspect[]>(
+        `/v1/marketplace/ebay/taxonomy/categories/${category.categoryId}/aspects`,
+        { params: { connectionId: formData.connectionId } },
       );
-      if (res.ok) {
-        const data = unwrapJson<Aspect[]>(await res.json());
-        setAspects(data);
-        // Pre-populate aspect fields with empty values
-        const initial: Record<string, string> = {};
-        data.forEach((a) => {
-          initial[a.localizedAspectName] = '';
-        });
-        setItemSpecifics(initial);
-      }
+      setAspects(res.data);
+      // Pre-populate aspect fields with empty values
+      const initial: Record<string, string> = {};
+      res.data.forEach((a) => {
+        initial[a.localizedAspectName] = '';
+      });
+      setItemSpecifics(initial);
     } catch (error) {
       console.error('Failed to load aspects:', error);
     } finally {
@@ -613,21 +630,11 @@ export default function CreateListingPage() {
     if (!newImageUrl.trim()) return;
     setUploadingImage(true);
     try {
-      const res = await fetch('/api/v1/marketplace/media/upload-url', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ url: newImageUrl.trim() }),
+      const res = await api.post<{ url: string }>('/v1/marketplace/media/upload-url', {
+        url: newImageUrl.trim(),
       });
-      if (res.ok) {
-        const data = unwrapJson<{ url: string }>(await res.json());
-        setPhotos((prev) => [...prev, data.url || newImageUrl.trim()]);
-        setNewImageUrl('');
-      } else {
-        // Fallback: add the raw URL
-        setPhotos((prev) => [...prev, newImageUrl.trim()]);
-        setNewImageUrl('');
-      }
+      setPhotos((prev) => [...prev, res.data.url || newImageUrl.trim()]);
+      setNewImageUrl('');
     } catch {
       // Fallback: add the raw URL directly
       setPhotos((prev) => [...prev, newImageUrl.trim()]);
@@ -809,8 +816,8 @@ export default function CreateListingPage() {
         isVariationListing && variation.variants.length > 0 && formData.format === 'FIXED_PRICE';
 
       const url = isVariationSubmission
-        ? '/api/v1/marketplace/ebay/listings/variations'
-        : '/api/v1/marketplace/ebay/listings/direct';
+        ? '/v1/marketplace/ebay/listings/variations'
+        : '/v1/marketplace/ebay/listings/direct';
 
       const submitBody = isVariationSubmission
         ? {
@@ -838,67 +845,56 @@ export default function CreateListingPage() {
           }
         : body;
 
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(submitBody),
-      });
+      const res = await api.post<unknown>(url, submitBody);
 
-      if (res.ok) {
-        // Variation submissions return an array of created listings; the
-        // direct path returns a single listing object. Use the first listing
-        // for any subsequent schedule / publish call.
-        const parsed = unwrapJson<unknown>(await res.json());
-        const firstListing = Array.isArray(parsed) ? (parsed[0] as { id: string }) : (parsed as { id: string });
+      // Variation submissions return an array of created listings; the
+      // direct path returns a single listing object. Use the first listing
+      // for any subsequent schedule / publish call.
+      const parsed = res.data;
+      const firstListing = Array.isArray(parsed)
+        ? (parsed[0] as { id: string })
+        : (parsed as { id: string });
 
-        if (isVariationSubmission) {
-          // Variation listings publish synchronously inside the create call,
-          // so skip the schedule / auto-publish branches and head back to the list.
-          toast({ title: 'Success', description: `Variation listing created with ${variation.variants.length} variants.` });
-          router.push('/app/marketplace/listings');
-          return;
-        }
-
-        const listing = firstListing;
-
-        // Handle scheduling
-        if (formData.scheduledStartTime) {
-          try {
-            await fetch(`/api/v1/marketplace/listings/${listing.id}/schedule`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'include',
-              body: JSON.stringify({ scheduledDate: new Date(formData.scheduledStartTime).toISOString() }),
-            });
-            toast({ title: 'Success', description: 'Listing created and scheduled successfully!' });
-          } catch {
-            toast({ title: 'Warning', description: 'Listing created but scheduling failed. You can schedule it manually.', variant: 'destructive' });
-          }
-        } else if (formData.autoPublish) {
-          // Auto-publish
-          const publishRes = await fetch(`/api/v1/marketplace/listings/${listing.id}/publish`, {
-            method: 'POST',
-            credentials: 'include',
-          });
-
-          if (publishRes.ok) {
-            toast({ title: 'Success', description: 'Listing created and published successfully!' });
-          } else {
-            toast({ title: 'Warning', description: 'Listing created but publishing failed. You can publish it manually.', variant: 'destructive' });
-          }
-        } else {
-          toast({ title: 'Success', description: 'Listing created successfully!' });
-        }
-
+      if (isVariationSubmission) {
+        // Variation listings publish synchronously inside the create call,
+        // so skip the schedule / auto-publish branches and head back to the list.
+        toast({ title: 'Success', description: `Variation listing created with ${variation.variants.length} variants.` });
         router.push('/app/marketplace/listings');
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to create listing', variant: 'destructive' });
+        return;
       }
-    } catch (error) {
+
+      const listing = firstListing;
+
+      // Handle scheduling
+      if (formData.scheduledStartTime) {
+        try {
+          await api.post(`/v1/marketplace/listings/${listing.id}/schedule`, {
+            scheduledDate: new Date(formData.scheduledStartTime).toISOString(),
+          });
+          toast({ title: 'Success', description: 'Listing created and scheduled successfully!' });
+        } catch {
+          toast({ title: 'Warning', description: 'Listing created but scheduling failed. You can schedule it manually.', variant: 'destructive' });
+        }
+      } else if (formData.autoPublish) {
+        // Auto-publish
+        try {
+          await api.post(`/v1/marketplace/listings/${listing.id}/publish`);
+          toast({ title: 'Success', description: 'Listing created and published successfully!' });
+        } catch {
+          toast({ title: 'Warning', description: 'Listing created but publishing failed. You can publish it manually.', variant: 'destructive' });
+        }
+      } else {
+        toast({ title: 'Success', description: 'Listing created successfully!' });
+      }
+
+      router.push('/app/marketplace/listings');
+    } catch (error: any) {
       console.error('Failed to create listing:', error);
-      toast({ title: 'Error', description: 'Failed to create listing', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to create listing',
+        variant: 'destructive',
+      });
     } finally {
       setSubmitting(false);
     }
@@ -1020,6 +1016,24 @@ export default function CreateListingPage() {
                     </option>
                   ))}
                 </select>
+                {/*
+                  Inventory-sharing trade-off explainer. The warehouse
+                  selected here is the same pool the storefront sells
+                  against. eBay's quantity is recomputed and pushed every
+                  30 minutes, so a fast-moving SKU can briefly oversell
+                  on either channel between sync ticks. Tenants who can't
+                  tolerate that should pick a dedicated eBay warehouse.
+                */}
+                <div className="mt-2 flex items-start gap-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2">
+                  <Info className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-900">
+                    <strong>Inventory is shared with your storefront.</strong>{' '}
+                    eBay&apos;s available quantity syncs every 30 minutes, so
+                    a brief overselling window exists for fast-moving SKUs.
+                    To isolate channels, allocate a separate warehouse for
+                    eBay.
+                  </p>
+                </div>
               </div>
             )}
           </div>
@@ -1497,7 +1511,7 @@ export default function CreateListingPage() {
                       Price *
                     </label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">$</span>
+                      <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">{currencySymbol}</span>
                       <input
                         type="number"
                         step="0.01"
@@ -1552,7 +1566,7 @@ export default function CreateListingPage() {
                           Auto Accept Price
                         </label>
                         <div className="relative">
-                          <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">$</span>
+                          <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">{currencySymbol}</span>
                           <input
                             type="number"
                             step="0.01"
@@ -1573,7 +1587,7 @@ export default function CreateListingPage() {
                           Auto Decline Price
                         </label>
                         <div className="relative">
-                          <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">$</span>
+                          <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">{currencySymbol}</span>
                           <input
                             type="number"
                             step="0.01"
@@ -1603,7 +1617,7 @@ export default function CreateListingPage() {
                       Starting Bid *
                     </label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">$</span>
+                      <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">{currencySymbol}</span>
                       <input
                         type="number"
                         step="0.01"
@@ -1622,7 +1636,7 @@ export default function CreateListingPage() {
                       Reserve Price
                     </label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">$</span>
+                      <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">{currencySymbol}</span>
                       <input
                         type="number"
                         step="0.01"
@@ -1643,7 +1657,7 @@ export default function CreateListingPage() {
                       Buy It Now Price
                     </label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">$</span>
+                      <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500">{currencySymbol}</span>
                       <input
                         type="number"
                         step="0.01"
@@ -2538,7 +2552,18 @@ export default function CreateListingPage() {
         <div className="flex gap-4">
           <button
             type="button"
-            onClick={() => router.back()}
+            onClick={() => {
+              // M31: confirm before discarding edits. router.back is an SPA
+              // transition so beforeunload doesn't fire — we have to ask
+              // here ourselves.
+              if (isDirty) {
+                const proceed = window.confirm(
+                  'You have unsaved changes. Discard and leave this page?',
+                );
+                if (!proceed) return;
+              }
+              router.back();
+            }}
             className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
           >
             Cancel

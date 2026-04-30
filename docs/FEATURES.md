@@ -182,25 +182,158 @@ Revenue tracking and payout management via Stripe Connect.
 
 ## 8. Marketplace Integration (eBay)
 
-List and sell products on eBay directly from the platform.
+List and sell products on eBay alongside your storefront. eBay is a separate
+sales channel — storefront customers never see eBay listings, and eBay buyers
+never see the storefront. The two channels meet only at the inventory layer
+(see [Inventory model](#inventory-model) below).
+
+> **In-depth tenant guide:** [ebay-integration-guide.md](ebay-integration-guide.md).
+> **Developer architecture:** [apps/api/.../ebay/README.md](../apps/api/src/app/marketplace-integrations/ebay/README.md).
 
 ### Connections
 
-- **Connect eBay stores** — Add stores via OAuth for multiple eBay marketplaces (US, UK, Germany, Canada, Australia).
-- **Connection status** — Each connection shows whether eBay is connected, business policies are set, and the store is ready to list.
-- **Manage connections** — Disconnect, reconnect, or delete eBay store connections.
+- **Connect eBay stores** — OAuth flow for any of the major eBay marketplaces
+  (US, UK, DE, FR, IT, ES, CA, AU). Multiple stores per tenant supported.
+- **Scope validation** — If the seller de-selects a required permission on
+  eBay's consent screen, the connect flow fails fast with a clear "missing
+  scopes" message rather than failing opaquely later.
+- **Business policies auto-fetch** — On successful connect, the platform pulls
+  the seller's payment, shipping, and return policies plus inventory location
+  from eBay and saves them as connection defaults.
+- **Connection status badge** — Each connection shows whether OAuth is live,
+  policies are set, and the store is ready to publish.
 - **Default store** — Mark one connection as the default for new listings.
+- **Disconnect** — Revokes the refresh token on eBay's side and clears local
+  credentials. Best-effort: disconnection succeeds locally even if the remote
+  revoke fails.
+- **Reconnect** — Re-run OAuth on a disconnected connection without losing
+  listing/order history.
+- **Delete** — Removes the connection record. Blocked if any listings or orders
+  exist (deactivate instead).
 
 ### Listings
 
-- **Create listings** — Define SKU, title, description, price, quantity, condition, and eBay category.
-- **Listing lifecycle** — Draft → Approved → Publishing → Published → Ended (or Error).
-- **Publish to eBay** — Push approved/draft listings to the eBay marketplace.
-- **End listings** — Remove active listings from eBay.
-- **Sync inventory** — Push updated stock quantities from the platform to eBay.
-- **Delete drafts** — Remove draft listings that haven't been published.
-- **Filter** — Filter listings by store and by status.
-- **Direct eBay link** — Published listings include a link to the live eBay item page.
+- **Create listings** — SKU, title, description, photos (up to 24), condition,
+  category, item specifics, price, quantity, package weight/dimensions.
+- **Formats** — Fixed-price (GTC), Auction (with start price, reserve, Buy It
+  Now), Best Offer.
+- **Approval workflow** — Optional two-person rule: Inventory Manager creates
+  drafts; Admin / System Manager approves before publish.
+- **Publish to eBay** — Multi-step publish (image upload → inventory item →
+  offer → publish). Full rollback on partial failure: the platform withdraws
+  any offer it created and deletes the inventory item if the final publish
+  step fails, so eBay never holds an orphaned half-listing.
+- **Edit live listings** — Price, quantity, and description on a published
+  listing can be edited via eBay's offer-update API. Subject to eBay's
+  250-revisions-per-listing-per-day cap, which the platform tracks and
+  surfaces clearly.
+- **End listings** — Withdraw a live listing from eBay; the local record
+  remains in **Ended** status.
+- **Schedule publish** — Set a future publish date (within 3 weeks) for a
+  draft or approved listing.
+- **Multi-variation listings** — Group SKUs into a single eBay listing with
+  variation aspects (size, color, …). All variants share images and
+  description; each has its own SKU, price, and quantity.
+- **Out-of-Stock Control** — Per-store toggle: when on, listings with 0
+  quantity stay active (hidden from search) instead of auto-ending.
+- **Vacation mode** — Per-store toggle (via eBay's Trading API): pause sales
+  with an automated buyer message.
+
+### Inventory model
+
+How stock is shared between the storefront and eBay is one decision per
+listing — the choice of warehouse:
+
+- **Per-listing warehouse selection** — When you create an eBay listing, you
+  pick which warehouse it sells against. eBay's "available quantity" is
+  computed as that warehouse's actual stock minus reservations.
+- **Shared warehouse strategy** — Pointing both the storefront and eBay at
+  the same warehouse keeps a single stock pool. Trade-off: changes propagate
+  to eBay on the 30-minute sync cycle, so a brief overselling window exists
+  for fast-moving SKUs.
+- **Dedicated eBay warehouse strategy** — Allocate a separate warehouse for
+  eBay to isolate the channels entirely. No cross-channel overselling, but
+  you manage two stock pools.
+- **Push-to-eBay sync** — Every 30 minutes, a background job recomputes
+  available quantity per published listing and pushes it to eBay via the
+  Inventory API. Enabled per connection via `autoSyncInventory` (on by
+  default).
+- **Distributed locks** — Sync uses Redis-backed locks at both the connection
+  and SKU level so multiple app instances never double-update the same
+  listing.
+
+### Orders
+
+- **Order ingestion** — eBay orders flow into the platform every 15 minutes
+  via the Fulfillment API, plus real-time webhook notifications. Incremental
+  sync uses `lastModifiedDate` with a 5-minute overlap to avoid gaps.
+- **Per-page checkpointing** — The sync watermark advances per-page, so a
+  partial failure on page 7 of 10 doesn't replay every page on the next
+  cycle.
+- **Auto-create unified orders** — Paid eBay orders automatically create a
+  matching `Order` record in the unified order system, prefixed `MKT-…`,
+  surfacing in the regular Orders page alongside storefront orders.
+- **Failed-operation queue** — Per-order sync failures are routed to the
+  failed-operations queue for automated retry instead of blocking the rest
+  of the sync.
+- **Push fulfillment** — Tracking number + carrier from the platform's ship
+  flow are pushed to eBay's Fulfillment API automatically.
+- **Refunds** — Full-order, partial, or line-item-level refunds via eBay's
+  refund API.
+- **Returns & cancellations** — Buyer-initiated returns flow into the Returns
+  page; approve, decline, or refund from there. Cancellations supported via
+  the Post-Order API.
+- **Order filtering** — Filter by store, fulfillment status, payment status,
+  sync status.
+
+### Webhooks & compliance
+
+- **Notification handler** — eBay marketplace notifications (order created /
+  updated, item sold, return created, …) are signature-verified using ECDSA
+  against eBay's public-key endpoint, then routed to the appropriate sync
+  handler.
+- **Challenge handshake** — Both notification and account-deletion endpoints
+  respond to eBay's verification GET with the spec-compliant SHA-256
+  challenge.
+- **Account-deletion compliance** — Required by eBay's program. When a seller
+  deletes their eBay account, the webhook anonymizes every matching
+  connection across all tenants.
+- **Sandbox vs. production** — All eBay endpoints (auth, API, webhook key
+  fetch) respect the `EBAY_SANDBOX` environment flag.
+
+### Messaging, promotions, and analytics
+
+- **Buyer-seller messaging** — Inbound messages flow into Marketplace →
+  Messages; replies post back to eBay's messaging system.
+- **Promotions & campaigns** — Create promotional discounts, item promotions,
+  and email campaigns directly via eBay's Marketing API.
+- **Store categories** — Manage your eBay store's custom category hierarchy
+  from Marketplace → Settings.
+- **Analytics** — Traffic, conversion, and seller-performance metrics from
+  eBay's Analytics API.
+- **Finances** — Payouts, transactions, and fee reporting from eBay's
+  Finances API.
+- **Negotiations, offers, disputes, inquiries, feedback** — Each surfaced as
+  its own page under the Marketplace section.
+
+### RBAC
+
+- **Per-permission control** — Marketplace permissions
+  (`marketplace.connections.manage`, `marketplace.listings.publish`, etc.)
+  are managed under Marketplace → Settings → Permissions.
+- **Default role templates** — Admin, System Manager, Inventory Manager,
+  Customer Service templates ship with the platform; tenants can customize.
+
+### Reliability
+
+- **Token refresh serialization** — Redis distributed lock ensures only one
+  app instance refreshes an expiring access token at a time, even across
+  pods.
+- **Token rate limiting** — Per-grant-type daily counters track eBay's OAuth
+  quotas (10,000/day for auth code, 50,000/day for refresh) with Redis
+  storage and in-memory fallback.
+- **Mock mode** — `MOCK_EXTERNAL_SERVICES=true` disables every outbound eBay
+  call for local dev and CI, returning deterministic mock responses.
 
 ---
 

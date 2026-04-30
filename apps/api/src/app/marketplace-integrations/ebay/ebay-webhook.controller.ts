@@ -7,6 +7,7 @@ import {
   Res,
   HttpStatus,
   Logger,
+  RawBodyRequest,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
@@ -61,12 +62,30 @@ export class EbayWebhookController {
    * POST /api/marketplace/ebay/webhooks/account-deletion
    */
   @Post('account-deletion')
-  async handleAccountDeletion(@Req() req: Request, @Res() res: Response) {
+  async handleAccountDeletion(@Req() req: RawBodyRequest<Request>, @Res() res: Response) {
     const signatureHeader = req.headers['x-ebay-signature'] as string;
-    const body =
-      typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
-    const parsedBody =
-      typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+
+    // ECDSA verification is byte-exact. NestJS exposes req.rawBody when
+    // bootstrapped with `rawBody: true` (see main.ts). Re-stringifying a
+    // parsed JSON body would produce different bytes than eBay sent
+    // (key ordering, whitespace, unicode escaping), causing verification
+    // to fail intermittently in production.
+    if (!req.rawBody) {
+      // Server bootstrap regression — rawBody:true was disabled or the
+      // global parser dropped the buffer. We MUST not return 5xx because
+      // eBay will then retry indefinitely (24h backoff window). Return
+      // 200 to ack receipt and rely on the loud error log + alerting to
+      // catch the misconfig. The notification is dropped (cannot verify
+      // signature without the original bytes), but eBay will resend on
+      // its next account-deletion event regardless; account deletion is
+      // not order-flow-critical in real time.
+      this.logger.error(
+        'CRITICAL: Account deletion webhook received without rawBody — bootstrap must enable rawBody:true. Notification dropped.'
+      );
+      return res.status(HttpStatus.OK).json({ status: 'ok' });
+    }
+    const body = req.rawBody.toString('utf8');
+    const parsedBody = JSON.parse(body);
     const timestamp = parsedBody?.metadata?.timestamp || '';
 
     if (!signatureHeader) {
@@ -143,12 +162,19 @@ export class EbayWebhookController {
    * POST /api/marketplace/ebay/webhooks/notifications
    */
   @Post('notifications')
-  async handleNotification(@Req() req: Request, @Res() res: Response) {
+  async handleNotification(@Req() req: RawBodyRequest<Request>, @Res() res: Response) {
     const signatureHeader = req.headers['x-ebay-signature'] as string;
-    const body =
-      typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
-    const parsedBody =
-      typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+
+    if (!req.rawBody) {
+      // See handleAccountDeletion — same reasoning. 200 + loud log
+      // beats 500-driven indefinite eBay retry.
+      this.logger.error(
+        'CRITICAL: Notification webhook received without rawBody — bootstrap must enable rawBody:true. Notification dropped.'
+      );
+      return res.status(HttpStatus.OK).json({ status: 'ok' });
+    }
+    const body = req.rawBody.toString('utf8');
+    const parsedBody = JSON.parse(body);
     const timestamp = parsedBody?.metadata?.timestamp || '';
 
     if (!signatureHeader) {

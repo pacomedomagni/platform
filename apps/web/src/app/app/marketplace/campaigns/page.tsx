@@ -15,7 +15,7 @@ import {
   RefreshCw,
   TrendingUp,
 } from 'lucide-react';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface Connection {
   id: string;
@@ -76,17 +76,12 @@ export default function MarketplaceCampaignsPage() {
 
   const loadConnections = async () => {
     try {
-      const res = await fetch('/api/v1/marketplace/connections', {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = unwrapJson(await res.json());
-        setConnections(data);
-        if (data.length > 0) {
-          setSelectedConnection(data[0].id);
-        } else {
-          setLoading(false);
-        }
+      const res = await api.get<Connection[]>('/v1/marketplace/connections');
+      setConnections(res.data);
+      if (res.data.length > 0) {
+        setSelectedConnection(res.data[0].id);
+      } else {
+        setLoading(false);
       }
     } catch (error) {
       console.error('Failed to load connections:', error);
@@ -97,14 +92,10 @@ export default function MarketplaceCampaignsPage() {
   const loadCampaigns = async () => {
     setLoading(true);
     try {
-      const res = await fetch(
-        `/api/v1/marketplace/campaigns?connectionId=${selectedConnection}`,
-        { credentials: 'include' }
-      );
-      if (res.ok) {
-        const data = unwrapJson(await res.json());
-        setCampaigns(data);
-      }
+      const res = await api.get('/v1/marketplace/campaigns', {
+        params: { connectionId: selectedConnection },
+      });
+      setCampaigns(res.data);
     } catch (error) {
       console.error('Failed to load campaigns:', error);
     } finally {
@@ -115,20 +106,16 @@ export default function MarketplaceCampaignsPage() {
   const handlePause = async (campaignId: string) => {
     setActionLoading(campaignId);
     try {
-      const res = await fetch(`/api/v1/marketplace/campaigns/${campaignId}/pause`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Campaign paused successfully' });
-        loadCampaigns();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to pause campaign', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.post(`/v1/marketplace/campaigns/${campaignId}/pause`);
+      toast({ title: 'Success', description: 'Campaign paused successfully' });
+      loadCampaigns();
+    } catch (error: any) {
       console.error('Failed to pause campaign:', error);
-      toast({ title: 'Error', description: 'Failed to pause campaign', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to pause campaign',
+        variant: 'destructive',
+      });
     } finally {
       setActionLoading(null);
     }
@@ -137,20 +124,16 @@ export default function MarketplaceCampaignsPage() {
   const handleResume = async (campaignId: string) => {
     setActionLoading(campaignId);
     try {
-      const res = await fetch(`/api/v1/marketplace/campaigns/${campaignId}/resume`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Campaign resumed successfully' });
-        loadCampaigns();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to resume campaign', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.post(`/v1/marketplace/campaigns/${campaignId}/resume`);
+      toast({ title: 'Success', description: 'Campaign resumed successfully' });
+      loadCampaigns();
+    } catch (error: any) {
       console.error('Failed to resume campaign:', error);
-      toast({ title: 'Error', description: 'Failed to resume campaign', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to resume campaign',
+        variant: 'destructive',
+      });
     } finally {
       setActionLoading(null);
     }
@@ -159,20 +142,16 @@ export default function MarketplaceCampaignsPage() {
   const handleEnd = async (campaignId: string) => {
     setActionLoading(campaignId);
     try {
-      const res = await fetch(`/api/v1/marketplace/campaigns/${campaignId}/end`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Campaign ended successfully' });
-        loadCampaigns();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to end campaign', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.post(`/v1/marketplace/campaigns/${campaignId}/end`);
+      toast({ title: 'Success', description: 'Campaign ended successfully' });
+      loadCampaigns();
+    } catch (error: any) {
       console.error('Failed to end campaign:', error);
-      toast({ title: 'Error', description: 'Failed to end campaign', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to end campaign',
+        variant: 'destructive',
+      });
     } finally {
       setActionLoading(null);
     }

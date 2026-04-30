@@ -2,8 +2,11 @@
 
 import { useState } from 'react';
 import { Button, Input, Badge } from '@platform/ui';
+import { Download } from 'lucide-react';
 import api from '../../../../lib/api';
-import { ReportAlert, ReportCard, ReportEmpty, ReportFilters, ReportPage, ReportTable } from '../_components/report-shell';
+import { ReportAlert, ReportCard, ReportEmpty, ReportFilters, ReportLoading, ReportPage, ReportTable } from '../_components/report-shell';
+import { downloadCsv, formatMoney } from '../_components/report-format';
+import { useUrlFilters } from '@/lib/hooks/use-url-filters';
 
 type AgingBucket = {
   name: string;
@@ -27,6 +30,8 @@ export default function ReceivableAgingPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useUrlFilters({ asOfDate }, { asOfDate: setAsOfDate });
+
   const load = async () => {
     setLoading(true);
     setError(null);
@@ -44,8 +49,40 @@ export default function ReceivableAgingPage() {
 
   const buckets = data ? Object.keys(data.aged) : [];
 
+  const handleExport = () => {
+    if (!data) return;
+    const rows: Array<Array<string | number>> = [];
+    for (const bucket of buckets) {
+      for (const r of data.aged[bucket]) {
+        rows.push([
+          bucket,
+          r.name,
+          r.customer,
+          r.posting_date,
+          r.due_date,
+          formatMoney(r.outstanding_amount),
+          r.days_overdue,
+        ]);
+      }
+    }
+    downloadCsv(
+      'receivable-aging',
+      ['Bucket', 'Invoice', 'Customer', 'Posting', 'Due', 'Outstanding', 'Days Overdue'],
+      rows,
+    );
+  };
+
   return (
-    <ReportPage title="Receivable Aging" description="Open customer invoices by age.">
+    <ReportPage
+      title="Receivable Aging"
+      description="Open customer invoices by age."
+      actions={
+        <Button variant="outline" size="sm" onClick={handleExport} disabled={!data || buckets.every((b) => data.aged[b].length === 0)}>
+          <Download className="w-4 h-4 mr-2" />
+          Export CSV
+        </Button>
+      }
+    >
       <ReportFilters className="md:grid-cols-3">
         <Input
           type="date"
@@ -59,13 +96,23 @@ export default function ReceivableAgingPage() {
 
       {error && <ReportAlert>{error}</ReportAlert>}
 
-      {data && (
+      {loading && (
+        <ReportCard>
+          <ReportTable>
+            <tbody>
+              <ReportLoading colSpan={6} />
+            </tbody>
+          </ReportTable>
+        </ReportCard>
+      )}
+
+      {!loading && data && (
         <div className="space-y-4">
           {buckets.map((bucket) => (
             <div key={bucket} className="space-y-2">
               <div className="flex items-center gap-2">
                 <div className="font-medium">{bucket}</div>
-                <Badge variant="secondary">Total: {data.totals[bucket] ?? 0}</Badge>
+                <Badge variant="secondary">Total: {formatMoney(data.totals[bucket] ?? 0)}</Badge>
               </div>
               <ReportCard>
                 <ReportTable>
@@ -87,8 +134,8 @@ export default function ReceivableAgingPage() {
                         <td className="p-3">{row.customer}</td>
                         <td className="p-3">{row.posting_date}</td>
                         <td className="p-3">{row.due_date}</td>
-                        <td className="p-3 text-right">{row.outstanding_amount}</td>
-                        <td className="p-3 text-right">{row.days_overdue}</td>
+                        <td className="p-3 text-right tabular-nums">{formatMoney(row.outstanding_amount)}</td>
+                        <td className="p-3 text-right tabular-nums">{row.days_overdue}</td>
                       </tr>
                     ))}
                   </tbody>

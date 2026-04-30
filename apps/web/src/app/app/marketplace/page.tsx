@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Card, Skeleton, StatusBadge, EmptyState, Button } from '@platform/ui';
 import { Link2, Tag, ShoppingCart, RotateCcw, AlertTriangle, ExternalLink } from 'lucide-react';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface Connection {
   id: string;
@@ -32,16 +32,6 @@ interface ListingCounts {
   error: number;
 }
 
-function authHeaders(): Record<string, string> {
-  if (typeof window === 'undefined') return {};
-  const token = localStorage.getItem('access_token') || '';
-  const tenantId = localStorage.getItem('tenantId') || '';
-  return {
-    Authorization: `Bearer ${token}`,
-    'x-tenant-id': tenantId,
-  };
-}
-
 export default function MarketplaceLanding() {
   const [connections, setConnections] = useState<Connection[]>([]);
   const [counts, setCounts] = useState<ListingCounts>({
@@ -62,20 +52,20 @@ export default function MarketplaceLanding() {
     const load = async () => {
       try {
         const [connRes, listRes, ordersRes] = await Promise.allSettled([
-          fetch('/api/v1/marketplace/connections', { headers: authHeaders() }),
-          fetch('/api/v1/marketplace/listings?limit=200', { headers: authHeaders() }),
-          fetch('/api/v1/marketplace/orders?limit=1', { headers: authHeaders() }),
+          api.get<any>('/v1/marketplace/connections'),
+          api.get<any>('/v1/marketplace/listings', { params: { limit: 200 } }),
+          api.get<any>('/v1/marketplace/orders', { params: { limit: 1 } }),
         ]);
 
         if (!alive) return;
 
-        if (connRes.status === 'fulfilled' && connRes.value.ok) {
-          const data = unwrapJson(await connRes.value.json());
+        if (connRes.status === 'fulfilled') {
+          const data = connRes.value.data;
           setConnections(Array.isArray(data) ? data : data?.data || []);
         }
 
-        if (listRes.status === 'fulfilled' && listRes.value.ok) {
-          const data = unwrapJson(await listRes.value.json());
+        if (listRes.status === 'fulfilled') {
+          const data = listRes.value.data;
           const listings: Listing[] = Array.isArray(data) ? data : data?.data || [];
           const next: ListingCounts = { draft: 0, approved: 0, publishing: 0, published: 0, ended: 0, error: 0 };
           for (const l of listings) {
@@ -91,8 +81,8 @@ export default function MarketplaceLanding() {
           setRecentErrors(listings.filter((l) => (l.status || '').toUpperCase() === 'ERROR').slice(0, 5));
         }
 
-        if (ordersRes.status === 'fulfilled' && ordersRes.value.ok) {
-          const data = unwrapJson(await ordersRes.value.json());
+        if (ordersRes.status === 'fulfilled') {
+          const data = ordersRes.value.data;
           setRecentOrders(data?.total ?? data?.count ?? (Array.isArray(data?.data) ? data.data.length : 0));
         }
       } catch {

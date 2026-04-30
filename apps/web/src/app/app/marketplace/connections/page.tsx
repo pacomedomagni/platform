@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { ConfirmDialog, toast } from '@platform/ui';
 import { PlusIcon, CheckCircle2, XCircle, RefreshCw, Palmtree } from 'lucide-react';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface Connection {
   id: string;
@@ -43,16 +43,6 @@ export default function MarketplaceConnectionsPage() {
   const [disconnectConfirm, setDisconnectConfirm] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
-  const authHeaders = () => {
-    const token = localStorage.getItem('access_token') || '';
-    const tenantId = localStorage.getItem('tenantId') || '';
-    return {
-      Authorization: `Bearer ${token}`,
-      'x-tenant-id': tenantId,
-      'Content-Type': 'application/json',
-    };
-  };
-
   useEffect(() => {
     // Check for OAuth callback success/error
     const params = new URLSearchParams(window.location.search);
@@ -70,13 +60,8 @@ export default function MarketplaceConnectionsPage() {
 
   const loadConnections = async () => {
     try {
-      const res = await fetch('/api/v1/marketplace/connections', {
-        headers: authHeaders(),
-      });
-      if (res.ok) {
-        const data = unwrapJson(await res.json());
-        setConnections(data);
-      }
+      const res = await api.get('/v1/marketplace/connections');
+      setConnections(res.data);
     } catch (error) {
       console.error('Failed to load connections:', error);
     } finally {
@@ -91,30 +76,23 @@ export default function MarketplaceConnectionsPage() {
     }
 
     try {
-      const res = await fetch('/api/v1/marketplace/connections', {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({
-          platform: 'EBAY',
-          ...newConnection,
-        }),
+      const res = await api.post<any>('/v1/marketplace/connections', {
+        platform: 'EBAY',
+        ...newConnection,
       });
-
-      if (res.ok) {
-        const connection = unwrapJson(await res.json());
-        setConnections([...connections, connection]);
-        setShowAddModal(false);
-        setNewConnection({ name: '', description: '', marketplaceId: 'EBAY_US', isDefault: false });
-
-        // Redirect to OAuth flow
-        window.location.href = `/api/v1/marketplace/ebay/auth/connect?connectionId=${connection.id}`;
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to create connection', variant: 'destructive' });
-      }
-    } catch (error) {
+      const connection = res.data;
+      setConnections([...connections, connection]);
+      setShowAddModal(false);
+      setNewConnection({ name: '', description: '', marketplaceId: 'EBAY_US', isDefault: false });
+      // Redirect to OAuth flow
+      window.location.href = `/api/v1/marketplace/ebay/auth/connect?connectionId=${connection.id}`;
+    } catch (error: any) {
       console.error('Failed to create connection:', error);
-      toast({ title: 'Error', description: 'Failed to create connection', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to create connection',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -128,14 +106,8 @@ export default function MarketplaceConnectionsPage() {
     setDisconnectConfirm(null);
 
     try {
-      const res = await fetch(`/api/v1/marketplace/connections/${connectionId}/disconnect`, {
-        method: 'POST',
-        headers: authHeaders(),
-      });
-
-      if (res.ok) {
-        loadConnections();
-      }
+      await api.post(`/v1/marketplace/connections/${connectionId}/disconnect`);
+      loadConnections();
     } catch (error) {
       console.error('Failed to disconnect:', error);
     }
@@ -151,19 +123,15 @@ export default function MarketplaceConnectionsPage() {
     setDeleteConfirm(null);
 
     try {
-      const res = await fetch(`/api/v1/marketplace/connections/${connectionId}`, {
-        method: 'DELETE',
-        headers: authHeaders(),
-      });
-
-      if (res.ok) {
-        setConnections(connections.filter((c) => c.id !== connectionId));
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to delete connection', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.delete(`/v1/marketplace/connections/${connectionId}`);
+      setConnections(connections.filter((c) => c.id !== connectionId));
+    } catch (error: any) {
       console.error('Failed to delete:', error);
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to delete connection',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -193,6 +161,22 @@ export default function MarketplaceConnectionsPage() {
           <PlusIcon className="w-5 h-5" />
           Add eBay Store
         </button>
+      </div>
+
+      {/*
+        Orientation banner: surfaces the two-channel model to first-time
+        tenants on the connections page so they know what eBay is and isn't
+        before they hit OAuth. Kept terse — full discussion lives in the
+        tenant docs.
+      */}
+      <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+        <p className="text-sm text-blue-900">
+          eBay is a separate sales channel from your storefront. Buyers come
+          via eBay; orders flow into your unified Orders page. Listings draw
+          from a warehouse you pick per listing — share one with your
+          storefront for a single stock pool, or use a dedicated eBay
+          warehouse to isolate channels.
+        </p>
       </div>
 
       {connections.length === 0 ? (
@@ -368,16 +352,6 @@ function ConnectionCard({
   const [showVacationInput, setShowVacationInput] = useState(false);
   const [vacationReturnMessage, setVacationReturnMessage] = useState('');
 
-  const authHeaders = () => {
-    const token = localStorage.getItem('access_token') || '';
-    const tenantId = localStorage.getItem('tenantId') || '';
-    return {
-      Authorization: `Bearer ${token}`,
-      'x-tenant-id': tenantId,
-      'Content-Type': 'application/json',
-    };
-  };
-
   useEffect(() => {
     loadStatus();
     loadVacationStatus();
@@ -385,12 +359,8 @@ function ConnectionCard({
 
   const loadStatus = async () => {
     try {
-      const res = await fetch(`/api/v1/marketplace/connections/${connection.id}/status`, {
-        headers: authHeaders(),
-      });
-      if (res.ok) {
-        setStatus(unwrapJson(await res.json()));
-      }
+      const res = await api.get(`/v1/marketplace/connections/${connection.id}/status`);
+      setStatus(res.data);
     } catch (error) {
       console.error('Failed to load status:', error);
     }
@@ -399,18 +369,11 @@ function ConnectionCard({
   const loadVacationStatus = async () => {
     setVacationLoading(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/connections/${connection.id}/vacation`, {
-        headers: authHeaders(),
-      });
-      if (res.ok) {
-        const data = unwrapJson(await res.json());
-        setVacationStatus(data);
-      } else {
-        // Endpoint may not exist yet; treat as disabled
-        setVacationStatus({ enabled: false });
-      }
+      const res = await api.get(`/v1/marketplace/connections/${connection.id}/vacation`);
+      setVacationStatus(res.data);
     } catch (error) {
       console.error('Failed to load vacation status:', error);
+      // Endpoint may not exist yet; treat as disabled
       setVacationStatus({ enabled: false });
     } finally {
       setVacationLoading(false);
@@ -431,38 +394,21 @@ function ConnectionCard({
     setVacationToggling(true);
     setShowVacationInput(false);
     try {
-      const res = await fetch(`/api/v1/marketplace/connections/${connection.id}/vacation`, {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({
-          enabled: newEnabled,
-          returnMessage: newEnabled ? vacationReturnMessage.trim() : '',
-        }),
+      const res = await api.post(`/v1/marketplace/connections/${connection.id}/vacation`, {
+        enabled: newEnabled,
+        returnMessage: newEnabled ? vacationReturnMessage.trim() : '',
       });
-
-      if (res.ok) {
-        const data = unwrapJson(await res.json());
-        setVacationStatus(data);
-        setVacationReturnMessage('');
-        toast({
-          title: 'Success',
-          description: newEnabled
-            ? 'Vacation mode enabled'
-            : 'Vacation mode disabled',
-        });
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({
-          title: 'Error',
-          description: error.error || 'Failed to update vacation mode',
-          variant: 'destructive',
-        });
-      }
-    } catch (error) {
+      setVacationStatus(res.data);
+      setVacationReturnMessage('');
+      toast({
+        title: 'Success',
+        description: newEnabled ? 'Vacation mode enabled' : 'Vacation mode disabled',
+      });
+    } catch (error: any) {
       console.error('Failed to toggle vacation mode:', error);
       toast({
         title: 'Error',
-        description: 'Failed to update vacation mode',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to update vacation mode',
         variant: 'destructive',
       });
     } finally {

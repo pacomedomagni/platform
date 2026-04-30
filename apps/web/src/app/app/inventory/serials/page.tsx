@@ -125,14 +125,16 @@ export default function SerialTrackingPage() {
     }
   };
 
-  const loadSerialHistory = async (serialNo: string) => {
+  const loadSerialHistory = async (serialNo: string): Promise<boolean> => {
     try {
       const res = await api.get(`/v1/inventory-management/serials/history/${encodeURIComponent(serialNo)}`);
       const historyResponse: SerialHistoryResponse = res.data;
       setSerialHistory(historyResponse.history || []);
+      return true;
     } catch (e: unknown) {
       const err = e as { response?: { data?: { message?: string } } };
       setError(err?.response?.data?.message || 'Failed to load serial history');
+      return false;
     }
   };
 
@@ -224,14 +226,26 @@ export default function SerialTrackingPage() {
 
   const openHistoryModal = async (serial: SerialRecord) => {
     setSelectedSerial(serial);
-    await loadSerialHistory(serial.serialNo);
-    setShowHistoryModal(true);
+    // Don't open the modal until the history actually loads. The previous
+    // shape opened the modal regardless of failure and rendered "No
+    // history available" instead of surfacing the error. See IS3 in
+    // docs/ui-audit.md.
+    const ok = await loadSerialHistory(serial.serialNo);
+    if (ok) {
+      setShowHistoryModal(true);
+    }
   };
 
   // eslint-disable-next-line react-hooks/exhaustive-deps -- loadSerials depends on filter state; we only want initial load
   useEffect(() => {
     loadSerials();
   }, []);
+
+  // Re-load on page change (IS1).
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-fire on page changes
+  useEffect(() => {
+    loadSerials();
+  }, [serialPage]);
 
   return (
     <ReportPage
@@ -358,7 +372,7 @@ export default function SerialTrackingPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => { setSerialPage((p) => Math.max(0, p - 1)); loadSerials(); }}
+                onClick={() => setSerialPage((p) => Math.max(0, p - 1))}
                 disabled={serialPage === 0}
               >
                 Previous
@@ -366,7 +380,7 @@ export default function SerialTrackingPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => { setSerialPage((p) => p + 1); loadSerials(); }}
+                onClick={() => setSerialPage((p) => p + 1)}
                 disabled={(serialPage + 1) * PAGE_SIZE >= pagination.total}
               >
                 Next

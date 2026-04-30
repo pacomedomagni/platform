@@ -14,8 +14,25 @@ function OnboardingCompleteContent() {
   const provider = searchParams.get('provider');
 
   useEffect(() => {
+    let cancelled = false;
+    let redirectTimer: ReturnType<typeof setTimeout> | null = null;
+
     const completeOnboarding = async () => {
+      // Idempotency guard against reload during the 3s redirect window:
+      // record the tenant id we've already POSTed to /complete in
+      // sessionStorage so a refresh doesn't double-fire. See C1 in
+      // docs/ui-audit.md.
+      const storageKey = 'onboarding_completed_for';
       try {
+        if (typeof window !== 'undefined' && sessionStorage.getItem(storageKey) === tenantId) {
+          // Already completed this session; skip the POST and just route on.
+          if (!cancelled) setIsCompleting(false);
+          redirectTimer = setTimeout(() => {
+            if (!cancelled) router.push('/app');
+          }, 1500);
+          return;
+        }
+
         const token = localStorage.getItem('access_token');
         if (!token) {
           throw new Error('Please sign in again to complete onboarding.');
@@ -29,21 +46,34 @@ function OnboardingCompleteContent() {
         });
 
         if (!res.ok) {
-          const err = unwrapJson(await res.json());
+          const err = unwrapJson(await res.json().catch(() => null));
           throw new Error(err.message || 'Failed to complete onboarding');
         }
 
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem(storageKey, String(tenantId));
+        }
+        if (cancelled) return;
         setIsCompleting(false);
 
-        // Redirect to dashboard after 3 seconds
-        setTimeout(() => router.push('/app'), 3000);
+        // Redirect to dashboard after 3 seconds. Timer is cleared on
+        // unmount so navigating away mid-countdown doesn't force a redirect.
+        redirectTimer = setTimeout(() => {
+          if (!cancelled) router.push('/app');
+        }, 3000);
       } catch (err: any) {
+        if (cancelled) return;
         setError(err.message);
         setIsCompleting(false);
       }
     };
 
     completeOnboarding();
+
+    return () => {
+      cancelled = true;
+      if (redirectTimer) clearTimeout(redirectTimer);
+    };
   }, [tenantId, router]);
 
   if (error) {

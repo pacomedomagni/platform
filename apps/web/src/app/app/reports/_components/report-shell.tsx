@@ -67,3 +67,19 @@ export const ReportEmpty = ({ colSpan, message }: { colSpan: number; message?: s
     </td>
   </tr>
 );
+
+/**
+ * R-COMMON-3: replace the previous "Loading..." inside the Load button
+ * with an obvious table-area indicator. Renders a single row with a
+ * spinner + label. Use as a sibling of the table rows, gated on `loading`.
+ */
+export const ReportLoading = ({ colSpan }: { colSpan: number }) => (
+  <tr>
+    <td colSpan={colSpan} className="p-8 text-center text-muted-foreground" aria-live="polite">
+      <span className="inline-flex items-center gap-2">
+        <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+        Loading…
+      </span>
+    </td>
+  </tr>
+);

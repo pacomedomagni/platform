@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { ConfirmDialog, toast } from '@platform/ui';
 import Link from 'next/link';
 import {
@@ -15,7 +16,7 @@ import {
   Power,
   Upload,
 } from 'lucide-react';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface Connection {
   id: string;
@@ -48,12 +49,32 @@ interface Listing {
   };
 }
 
+// Filter values the API expects. Dashboard tiles deep-link with both
+// UPPERCASE and lowercase variants; normalize once on read so the deep
+// link works regardless of casing. See M17 in docs/ui-audit.md.
+const VALID_STATUSES = new Set([
+  'all',
+  'draft',
+  'pending_approval',
+  'approved',
+  'publishing',
+  'published',
+  'ended',
+  'error',
+]);
+
 export default function MarketplaceListingsPage() {
+  const searchParams = useSearchParams();
+  const initialStatus = (() => {
+    const raw = (searchParams.get('status') ?? 'all').toLowerCase();
+    return VALID_STATUSES.has(raw) ? raw : 'all';
+  })();
+
   const [listings, setListings] = useState<Listing[]>([]);
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedConnection, setSelectedConnection] = useState<string>('all');
-  const [selectedStatus, setSelectedStatus] = useState<string>('all');
+  const [selectedStatus, setSelectedStatus] = useState<string>(initialStatus);
   const [searchQuery, setSearchQuery] = useState('');
   const [syncing, setSyncing] = useState<string | null>(null);
   const [publishConfirm, setPublishConfirm] = useState<string | null>(null);
@@ -67,31 +88,15 @@ export default function MarketplaceListingsPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      // Load connections
-      const connectionsRes = await fetch('/api/v1/marketplace/connections', {
-        credentials: 'include',
-      });
-      if (connectionsRes.ok) {
-        const connectionsData = unwrapJson(await connectionsRes.json());
-        setConnections(connectionsData);
-      }
-
-      // Load listings with filters
-      const params = new URLSearchParams();
-      if (selectedConnection !== 'all') {
-        params.append('connectionId', selectedConnection);
-      }
-      if (selectedStatus !== 'all') {
-        params.append('status', selectedStatus);
-      }
-
-      const listingsRes = await fetch(`/api/v1/marketplace/listings?${params}`, {
-        credentials: 'include',
-      });
-      if (listingsRes.ok) {
-        const listingsData = unwrapJson(await listingsRes.json());
-        setListings(listingsData);
-      }
+      const params: Record<string, string> = {};
+      if (selectedConnection !== 'all') params.connectionId = selectedConnection;
+      if (selectedStatus !== 'all') params.status = selectedStatus;
+      const [connRes, listRes] = await Promise.all([
+        api.get('/v1/marketplace/connections'),
+        api.get('/v1/marketplace/listings', { params }),
+      ]);
+      setConnections(connRes.data);
+      setListings(listRes.data);
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
@@ -109,21 +114,16 @@ export default function MarketplaceListingsPage() {
     setPublishConfirm(null);
 
     try {
-      const res = await fetch(`/api/v1/marketplace/listings/${listingId}/publish`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Listing published successfully!' });
-        loadData();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to publish listing', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.post(`/v1/marketplace/listings/${listingId}/publish`);
+      toast({ title: 'Success', description: 'Listing published successfully!' });
+      loadData();
+    } catch (error: any) {
       console.error('Failed to publish:', error);
-      toast({ title: 'Error', description: 'Failed to publish listing', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to publish listing',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -137,42 +137,32 @@ export default function MarketplaceListingsPage() {
     setEndConfirm(null);
 
     try {
-      const res = await fetch(`/api/v1/marketplace/listings/${listingId}/end`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Listing ended successfully' });
-        loadData();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to end listing', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.post(`/v1/marketplace/listings/${listingId}/end`);
+      toast({ title: 'Success', description: 'Listing ended successfully' });
+      loadData();
+    } catch (error: any) {
       console.error('Failed to end listing:', error);
-      toast({ title: 'Error', description: 'Failed to end listing', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to end listing',
+        variant: 'destructive',
+      });
     }
   };
 
   const handleSyncInventory = async (listingId: string) => {
     setSyncing(listingId);
     try {
-      const res = await fetch(`/api/v1/marketplace/listings/${listingId}/sync-inventory`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Inventory synced successfully' });
-        loadData();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to sync inventory', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.post(`/v1/marketplace/listings/${listingId}/sync-inventory`);
+      toast({ title: 'Success', description: 'Inventory synced successfully' });
+      loadData();
+    } catch (error: any) {
       console.error('Failed to sync inventory:', error);
-      toast({ title: 'Error', description: 'Failed to sync inventory', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to sync inventory',
+        variant: 'destructive',
+      });
     } finally {
       setSyncing(null);
     }
@@ -188,20 +178,15 @@ export default function MarketplaceListingsPage() {
     setDeleteConfirm(null);
 
     try {
-      const res = await fetch(`/api/v1/marketplace/listings/${listingId}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-
-      if (res.ok) {
-        setListings(listings.filter((l) => l.id !== listingId));
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to delete listing', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.delete(`/v1/marketplace/listings/${listingId}`);
+      setListings(listings.filter((l) => l.id !== listingId));
+    } catch (error: any) {
       console.error('Failed to delete:', error);
-      toast({ title: 'Error', description: 'Failed to delete listing', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to delete listing',
+        variant: 'destructive',
+      });
     }
   };
 

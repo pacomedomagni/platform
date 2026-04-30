@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { DbModule } from '@platform/db';
 import { OperationsModule } from '../../operations/operations.module';
+import { WorkersModule } from '../../workers/workers.module';
 import { EncryptionService } from '../shared/encryption.service';
 import { MarketplaceAuditService } from '../shared/marketplace-audit.service';
 import { DistributedLockService } from '../shared/distributed-lock.service';
@@ -70,7 +71,7 @@ import { EbayPolicyService } from './ebay-policy.service';
  * Handles all eBay-related functionality
  */
 @Module({
-  imports: [DbModule, OperationsModule],
+  imports: [DbModule, OperationsModule, WorkersModule],
   controllers: [
     EbayAuthController,
     EbayListingsController,

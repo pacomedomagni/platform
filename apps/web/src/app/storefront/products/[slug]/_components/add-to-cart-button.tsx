@@ -16,6 +16,11 @@ interface AddToCartButtonProps {
   className?: string;
   buyNow?: boolean;
   quantity?: number;
+  /**
+   * Externally disable the button (e.g. out-of-stock / variant unavailable).
+   * Composed with the internal `isAdding` and the cart store's `isLoading`.
+   */
+  disabled?: boolean;
 }
 
 const ACK_DURATION_MS = 3000;
@@ -29,6 +34,7 @@ export function AddToCartButton({
   className = '',
   buyNow = false,
   quantity = 1,
+  disabled: disabledProp = false,
 }: AddToCartButtonProps) {
   const router = useRouter();
   const { addItem, isLoading } = useCartStore();
@@ -85,7 +91,8 @@ export function AddToCartButton({
 
   // The button is disabled while either the local add or the cart-store
   // mutation is in flight. Both flags are set; this is belt-and-braces.
-  const disabled = isAdding || isLoading;
+  // Also honors a parent-supplied `disabled` (out-of-stock / unavailable).
+  const disabled = isAdding || isLoading || disabledProp;
 
   if (buyNow) {
     return (

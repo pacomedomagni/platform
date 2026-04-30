@@ -102,18 +102,13 @@ export default function InventoryPage() {
       setLoading(true);
       setError(null);
       try {
-        const token = localStorage.getItem('access_token');
-        const tenantId = localStorage.getItem('tenantId');
-
-        // We use Promise.allSettled because each subrequest is independently useful;
-        // a 404 on stock-balance shouldn't blank the whole overview.
+        // 6.1: route everything through the axios singleton so auth +
+        // tenant headers are consistent and the response envelope unwrap
+        // happens in one place. Promise.allSettled keeps each subrequest
+        // independently useful — a 404 on stock-balance shouldn't blank
+        // the whole overview.
         const [alertsRes, balanceRes, reorderRes] = await Promise.allSettled([
-          fetch('/api/v1/store/admin/dashboard/inventory-alerts', {
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'x-tenant-id': tenantId || '',
-            },
-          }).then((r) => (r.ok ? r.json() : Promise.reject(r))),
+          api.get<InventoryAlertsResponse>('/v1/store/admin/dashboard/inventory-alerts'),
           api.get<BalanceRow[]>('/v1/inventory/stock-balance', { params: {} }),
           api.get<Reorder[]>('/v1/inventory/reorder-suggestions', { params: {} }),
         ]);
@@ -121,9 +116,7 @@ export default function InventoryPage() {
         if (cancelled) return;
 
         if (alertsRes.status === 'fulfilled') {
-          // unwrapJson handles { data: ... } envelopes; fetch path uses raw JSON.
-          const a = (alertsRes.value && alertsRes.value.data) || alertsRes.value;
-          setAlerts(a);
+          setAlerts(alertsRes.value.data);
         }
         if (balanceRes.status === 'fulfilled') {
           setBalanceRows(balanceRes.value.data || []);

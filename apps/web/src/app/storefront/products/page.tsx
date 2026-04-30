@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   Badge,
   Button,
@@ -47,17 +47,39 @@ export default function ProductsPage() {
 }
 
 function ProductsContent() {
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const [products, setProducts] = useState<StoreProduct[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // SF-P4: hydrate filter state from the URL on mount so links like
+  // /storefront/products?q=lamp&category=lighting&sort=price-asc are
+  // shareable. The effect below pushes subsequent edits back to the URL.
   const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
-  const [selectedCategory, setSelectedCategory] = useState('all');
-  const [sortBy, setSortBy] = useState<SortOption>('featured');
+  const [selectedCategory, setSelectedCategory] = useState(
+    searchParams.get('category') || 'all',
+  );
+  const [sortBy, setSortBy] = useState<SortOption>(
+    (searchParams.get('sort') as SortOption) || 'featured',
+  );
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+
+  // SF-P4: keep the URL in sync with current filter state (replace, not push,
+  // so the back button still goes to the previous page rather than walking
+  // backwards through every keystroke).
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (searchQuery) params.set('q', searchQuery);
+    if (selectedCategory !== 'all') params.set('category', selectedCategory);
+    if (sortBy !== 'featured') params.set('sort', sortBy);
+    const qs = params.toString();
+    const next = qs ? `${pathname}?${qs}` : pathname;
+    router.replace(next, { scroll: false });
+  }, [searchQuery, selectedCategory, sortBy, pathname, router]);
 
   // Active filter count for mobile badge (excluding default sort).
   const activeFilterCount =
@@ -508,6 +530,9 @@ function ProductsContent() {
         </div>
         <Button
           className="bg-background text-foreground hover:bg-background/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+          onClick={() => {
+            window.location.href = 'mailto:sales@noslag.com?subject=Storefront%20rollout%20inquiry';
+          }}
         >
           Talk to sales
         </Button>

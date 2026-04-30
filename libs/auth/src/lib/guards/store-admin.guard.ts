@@ -7,7 +7,7 @@ import { JwtTenantGuard } from './jwt-tenant.guard';
  */
 @Injectable()
 export class StoreAdminGuard extends JwtTenantGuard {
-  async canActivate(context: ExecutionContext): Promise<boolean> {
+  override async canActivate(context: ExecutionContext): Promise<boolean> {
     // First, validate JWT
     const isAuthenticated = await super.canActivate(context);
     if (!isAuthenticated) {

@@ -11,10 +11,11 @@ import {
   X,
   CloudDownload,
   FileInput,
+  FileText,
   ExternalLink,
 } from 'lucide-react';
 import Link from 'next/link';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface Connection {
   id: string;
@@ -91,35 +92,17 @@ export default function MarketplaceOrdersPage() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const connectionsRes = await fetch('/api/v1/marketplace/connections', {
-        credentials: 'include',
-      });
-      if (connectionsRes.ok) {
-        const connectionsData = unwrapJson(await connectionsRes.json());
-        setConnections(connectionsData);
-      }
-
-      const params = new URLSearchParams();
-      if (selectedConnection !== 'all') {
-        params.append('connectionId', selectedConnection);
-      }
-      if (selectedFulfillment !== 'all') {
-        params.append('fulfillmentStatus', selectedFulfillment);
-      }
-      if (selectedPayment !== 'all') {
-        params.append('paymentStatus', selectedPayment);
-      }
-      if (selectedSync !== 'all') {
-        params.append('syncStatus', selectedSync);
-      }
-
-      const ordersRes = await fetch(`/api/v1/marketplace/orders?${params}`, {
-        credentials: 'include',
-      });
-      if (ordersRes.ok) {
-        const ordersData = unwrapJson(await ordersRes.json());
-        setOrders(ordersData);
-      }
+      const params: Record<string, string> = {};
+      if (selectedConnection !== 'all') params.connectionId = selectedConnection;
+      if (selectedFulfillment !== 'all') params.fulfillmentStatus = selectedFulfillment;
+      if (selectedPayment !== 'all') params.paymentStatus = selectedPayment;
+      if (selectedSync !== 'all') params.syncStatus = selectedSync;
+      const [connRes, ordersRes] = await Promise.all([
+        api.get('/v1/marketplace/connections'),
+        api.get('/v1/marketplace/orders', { params }),
+      ]);
+      setConnections(connRes.data);
+      setOrders(ordersRes.data);
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
@@ -135,24 +118,17 @@ export default function MarketplaceOrdersPage() {
 
     setSyncing(true);
     try {
-      const res = await fetch('/api/v1/marketplace/orders/sync', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ connectionId: syncConnectionId }),
-      });
-
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Orders synced successfully!' });
-        setShowSyncDropdown(false);
-        loadData();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to sync orders', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.post('/v1/marketplace/orders/sync', { connectionId: syncConnectionId });
+      toast({ title: 'Success', description: 'Orders synced successfully!' });
+      setShowSyncDropdown(false);
+      loadData();
+    } catch (error: any) {
       console.error('Failed to sync orders:', error);
-      toast({ title: 'Error', description: 'Failed to sync orders', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to sync orders',
+        variant: 'destructive',
+      });
     } finally {
       setSyncing(false);
     }
@@ -171,24 +147,20 @@ export default function MarketplaceOrdersPage() {
 
     setFulfilling(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/orders/${fulfillModal.id}/fulfill`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trackingNumber: trackingNumber.trim(), carrier: carrier.trim() }),
+      await api.post(`/v1/marketplace/orders/${fulfillModal.id}/fulfill`, {
+        trackingNumber: trackingNumber.trim(),
+        carrier: carrier.trim(),
       });
-
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Order fulfilled successfully!' });
-        closeFulfillModal();
-        loadData();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to fulfill order', variant: 'destructive' });
-      }
-    } catch (error) {
+      toast({ title: 'Success', description: 'Order fulfilled successfully!' });
+      closeFulfillModal();
+      loadData();
+    } catch (error: any) {
       console.error('Failed to fulfill order:', error);
-      toast({ title: 'Error', description: 'Failed to fulfill order', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to fulfill order',
+        variant: 'destructive',
+      });
     } finally {
       setFulfilling(false);
     }
@@ -208,22 +180,16 @@ export default function MarketplaceOrdersPage() {
 
   const handleCreateOrder = async (order: Order) => {
     try {
-      const res = await fetch(`/api/v1/marketplace/orders/${order.id}/create-order`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-
-      if (res.ok) {
-        const data = unwrapJson(await res.json());
-        toast({ title: 'Success', description: `Created NoSlag order ${data.orderNumber}` });
-        loadData();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to create order', variant: 'destructive' });
-      }
-    } catch (error) {
+      const res = await api.post<{ orderNumber: string }>(`/v1/marketplace/orders/${order.id}/create-order`);
+      toast({ title: 'Success', description: `Created NoSlag order ${res.data.orderNumber}` });
+      loadData();
+    } catch (error: any) {
       console.error('Failed to create NoSlag order:', error);
-      toast({ title: 'Error', description: 'Failed to create order', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to create order',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -602,6 +568,18 @@ function OrderRow({
         </td>
         <td className="px-6 py-4">
           <div className="flex items-center gap-2">
+            {/*
+              Surfaces the per-order detail page (refund / cancel / line-item
+              actions) which was previously orphaned dead code — only reachable
+              by URL guess. See M51 in docs/ui-audit.md.
+            */}
+            <Link
+              href={`/app/marketplace/orders/${order.id}`}
+              className="inline-flex items-center gap-1 px-3 py-1.5 text-sm bg-gray-50 text-gray-700 rounded-lg hover:bg-gray-100"
+            >
+              <FileText className="w-4 h-4" />
+              Details
+            </Link>
             {canFulfill && (
               <button
                 onClick={onFulfill}

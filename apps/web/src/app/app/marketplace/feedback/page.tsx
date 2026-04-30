@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { toast } from '@platform/ui';
 import { RefreshCw, ThumbsUp, ThumbsDown, Minus, Star, MessageSquare, X } from 'lucide-react';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface Connection {
   id: string;
@@ -99,15 +99,12 @@ export default function MarketplaceFeedbackPage() {
 
   const loadConnections = async () => {
     try {
-      const res = await fetch('/api/v1/marketplace/connections', { credentials: 'include' });
-      if (res.ok) {
-        const data = unwrapJson<Connection[]>(await res.json());
-        setConnections(data);
-        if (data.length > 0) {
-          setSelectedConnection(data[0].id);
-        } else {
-          setLoading(false);
-        }
+      const res = await api.get<Connection[]>('/v1/marketplace/connections');
+      setConnections(res.data);
+      if (res.data.length > 0) {
+        setSelectedConnection(res.data[0].id);
+      } else {
+        setLoading(false);
       }
     } catch (error) {
       console.error('Failed to load connections:', error);
@@ -119,18 +116,18 @@ export default function MarketplaceFeedbackPage() {
     if (!selectedConnection) return;
     setLoading(true);
     try {
-      const params = new URLSearchParams({ connectionId: selectedConnection });
-      const res = await fetch(`/api/v1/marketplace/feedback?${params}`, { credentials: 'include' });
-      if (res.ok) {
-        const data = unwrapJson<{ feedbackEntries: FeedbackEntry[]; totalEntries: number }>(await res.json());
-        setEntries(data.feedbackEntries || []);
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.message || 'Failed to load feedback', variant: 'destructive' });
-      }
-    } catch (error) {
+      const res = await api.get<{ feedbackEntries: FeedbackEntry[]; totalEntries: number }>(
+        '/v1/marketplace/feedback',
+        { params: { connectionId: selectedConnection } },
+      );
+      setEntries(res.data.feedbackEntries || []);
+    } catch (error: any) {
       console.error('Failed to load feedback:', error);
-      toast({ title: 'Error', description: 'Failed to load feedback', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.message || 'Failed to load feedback',
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }
@@ -140,12 +137,10 @@ export default function MarketplaceFeedbackPage() {
     if (!selectedConnection) return;
     setSummaryLoading(true);
     try {
-      const params = new URLSearchParams({ connectionId: selectedConnection });
-      const res = await fetch(`/api/v1/marketplace/feedback/summary?${params}`, { credentials: 'include' });
-      if (res.ok) {
-        const data = unwrapJson<FeedbackSummary>(await res.json());
-        setSummary(data);
-      }
+      const res = await api.get<FeedbackSummary>('/v1/marketplace/feedback/summary', {
+        params: { connectionId: selectedConnection },
+      });
+      setSummary(res.data);
     } catch (error) {
       console.error('Failed to load feedback summary:', error);
     } finally {
@@ -160,27 +155,21 @@ export default function MarketplaceFeedbackPage() {
     }
     setResponding(true);
     try {
-      const res = await fetch('/api/v1/marketplace/feedback/respond', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          connectionId: selectedConnection,
-          feedbackId: respondModal.FeedbackID,
-          responseText: responseText.trim(),
-        }),
+      await api.post('/v1/marketplace/feedback/respond', {
+        connectionId: selectedConnection,
+        feedbackId: respondModal.FeedbackID,
+        responseText: responseText.trim(),
       });
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Response submitted successfully' });
-        setRespondModal(null);
-        setResponseText('');
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.message || 'Failed to submit response', variant: 'destructive' });
-      }
-    } catch (error) {
+      toast({ title: 'Success', description: 'Response submitted successfully' });
+      setRespondModal(null);
+      setResponseText('');
+    } catch (error: any) {
       console.error('Failed to respond to feedback:', error);
-      toast({ title: 'Error', description: 'Failed to submit response', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.message || 'Failed to submit response',
+        variant: 'destructive',
+      });
     } finally {
       setResponding(false);
     }

@@ -323,6 +323,14 @@ export interface CheckoutResponse {
   billingAddress: Address | null;
   items: Array<{
     id: string;
+    /**
+     * productId/variantId expose the original product references so the
+     * reorder flow can call `addItem(productId, qty)`. Both can be null for
+     * snapshot-only items where the underlying product was deleted —
+     * those items must be skipped during reorder.
+     */
+    productId: string | null;
+    variantId: string | null;
     name: string;
     quantity: number;
     unitPrice: number;
@@ -535,6 +543,14 @@ export interface OrderDetail extends OrderSummary {
   billingAddress: Address | null;
   items: Array<{
     id: string;
+    /**
+     * productId/variantId expose the original product references so the
+     * reorder flow can call `addItem(productId, qty)`. Both can be null for
+     * snapshot-only items where the underlying product was deleted —
+     * those items must be skipped during reorder.
+     */
+    productId: string | null;
+    variantId: string | null;
     name: string;
     quantity: number;
     unitPrice: number;
@@ -644,15 +660,19 @@ export interface ShippingRatesResponse {
 }
 
 export const shippingApi = {
-  getRates: (data: {
-    country: string;
-    state?: string;
-    zipCode?: string;
-    cartTotal: number;
-  }): Promise<ShippingRatesResponse> => {
+  getRates: (
+    data: {
+      country: string;
+      state?: string;
+      zipCode?: string;
+      cartTotal: number;
+    },
+    options?: { signal?: AbortSignal },
+  ): Promise<ShippingRatesResponse> => {
     return apiFetch('/v1/store/shipping/calculate', {
       method: 'POST',
       body: JSON.stringify(data),
+      signal: options?.signal,
     });
   },
 };

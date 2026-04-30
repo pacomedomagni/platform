@@ -83,8 +83,7 @@ export class EncryptionService {
     for (const secret of candidates) {
       try {
         const key = this.deriveKey(secret, salt);
-        const decipher = createCipheriv === createCipheriv ? createDecipheriv(this.algorithm, key, iv) : null;
-        if (!decipher) throw new Error('createDecipheriv unavailable');
+        const decipher = createDecipheriv(this.algorithm, key, iv);
         decipher.setAuthTag(tag);
         let decrypted = decipher.update(encrypted.toString('hex'), 'hex', 'utf8');
         decrypted += decipher.final('utf8');

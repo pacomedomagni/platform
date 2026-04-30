@@ -1,9 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { Button, Input } from '@platform/ui';
+import { Button, Input, NativeSelect } from '@platform/ui';
+import { Download } from 'lucide-react';
 import api from '../../../../lib/api';
-import { ReportAlert, ReportCard, ReportEmpty, ReportFilters, ReportPage, ReportTable } from '../_components/report-shell';
+import { ReportAlert, ReportCard, ReportEmpty, ReportFilters, ReportLoading, ReportPage, ReportTable } from '../_components/report-shell';
+import { downloadCsv } from '../_components/report-format';
+import { useUrlFilters } from '@/lib/hooks/use-url-filters';
+import { CodeTypeahead } from '../_components/code-typeahead';
 
 type SerialRow = {
   serialNo: string;
@@ -21,6 +25,11 @@ export default function SerialsReportPage() {
   const [rows, setRows] = useState<SerialRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useUrlFilters(
+    { itemCode, warehouseCode, status },
+    { itemCode: setItemCode, warehouseCode: setWarehouseCode, status: setStatus },
+  );
 
   const load = async () => {
     setLoading(true);
@@ -41,24 +50,47 @@ export default function SerialsReportPage() {
     }
   };
 
+  const handleExport = () => {
+    downloadCsv(
+      'serials',
+      ['Serial No', 'Item', 'Warehouse', 'Location', 'Batch', 'Status'],
+      rows.map((r) => [
+        r.serialNo,
+        r.itemCode,
+        r.warehouseCode ?? '',
+        r.locationCode ?? '',
+        r.batchNo ?? '',
+        r.status,
+      ]),
+    );
+  };
+
   return (
-    <ReportPage title="Serials" description="Serial number status by item and location.">
+    <ReportPage
+      title="Serials"
+      description="Serial number status by item and location."
+      actions={
+        <Button variant="outline" size="sm" onClick={handleExport} disabled={rows.length === 0}>
+          <Download className="w-4 h-4 mr-2" />
+          Export CSV
+        </Button>
+      }
+    >
       <ReportFilters className="md:grid-cols-4">
-        <Input
-          placeholder="Item Code"
-          value={itemCode}
-          onChange={(e) => setItemCode(e.target.value)}
-        />
-        <Input
-          placeholder="Warehouse Code"
-          value={warehouseCode}
-          onChange={(e) => setWarehouseCode(e.target.value)}
-        />
-        <Input
-          placeholder="Status (AVAILABLE/ISSUED)"
+        <CodeTypeahead docType="Item" value={itemCode} onChange={setItemCode} placeholder="Item Code" />
+        <CodeTypeahead docType="Warehouse" value={warehouseCode} onChange={setWarehouseCode} placeholder="Warehouse Code" />
+        {/* SR1: status was a free-text input that silently accepted typos.
+            The server enum is small and known — render as a select. */}
+        <NativeSelect
           value={status}
           onChange={(e) => setStatus(e.target.value)}
-        />
+        >
+          <option value="">All statuses</option>
+          <option value="AVAILABLE">Available</option>
+          <option value="ISSUED">Issued</option>
+          <option value="RESERVED">Reserved</option>
+          <option value="SCRAPPED">Scrapped</option>
+        </NativeSelect>
         <Button onClick={load} disabled={loading}>
           {loading ? 'Loading...' : 'Load'}
         </Button>
@@ -79,7 +111,8 @@ export default function SerialsReportPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && <ReportEmpty colSpan={6} />}
+            {loading && <ReportLoading colSpan={6} />}
+            {!loading && rows.length === 0 && <ReportEmpty colSpan={6} />}
             {rows.map((row, idx) => (
               <tr key={`${row.serialNo}-${idx}`} className="border-b last:border-0">
                 <td className="p-3">{row.serialNo}</td>

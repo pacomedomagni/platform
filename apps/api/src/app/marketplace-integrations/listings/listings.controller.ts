@@ -128,13 +128,15 @@ export class MarketplaceListingsController {
   /**
    * Publish listing to marketplace
    * POST /api/marketplace/listings/:id/publish
+   *
+   * The service owns the two-person-rule decision; we just hand it the
+   * caller's roles. Don't reintroduce role logic here.
    */
   @Post(':id/publish')
   @Roles('admin', 'System Manager', 'Inventory Manager')
   async publishListing(@Param('id') id: string, @Request() req: any) {
-    const userRoles: string[] = (req.user?.roles || []).map((r: string) => r.toLowerCase());
-    const isPrivileged = userRoles.includes('admin') || userRoles.includes('system manager');
-    return this.listingsService.publishListing(id, { requireApproved: !isPrivileged });
+    const userRoles: string[] = req.user?.roles ?? [];
+    return this.listingsService.publishListing(id, { userRoles });
   }
 
   /**

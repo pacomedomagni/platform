@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Button, Card, Input, Badge, Spinner } from '@platform/ui';
+import { Button, Card, Input, Badge, Spinner, ToastAction, toast } from '@platform/ui';
 import { Trash2, Minus, Plus, ShoppingBag } from 'lucide-react';
 import { useCartStore } from '@/lib/cart-store';
 import { formatCurrency } from '../_lib/format';
@@ -24,10 +24,24 @@ export default function CartPage() {
     initializeCart,
     updateItem,
     removeItem,
+    addItem,
     applyCoupon,
     removeCoupon,
     shippingEstimate,
   } = useCartStore();
+
+  // SF-C2: per-item busy state. The store exposes a single global isLoading
+  // which makes the entire cart appear frozen during any mutation. Track
+  // pending IDs locally so only the affected row's controls disable.
+  const [pendingItemIds, setPendingItemIds] = useState<Set<string>>(new Set());
+  const setItemPending = (id: string, pending: boolean) => {
+    setPendingItemIds((prev) => {
+      const next = new Set(prev);
+      if (pending) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
 
   // Effective shipping/tax/total — prefer the user's estimate when set,
   // otherwise fall back to whatever the cart API has computed.
@@ -35,8 +49,12 @@ export default function CartPage() {
   const effectiveTax = shippingEstimate?.estimatedTax ?? tax;
   const effectiveTotal =
     subtotal + effectiveShipping + effectiveTax - discount;
+  // SF-C1: ideally this comes from the tenant's shipping config exposed
+  // through the cart API. Until that lands, fall back to a sensible
+  // default; the banner is hidden when the threshold is 0 or already met.
   const FREE_SHIPPING_THRESHOLD = 75;
   const remainingForFreeShipping = Math.max(0, FREE_SHIPPING_THRESHOLD - subtotal);
+  const showFreeShippingBanner = FREE_SHIPPING_THRESHOLD > 0 && remainingForFreeShipping > 0;
 
   const [promoCode, setPromoCode] = useState('');
   const [promoLoading, setPromoLoading] = useState(false);
@@ -48,11 +66,63 @@ export default function CartPage() {
 
   const handleQuantityChange = async (itemId: string, newQuantity: number) => {
     if (newQuantity < 1) return;
-    await updateItem(itemId, newQuantity);
+    if (pendingItemIds.has(itemId)) return;
+    setItemPending(itemId, true);
+    try {
+      await updateItem(itemId, newQuantity);
+    } catch (err) {
+      toast({
+        title: 'Could not update quantity',
+        description: err instanceof Error ? err.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setItemPending(itemId, false);
+    }
   };
 
+  // SF-C3: instead of a confirm dialog (which interrupts the flow), remove
+  // optimistically and offer Undo via toast. The Undo handler re-adds the
+  // product at the same quantity. The server is the source of truth so a
+  // failed re-add will surface as an error toast.
   const handleRemoveItem = async (itemId: string) => {
-    await removeItem(itemId);
+    const item = items.find((i) => i.id === itemId);
+    if (!item) return;
+    if (pendingItemIds.has(itemId)) return;
+    setItemPending(itemId, true);
+    try {
+      await removeItem(itemId);
+      toast({
+        title: 'Item removed',
+        description: item.name,
+        action: (
+          <ToastAction
+            altText="Undo remove"
+            onClick={async () => {
+              try {
+                await addItem(item.productId, item.quantity);
+              } catch (err) {
+                toast({
+                  title: 'Could not restore item',
+                  description: err instanceof Error ? err.message : 'Please try again.',
+                  variant: 'destructive',
+                });
+              }
+            }}
+          >
+            Undo
+          </ToastAction>
+        ),
+      });
+    } catch (err) {
+      toast({
+        title: 'Could not remove item',
+        description: err instanceof Error ? err.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setItemPending(itemId, false);
+    }
   };
 
   const handleApplyCoupon = async () => {
@@ -127,11 +197,14 @@ export default function CartPage() {
             Shopping Cart Items
           </h2>
           <div className="space-y-4" role="list" aria-label="Cart items">
-            {items.map((item) => (
+            {items.map((item) => {
+              const itemBusy = pendingItemIds.has(item.id);
+              return (
               <Card
                 key={item.id}
                 className="flex flex-col gap-4 border-border bg-card p-5 shadow-sm sm:flex-row sm:items-center"
                 role="listitem"
+                aria-busy={itemBusy}
               >
                 <div
                   className="h-24 w-32 rounded-xl bg-gradient-to-br from-blue-50 via-slate-50 to-amber-50 flex items-center justify-center overflow-hidden"
@@ -177,7 +250,7 @@ export default function CartPage() {
                         <button
                           className="text-muted-foreground hover:text-foreground disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-ring rounded"
                           onClick={() => handleQuantityChange(item.id, item.quantity - 1)}
-                          disabled={item.quantity <= 1}
+                          disabled={item.quantity <= 1 || itemBusy}
                           aria-label={`Decrease quantity of ${item.name}`}
                         >
                           <Minus className="h-3 w-3" aria-hidden="true" />
@@ -187,11 +260,12 @@ export default function CartPage() {
                           aria-live="polite"
                           aria-atomic="true"
                         >
-                          {item.quantity}
+                          {itemBusy ? <Spinner className="h-3 w-3 inline" aria-hidden="true" /> : item.quantity}
                         </span>
                         <button
-                          className="text-muted-foreground hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring rounded"
+                          className="text-muted-foreground hover:text-foreground disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-ring rounded"
                           onClick={() => handleQuantityChange(item.id, item.quantity + 1)}
+                          disabled={itemBusy}
                           aria-label={`Increase quantity of ${item.name}`}
                         >
                           <Plus className="h-3 w-3" aria-hidden="true" />
@@ -202,16 +276,22 @@ export default function CartPage() {
                       </span>
                     </div>
                     <button
-                      className="text-muted-foreground hover:text-destructive p-1 focus:outline-none focus:ring-2 focus:ring-destructive rounded"
+                      className="text-muted-foreground hover:text-destructive disabled:opacity-50 p-1 focus:outline-none focus:ring-2 focus:ring-destructive rounded"
                       onClick={() => handleRemoveItem(item.id)}
+                      disabled={itemBusy}
                       aria-label={`Remove ${item.name} from cart`}
                     >
-                      <Trash2 className="h-4 w-4" aria-hidden="true" />
+                      {itemBusy ? (
+                        <Spinner className="h-4 w-4" aria-hidden="true" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
+                      )}
                     </button>
                   </div>
                 </div>
               </Card>
-            ))}
+              );
+            })}
           </div>
         </main>
 

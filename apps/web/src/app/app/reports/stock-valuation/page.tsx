@@ -2,8 +2,12 @@
 
 import { useState } from 'react';
 import { Button, Input } from '@platform/ui';
+import { Download } from 'lucide-react';
 import api from '../../../../lib/api';
-import { ReportAlert, ReportCard, ReportEmpty, ReportFilters, ReportPage, ReportTable } from '../_components/report-shell';
+import { ReportAlert, ReportCard, ReportEmpty, ReportFilters, ReportLoading, ReportPage, ReportTable } from '../_components/report-shell';
+import { downloadCsv, formatMoney, formatQty } from '../_components/report-format';
+import { useUrlFilters } from '@/lib/hooks/use-url-filters';
+import { CodeTypeahead } from '../_components/code-typeahead';
 
 type ValuationRow = {
   itemCode: string;
@@ -23,6 +27,16 @@ export default function StockValuationPage() {
   const [rows, setRows] = useState<ValuationRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useUrlFilters(
+    { warehouseCode, itemCode, locationCode, batchNo },
+    {
+      warehouseCode: setWarehouseCode,
+      itemCode: setItemCode,
+      locationCode: setLocationCode,
+      batchNo: setBatchNo,
+    },
+  );
 
   const load = async () => {
     setLoading(true);
@@ -44,24 +58,37 @@ export default function StockValuationPage() {
     }
   };
 
+  const handleExport = () => {
+    downloadCsv(
+      'stock-valuation',
+      ['Item', 'Warehouse', 'Location', 'Batch', 'Qty', 'Avg Rate', 'Stock Value'],
+      rows.map((r) => [
+        r.itemCode,
+        r.warehouseCode,
+        r.locationCode ?? '',
+        r.batchNo ?? '',
+        formatQty(r.qty, 4),
+        formatMoney(r.avgRate),
+        formatMoney(r.stockValue),
+      ]),
+    );
+  };
+
   return (
-    <ReportPage title="Stock Valuation" description="FIFO layer valuation by location.">
+    <ReportPage
+      title="Stock Valuation"
+      description="FIFO layer valuation by location."
+      actions={
+        <Button variant="outline" size="sm" onClick={handleExport} disabled={rows.length === 0}>
+          <Download className="w-4 h-4 mr-2" />
+          Export CSV
+        </Button>
+      }
+    >
       <ReportFilters className="md:grid-cols-5">
-        <Input
-          placeholder="Warehouse Code"
-          value={warehouseCode}
-          onChange={(e) => setWarehouseCode(e.target.value)}
-        />
-        <Input
-          placeholder="Item Code"
-          value={itemCode}
-          onChange={(e) => setItemCode(e.target.value)}
-        />
-        <Input
-          placeholder="Location Code"
-          value={locationCode}
-          onChange={(e) => setLocationCode(e.target.value)}
-        />
+        <CodeTypeahead docType="Warehouse" value={warehouseCode} onChange={setWarehouseCode} placeholder="Warehouse Code" />
+        <CodeTypeahead docType="Item" value={itemCode} onChange={setItemCode} placeholder="Item Code" />
+        <CodeTypeahead docType="Location" value={locationCode} onChange={setLocationCode} placeholder="Location Code" />
         <Input
           placeholder="Batch No"
           value={batchNo}
@@ -88,16 +115,17 @@ export default function StockValuationPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && <ReportEmpty colSpan={7} />}
+            {loading && <ReportLoading colSpan={7} />}
+            {!loading && rows.length === 0 && <ReportEmpty colSpan={7} />}
             {rows.map((row, idx) => (
               <tr key={`${row.itemCode}-${row.warehouseCode}-${row.locationCode}-${row.batchNo}-${idx}`} className="border-b last:border-0">
                 <td className="p-3">{row.itemCode}</td>
                 <td className="p-3">{row.warehouseCode}</td>
                 <td className="p-3">{row.locationCode ?? '-'}</td>
                 <td className="p-3">{row.batchNo ?? '-'}</td>
-                <td className="p-3 text-right">{row.qty}</td>
-                <td className="p-3 text-right">{row.avgRate}</td>
-                <td className="p-3 text-right">{row.stockValue}</td>
+                <td className="p-3 text-right tabular-nums">{formatQty(row.qty, 4)}</td>
+                <td className="p-3 text-right tabular-nums">{formatMoney(row.avgRate)}</td>
+                <td className="p-3 text-right tabular-nums">{formatMoney(row.stockValue)}</td>
               </tr>
             ))}
           </tbody>

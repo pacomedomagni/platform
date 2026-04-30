@@ -8,7 +8,8 @@ import { EbayTaxonomyService } from './ebay-taxonomy.service';
 import { EbayPolicyService } from './ebay-policy.service';
 import { MarketplaceAuditService } from '../shared/marketplace-audit.service';
 import { ListingStatus, SyncStatus } from '../shared/marketplace.types';
-import { Prisma } from '@prisma/client';
+import { FailedOperationsService } from '../../workers/failed-operations.service';
+import { OperationType, Prisma } from '@prisma/client';
 const Decimal = Prisma.Decimal;
 
 /**
@@ -43,8 +44,42 @@ export class EbayListingsService {
     private mediaService: EbayMediaService,
     private taxonomyService: EbayTaxonomyService,
     private policyService: EbayPolicyService,
-    private audit: MarketplaceAuditService
+    private audit: MarketplaceAuditService,
+    private failedOps: FailedOperationsService,
   ) {}
+
+  /**
+   * Schedule a deferred retry for deleting an orphaned eBay inventory
+   * item. Use this from rollback paths instead of best-effort logging,
+   * because eBay's offer purge is asynchronous: the inline delete
+   * frequently fails with "inventory item is referenced by an offer"
+   * until eBay finishes tearing down the withdrawn offer.
+   */
+  private async scheduleInventoryItemDelete(
+    tenantId: string,
+    connectionId: string,
+    sku: string,
+    cause: string,
+  ): Promise<void> {
+    try {
+      await this.failedOps.recordFailedOperation({
+        tenantId,
+        operationType: OperationType.EBAY_INVENTORY_ITEM_DELETE,
+        referenceId: sku,
+        referenceType: 'ebay_inventory_item',
+        payload: { connectionId, sku } as Prisma.JsonValue,
+        errorMessage: cause,
+      });
+    } catch (e) {
+      // Don't let retry-enqueue itself cascade. Log and move on; the
+      // operator can clean orphans manually if the failed-ops table is
+      // unavailable for some reason.
+      this.logger.error(
+        `Failed to enqueue retry for orphaned eBay inventory item ${sku}`,
+        e
+      );
+    }
+  }
 
   /**
    * Determine the currency for a given eBay marketplace ID.
@@ -104,8 +139,12 @@ export class EbayListingsService {
         : 0;
     }
 
-    // SKU format: use full item code and full connection ID to avoid collision risk
-    const sku = `${product.item.code}-${connection.id}`;
+    // SKU is built from productListingId (guaranteed unique) + connectionId,
+    // matching the unified createDirectListing path. Using item.code instead
+    // would collide between two ProductListings backed by the same Item
+    // (e.g. variant A and variant B of the same SKU sold at different prices),
+    // tripping the @@unique([connectionId, sku]) constraint.
+    const sku = `${data.productListingId}-${connection.id}`;
 
     // Check if listing already exists
     const existing = await this.prisma.marketplaceListing.findFirst({
@@ -117,6 +156,17 @@ export class EbayListingsService {
 
     if (existing) {
       throw new BadRequestException('Listing already exists for this product on this store');
+    }
+
+    // categoryId is required — eBay rejects offers without a valid leaf
+    // category, and silently defaulting to a single hardcoded one ("Cell
+    // Phones & Smartphones") routinely landed listings in the wrong
+    // marketplace section, triggering buyer complaints and seller
+    // violations. Caller must pick a category via EbayTaxonomyService.
+    if (!data.overrides?.categoryId) {
+      throw new BadRequestException(
+        'categoryId is required. Use the eBay taxonomy API to resolve a category for this product before creating the listing.'
+      );
     }
 
     // Create marketplace listing (draft)
@@ -132,7 +182,7 @@ export class EbayListingsService {
         price: new Decimal(data.overrides?.price || product.price.toNumber()),
         quantity: availableQuantity || 1,
         condition: data.overrides?.condition || 'NEW',
-        categoryId: data.overrides?.categoryId || '9355', // Default category
+        categoryId: data.overrides.categoryId,
         photos: JSON.stringify(product.images || []),
         platformData: JSON.stringify({
           format: 'FIXED_PRICE',
@@ -533,26 +583,31 @@ export class EbayListingsService {
   /**
    * Publish listing to eBay.
    *
-   * `options.requireApproved` enforces the approval workflow for non-admin
-   * roles: an Inventory Manager can publish only listings that have already
-   * been approved (admin/SM can also publish drafts directly to skip the
-   * two-person rule when needed).
+   * Two-person rule: only Admin / System Manager can publish a DRAFT
+   * directly. Inventory Managers must wait for an approver to move the
+   * listing to APPROVED first. The role check lives here, not in the
+   * controller, so the rule holds regardless of caller path.
    */
   async publishListing(
     listingId: string,
-    options: { requireApproved?: boolean } = {}
+    options: { userRoles?: string[] } = {}
   ) {
     const listing = await this.getListing(listingId);
 
-    const allowedStatuses = options.requireApproved
-      ? [ListingStatus.APPROVED]
-      : [ListingStatus.DRAFT, ListingStatus.APPROVED];
+    const normalizedRoles = (options.userRoles ?? []).map((r) => r.toLowerCase());
+    const isPrivileged =
+      normalizedRoles.includes('admin') ||
+      normalizedRoles.includes('system manager');
+
+    const allowedStatuses = isPrivileged
+      ? [ListingStatus.DRAFT, ListingStatus.APPROVED]
+      : [ListingStatus.APPROVED];
 
     if (!allowedStatuses.includes(listing.status as any)) {
       throw new BadRequestException(
-        options.requireApproved
-          ? 'Only approved listings can be published. Ask an admin to approve this listing first.'
-          : 'Only draft or approved listings can be published'
+        isPrivileged
+          ? 'Only draft or approved listings can be published'
+          : 'Only approved listings can be published. Ask an admin to approve this listing first.'
       );
     }
 
@@ -808,7 +863,12 @@ export class EbayListingsService {
     } catch (error) {
       this.logger.error(`Failed to publish listing ${listingId}`, error);
 
-      // Rollback partially created eBay resources
+      // Rollback partially created eBay resources. The withdraw is
+      // synchronous on our side but eBay's offer purge is async; if we
+      // try to delete the inventory item right after withdraw, eBay
+      // often returns "inventory item is referenced by an offer". So we
+      // attempt the delete inline once; on failure, schedule a deferred
+      // retry via FailedOperationsService instead of leaving an orphan.
       if (client) {
         if (offerCreated && offerId) {
           try {
@@ -824,7 +884,16 @@ export class EbayListingsService {
             await this.ebayClient.deleteInventoryItem(client, listing.sku);
             this.logger.log(`Rolled back inventory item ${listing.sku} for listing ${listingId}`);
           } catch (rollbackError) {
-            this.logger.error(`Failed to rollback inventory item ${listing.sku}`, rollbackError);
+            this.logger.warn(
+              `Inline delete of inventory item ${listing.sku} failed (likely eBay's async offer purge). Scheduling retry.`,
+              rollbackError
+            );
+            await this.scheduleInventoryItemDelete(
+              listing.tenantId,
+              listing.connectionId,
+              listing.sku,
+              `Publish-rollback inline delete failed: ${(rollbackError as Error)?.message ?? 'unknown'}`,
+            );
           }
         }
       }
@@ -1170,44 +1239,51 @@ export class EbayListingsService {
     const client = await this.ebayStore.getClient(data.connectionId);
     const currency = this.getMarketplaceCurrency(connection.marketplaceId);
 
-    // Step 1: Create inventory items for each variant
+    // Track partially-created eBay-side resources for rollback on any
+    // failure between here and step 4. The previous shape only rolled back
+    // inventory items, leaving orphaned groups + leaving local DB out of
+    // sync if step 4 partially failed.
     const createdSkus: string[] = [];
-    for (const variant of data.variants) {
-      await this.ebayClient.createOrReplaceInventoryItem(client, variant.sku, {
-        product: {
-          title: variant.title,
-          description: variant.description,
-          imageUrls: variant.imageUrls,
-          aspects: variant.variantAspects,
-        },
-        condition: variant.condition,
-        availability: {
-          shipToLocationAvailability: { quantity: variant.quantity },
+    let groupCreated = false;
+    let publishResult: Awaited<ReturnType<EbayClientService['publishOfferByInventoryItemGroup']>> | undefined;
+
+    try {
+      // Step 1: Create inventory items for each variant
+      for (const variant of data.variants) {
+        await this.ebayClient.createOrReplaceInventoryItem(client, variant.sku, {
+          product: {
+            title: variant.title,
+            description: variant.description,
+            imageUrls: variant.imageUrls,
+            aspects: variant.variantAspects,
+          },
+          condition: variant.condition,
+          availability: {
+            shipToLocationAvailability: { quantity: variant.quantity },
+          },
+        });
+        createdSkus.push(variant.sku);
+      }
+
+      // Step 2: Create inventory item group
+      const variesByAspects = Object.keys(data.variants[0]?.variantAspects || {});
+      await this.ebayClient.createOrReplaceInventoryItemGroup(client, data.groupKey, {
+        title: data.title,
+        description: data.description,
+        imageUrls: data.imageUrls,
+        aspects: data.aspects,
+        variantSKUs: data.variants.map((v) => v.sku),
+        variesBy: {
+          aspectsImageVariesBy: variesByAspects,
+          specifications: variesByAspects.map((aspect) => ({
+            name: aspect,
+            values: [...new Set(data.variants.flatMap((v) => v.variantAspects[aspect] || []))],
+          })),
         },
       });
-      createdSkus.push(variant.sku);
-    }
+      groupCreated = true;
 
-    // Step 2: Create inventory item group
-    const variesByAspects = Object.keys(data.variants[0]?.variantAspects || {});
-    await this.ebayClient.createOrReplaceInventoryItemGroup(client, data.groupKey, {
-      title: data.title,
-      description: data.description,
-      imageUrls: data.imageUrls,
-      aspects: data.aspects,
-      variantSKUs: data.variants.map((v) => v.sku),
-      variesBy: {
-        aspectsImageVariesBy: variesByAspects,
-        specifications: variesByAspects.map((aspect) => ({
-          name: aspect,
-          values: [...new Set(data.variants.flatMap((v) => v.variantAspects[aspect] || []))],
-        })),
-      },
-    });
-
-    // Step 3: Publish via group (with rollback on failure)
-    let publishResult;
-    try {
+      // Step 3: Publish the group as a single multi-variation listing
       publishResult = await this.ebayClient.publishOfferByInventoryItemGroup(client, {
         inventoryItemGroupKey: data.groupKey,
         marketplaceId: connection.marketplaceId,
@@ -1228,39 +1304,98 @@ export class EbayListingsService {
           merchantLocationKey: data.merchantLocationKey,
         })),
       });
-    } catch (error) {
-      // Cleanup: delete created inventory items on publish failure
-      for (const sku of createdSkus) {
-        try { await this.ebayClient.deleteInventoryItem(client, sku); } catch { /* best effort */ }
+
+      // Build a SKU→offerId index so we can stamp the per-variant offer IDs
+      // on the local records in step 4. Without these, the inventory-sync
+      // cron (which filters externalOfferId IS NOT NULL) would skip every
+      // variation listing forever — silent inventory drift.
+      const offerIdBySku = new Map<string, string>();
+      for (const o of publishResult.offers ?? []) {
+        if (o.sku && o.offerId) offerIdBySku.set(o.sku, o.offerId);
       }
+      const groupListingId = publishResult.listingId;
+
+      // Step 4: Create local listing records atomically. If any one fails,
+      // none get committed and the catch block tears down the eBay-side
+      // resources too.
+      const listings = await this.prisma.$transaction(
+        data.variants.map((variant) =>
+          this.prisma.marketplaceListing.create({
+            data: {
+              tenantId,
+              connectionId: data.connectionId,
+              productListingId: variant.productListingId,
+              sku: variant.sku,
+              title: variant.title,
+              description: variant.description,
+              price: new Decimal(variant.price),
+              quantity: variant.quantity,
+              condition: variant.condition,
+              categoryId: data.categoryId,
+              status: ListingStatus.PUBLISHED,
+              syncStatus: SyncStatus.SYNCED,
+              publishedAt: new Date(),
+              inventoryGroupKey: data.groupKey,
+              externalOfferId: offerIdBySku.get(variant.sku) ?? null,
+              externalListingId: groupListingId ?? null,
+              isVariation: true,
+              variantAspects: variant.variantAspects as any,
+              platformData: JSON.stringify({ variantAspects: variant.variantAspects, currency }),
+            },
+          })
+        )
+      );
+
+      this.logger.log(
+        `Created multi-variation listing group ${data.groupKey} with ${data.variants.length} variants (listingId=${groupListingId})`
+      );
+      return { groupKey: data.groupKey, listings, publishResult };
+    } catch (error) {
+      // Best-effort rollback in reverse order. Each step is independent so
+      // we don't bail on the first failure — log and keep cleaning.
+      this.logger.error(
+        `Variation publish failed for group ${data.groupKey}; rolling back eBay-side resources`,
+        error
+      );
+
+      if (publishResult?.listingId) {
+        // Withdraw any per-SKU offers eBay accepted before the failure.
+        for (const o of publishResult.offers ?? []) {
+          if (!o.offerId) continue;
+          try {
+            await this.ebayClient.withdrawOffer(client, o.offerId);
+          } catch (e) {
+            this.logger.error(`Rollback: failed to withdraw offer ${o.offerId}`, e);
+          }
+        }
+      }
+
+      if (groupCreated) {
+        try {
+          await this.ebayClient.deleteInventoryItemGroup(client, data.groupKey);
+        } catch (e) {
+          this.logger.error(`Rollback: failed to delete inventory group ${data.groupKey}`, e);
+        }
+      }
+
+      for (const sku of createdSkus) {
+        try {
+          await this.ebayClient.deleteInventoryItem(client, sku);
+        } catch (e) {
+          this.logger.warn(
+            `Rollback: inline delete of variant inventory item ${sku} failed; scheduling retry`,
+            e
+          );
+          await this.scheduleInventoryItemDelete(
+            tenantId,
+            data.connectionId,
+            sku,
+            `Variation publish-rollback inline delete failed: ${(e as Error)?.message ?? 'unknown'}`,
+          );
+        }
+      }
+
       throw error;
     }
-
-    // Step 4: Create local listing records for each variant
-    const listings = [];
-    for (const variant of data.variants) {
-      const listing = await this.prisma.marketplaceListing.create({
-        data: {
-          tenantId,
-          connectionId: data.connectionId,
-          productListingId: variant.productListingId,
-          sku: variant.sku,
-          title: variant.title,
-          description: variant.description,
-          price: new Decimal(variant.price),
-          quantity: variant.quantity,
-          condition: variant.condition,
-          categoryId: data.categoryId,
-          status: ListingStatus.PUBLISHED,
-          publishedAt: new Date(),
-          inventoryGroupKey: data.groupKey,
-          platformData: JSON.stringify({ variantAspects: variant.variantAspects, currency }),
-        },
-      });
-      listings.push(listing);
-    }
-
-    this.logger.log(`Created multi-variation listing group ${data.groupKey} with ${data.variants.length} variants`);
-    return { groupKey: data.groupKey, listings, publishResult };
   }
 }

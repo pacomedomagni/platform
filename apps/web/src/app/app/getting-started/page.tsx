@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Card } from '@platform/ui';
 import { Store, Truck, Package, PartyPopper, Loader2, Upload, X, Check, Globe, Link2 } from 'lucide-react';
 import Link from 'next/link';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -25,16 +25,6 @@ interface StoreSettings {
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
-
-function authHeaders(): Record<string, string> {
-  const token = localStorage.getItem('access_token') || '';
-  const tenantId = localStorage.getItem('tenantId') || '';
-  return {
-    Authorization: `Bearer ${token}`,
-    'x-tenant-id': tenantId,
-    'Content-Type': 'application/json',
-  };
-}
 
 /* ------------------------------------------------------------------ */
 /*  Step indicator                                                     */
@@ -160,11 +150,8 @@ function GettingStartedInner() {
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const res = await fetch('/api/v1/store/admin/settings', {
-          headers: authHeaders(),
-        });
-        if (!res.ok) throw new Error('Failed to load settings');
-        const data: StoreSettings = unwrapJson(await res.json());
+        const res = await api.get<StoreSettings>('/v1/store/admin/settings');
+        const data = res.data;
         setBusinessName(data.businessName || '');
         if (data.defaultTaxRate != null) setTaxRatePercent(String(+(data.defaultTaxRate * 100).toFixed(4)));
         if (data.defaultShippingRate != null) setShippingRate(String(data.defaultShippingRate));
@@ -185,21 +172,17 @@ function GettingStartedInner() {
 
   const loadEbayConnections = useCallback(async () => {
     try {
-      const res = await fetch('/api/v1/marketplace/connections?platform=EBAY', {
-        headers: authHeaders(),
-      });
-      if (res.ok) {
-        const data = unwrapJson(await res.json());
-        setEbayConnections(
-          Array.isArray(data)
-            ? data.map((connection) => ({
-                id: connection.id,
-                name: connection.name,
-                isConnected: Boolean(connection.isConnected),
-              }))
-            : [],
-        );
-      }
+      const res = await api.get<any>('/v1/marketplace/connections', { params: { platform: 'EBAY' } });
+      const data = res.data;
+      setEbayConnections(
+        Array.isArray(data)
+          ? data.map((connection: any) => ({
+              id: connection.id,
+              name: connection.name,
+              isConnected: Boolean(connection.isConnected),
+            }))
+          : [],
+      );
     } catch {
       // Ignore; user can still continue without eBay.
     }
@@ -217,24 +200,16 @@ function GettingStartedInner() {
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch('/api/v1/store/admin/settings', {
-        method: 'PUT',
-        headers: authHeaders(),
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const err = unwrapJson(await res.json().catch(() => ({})));
-        throw new Error(err.message || 'Failed to save');
-      }
-      const updated = unwrapJson(await res.json());
-      if (updated.storeUrl) setStoreUrl(updated.storeUrl);
-      if (updated.customDomain !== undefined) setCustomDomain(updated.customDomain || '');
-      if (updated.customDomainStatus !== undefined) setCustomDomainStatus(updated.customDomainStatus);
-      if (updated.customDomainVerifiedAt !== undefined)
+      const res = await api.put<any>('/v1/store/admin/settings', body);
+      const updated = res.data;
+      if (updated?.storeUrl) setStoreUrl(updated.storeUrl);
+      if (updated?.customDomain !== undefined) setCustomDomain(updated.customDomain || '');
+      if (updated?.customDomainStatus !== undefined) setCustomDomainStatus(updated.customDomainStatus);
+      if (updated?.customDomainVerifiedAt !== undefined)
         setCustomDomainVerifiedAt(updated.customDomainVerifiedAt);
       return true;
     } catch (err: any) {
-      setError(err.message);
+      setError(err?.response?.data?.message || err.message || 'Failed to save');
       return false;
     } finally {
       setSaving(false);
@@ -301,24 +276,14 @@ function GettingStartedInner() {
     setVerifyingDomain(true);
     setError(null);
     try {
-      const res = await fetch('/api/v1/store/admin/settings/verify-domain', {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ customDomain: domain }),
-      });
-
-      if (!res.ok) {
-        const err = unwrapJson(await res.json().catch(() => ({})));
-        throw new Error(err.message || 'Failed to verify domain');
-      }
-
-      const data = unwrapJson(await res.json());
+      const res = await api.post<any>('/v1/store/admin/settings/verify-domain', { customDomain: domain });
+      const data = res.data;
       setCustomDomainStatus(data.status || 'pending');
       if (data.status === 'verified') {
         setCustomDomainVerifiedAt(data.verifiedAt || new Date().toISOString());
       }
     } catch (err: any) {
-      setError(err.message);
+      setError(err?.response?.data?.message || err.message || 'Failed to verify domain');
     } finally {
       setVerifyingDomain(false);
     }
@@ -333,23 +298,13 @@ function GettingStartedInner() {
     setConnectingEbay(true);
     setError(null);
     try {
-      const res = await fetch('/api/v1/marketplace/connections', {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({
-          platform: 'EBAY',
-          name: ebayName.trim(),
-          marketplaceId: ebayMarketplaceId,
-          isDefault: ebayConnections.length === 0,
-        }),
+      const res = await api.post<any>('/v1/marketplace/connections', {
+        platform: 'EBAY',
+        name: ebayName.trim(),
+        marketplaceId: ebayMarketplaceId,
+        isDefault: ebayConnections.length === 0,
       });
-
-      if (!res.ok) {
-        const err = unwrapJson(await res.json().catch(() => ({})));
-        throw new Error(err.error || err.message || 'Failed to create connection');
-      }
-
-      const connection = unwrapJson(await res.json());
+      const connection = res.data;
       setEbayConnections((prev) => [
         ...prev,
         { id: connection.id, name: connection.name, isConnected: Boolean(connection.isConnected) },
@@ -359,7 +314,7 @@ function GettingStartedInner() {
       const connectUrl = `/api/v1/marketplace/ebay/auth/connect?connectionId=${connection.id}`;
       window.open(connectUrl, '_blank');
     } catch (err: any) {
-      setError(err.message);
+      setError(err?.response?.data?.error || err?.response?.data?.message || err.message || 'Failed to create connection');
     } finally {
       setConnectingEbay(false);
     }
@@ -369,26 +324,15 @@ function GettingStartedInner() {
     setUploadingImage(true);
     setError(null);
     try {
-      const token = localStorage.getItem('access_token') || '';
-      const tenantId = localStorage.getItem('tenantId') || '';
       const formData = new FormData();
       formData.append('file', file);
 
-      const res = await fetch('/api/v1/store/admin/uploads', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'x-tenant-id': tenantId,
-        },
-        body: formData,
-      });
-
-      if (!res.ok) throw new Error('Failed to upload image');
-      const data = unwrapJson(await res.json());
+      const res = await api.post<any>('/v1/store/admin/uploads', formData);
+      const data = res.data;
       setProductImage(data.url || data.imageUrl || data.path);
       setProductImageName(file.name);
     } catch (err: any) {
-      setError(err.message);
+      setError(err?.response?.data?.message || err.message || 'Failed to upload image');
     } finally {
       setUploadingImage(false);
     }
@@ -410,18 +354,9 @@ function GettingStartedInner() {
           body.image = productImage;
         }
 
-        const res = await fetch('/api/v1/store/admin/products/simple', {
-          method: 'POST',
-          headers: authHeaders(),
-          body: JSON.stringify(body),
-        });
-
-        if (!res.ok) {
-          const err = unwrapJson(await res.json().catch(() => ({})));
-          throw new Error(err.message || 'Failed to create product');
-        }
+        await api.post('/v1/store/admin/products/simple', body);
       } catch (err: any) {
-        setError(err.message);
+        setError(err?.response?.data?.message || err.message || 'Failed to create product');
         setSaving(false);
         return;
       } finally {

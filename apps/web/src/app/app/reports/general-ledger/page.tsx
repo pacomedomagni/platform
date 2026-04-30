@@ -2,8 +2,12 @@
 
 import { useState } from 'react';
 import { Button, Input } from '@platform/ui';
+import { Download } from 'lucide-react';
 import api from '../../../../lib/api';
-import { ReportAlert, ReportCard, ReportEmpty, ReportFilters, ReportPage, ReportTable } from '../_components/report-shell';
+import { ReportAlert, ReportCard, ReportEmpty, ReportFilters, ReportLoading, ReportPage, ReportTable } from '../_components/report-shell';
+import { downloadCsv } from '../_components/report-format';
+import { useUrlFilters } from '@/lib/hooks/use-url-filters';
+import { CodeTypeahead } from '../_components/code-typeahead';
 
 type LedgerEntry = {
   posting_date: string;
@@ -52,6 +56,11 @@ export default function GeneralLedgerPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useUrlFilters(
+    { account, fromDate, toDate },
+    { account: setAccount, fromDate: setFromDate, toDate: setToDate },
+  );
+
   const load = async () => {
     setLoading(true);
     setError(null);
@@ -71,14 +80,37 @@ export default function GeneralLedgerPage() {
     }
   };
 
+  const handleExport = () => {
+    if (!data) return;
+    downloadCsv(
+      `general-ledger-${data.account || 'all'}`,
+      ['Posting Date', 'Voucher', 'Party', 'Against', 'Debit', 'Credit', 'Remarks', 'Balance'],
+      data.entries.map((r) => [
+        r.posting_date,
+        `${r.voucher_type} ${r.voucher_no}`,
+        r.party ?? '',
+        r.against ?? '',
+        formatCurrency(r.debit),
+        formatCurrency(r.credit),
+        r.remarks ?? '',
+        formatCurrency(r.balance),
+      ]),
+    );
+  };
+
   return (
-    <ReportPage title="General Ledger" description="Account transactions with running balance.">
+    <ReportPage
+      title="General Ledger"
+      description="Account transactions with running balance."
+      actions={
+        <Button variant="outline" size="sm" onClick={handleExport} disabled={!data || data.entries.length === 0}>
+          <Download className="w-4 h-4 mr-2" />
+          Export CSV
+        </Button>
+      }
+    >
       <ReportFilters className="md:grid-cols-5">
-        <Input
-          placeholder="Account"
-          value={account}
-          onChange={(e) => setAccount(e.target.value)}
-        />
+        <CodeTypeahead docType="Account" value={account} onChange={setAccount} placeholder="Account" />
         <Input
           type="date"
           value={fromDate}
@@ -116,7 +148,8 @@ export default function GeneralLedgerPage() {
                 </tr>
               </thead>
               <tbody>
-                {data.entries.length === 0 && <ReportEmpty colSpan={8} />}
+                {loading && <ReportLoading colSpan={8} />}
+                {!loading && data.entries.length === 0 && <ReportEmpty colSpan={8} />}
                 {data.entries.map((row, idx) => (
                   <tr key={`${row.voucher_type}-${row.voucher_no}-${idx}`} className="border-b last:border-0">
                     <td className="p-3">{row.posting_date}</td>

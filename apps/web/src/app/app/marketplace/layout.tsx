@@ -18,7 +18,7 @@ import {
   Star,
   Settings,
 } from 'lucide-react';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 const MARKETPLACE_NAV = [
   { label: 'Connections', href: '/app/marketplace/connections', icon: Link2 },
@@ -36,13 +36,6 @@ const MARKETPLACE_NAV = [
   { label: 'Settings', href: '/app/marketplace/settings', icon: Settings },
 ];
 
-function authHeaders(): Record<string, string> {
-  if (typeof window === 'undefined') return {};
-  const token = localStorage.getItem('access_token') || '';
-  const tenantId = localStorage.getItem('tenantId') || '';
-  return { Authorization: `Bearer ${token}`, 'x-tenant-id': tenantId };
-}
-
 export default function MarketplaceLayout({
   children,
 }: {
@@ -55,9 +48,9 @@ export default function MarketplaceLayout({
     let alive = true;
     const load = async () => {
       try {
-        const res = await fetch('/api/v1/marketplace/listings?status=ERROR&limit=1', { headers: authHeaders() });
-        if (!res.ok || !alive) return;
-        const data = unwrapJson(await res.json());
+        const res = await api.get('/v1/marketplace/listings', { params: { status: 'ERROR', limit: 1 } });
+        if (!alive) return;
+        const data: any = res.data;
         const total: number = data?.total ?? data?.count ?? (Array.isArray(data?.data) ? data.data.length : Array.isArray(data) ? data.length : 0);
         if (alive) setErrorCount(total);
       } catch {

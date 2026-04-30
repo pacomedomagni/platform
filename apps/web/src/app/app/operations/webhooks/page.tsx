@@ -113,15 +113,43 @@ export default function WebhooksPage() {
 
   const loadDeliveries = async (webhookId: string) => {
     try {
-      const res = await api.get(`/v1/operations/webhooks/${webhookId}/deliveries`);
+      // WH5: cap at 50 most-recent deliveries so the modal doesn't load
+      // the entire delivery history (multi-MB JSON for chatty webhooks).
+      // Pagination beyond 50 deferred — for now, "first 50" is the view.
+      const res = await api.get(`/v1/operations/webhooks/${webhookId}/deliveries?limit=50`);
       setDeliveries(res.data?.deliveries || res.data || []);
     } catch (e: any) {
       setError(e?.response?.data?.message || 'Failed to load deliveries');
     }
   };
 
+  // WH1: validate webhook URL/name/events before submitting. The previous
+  // shape allowed empty strings to reach the server; users got a generic
+  // 400 error toast and didn't know which field was wrong.
+  const validateWebhook = (): string | null => {
+    if (!formData.name?.trim()) return 'Name is required.';
+    if (!formData.url?.trim()) return 'URL is required.';
+    try {
+      const u = new URL(formData.url);
+      if (u.protocol !== 'https:' && u.protocol !== 'http:') {
+        return 'URL must use http or https.';
+      }
+    } catch {
+      return 'URL is not valid.';
+    }
+    if (!formData.events || formData.events.length === 0) {
+      return 'Select at least one event.';
+    }
+    return null;
+  };
+
   const createWebhook = async () => {
     setError(null);
+    const validationErr = validateWebhook();
+    if (validationErr) {
+      setError(validationErr);
+      return;
+    }
     try {
       await api.post('/v1/operations/webhooks', formData);
       setShowCreateModal(false);
@@ -136,6 +164,11 @@ export default function WebhooksPage() {
   const updateWebhook = async () => {
     if (!editingWebhook) return;
     setError(null);
+    const validationErr = validateWebhook();
+    if (validationErr) {
+      setError(validationErr);
+      return;
+    }
     try {
       await api.put(`/v1/operations/webhooks/${editingWebhook.id}`, formData);
       setEditingWebhook(null);
@@ -194,6 +227,16 @@ export default function WebhooksPage() {
 
   const toggleStatus = async (webhook: WebhookRecord) => {
     const newStatus = webhook.status === 'active' ? 'paused' : 'active';
+    // WH2: pausing a live webhook silently drops events for as long as
+    // it stays paused. The previous shape made the status badge itself
+    // a one-click toggle, which is trivially miss-clickable. Confirm.
+    if (newStatus === 'paused') {
+      const ok = window.confirm(
+        `Pause "${webhook.name}"? While paused, events will not be delivered. ` +
+          'You can re-enable it later.'
+      );
+      if (!ok) return;
+    }
     try {
       await api.put(`/v1/operations/webhooks/${webhook.id}`, { status: newStatus });
       setSuccess(`Webhook ${newStatus === 'active' ? 'activated' : 'paused'}`);

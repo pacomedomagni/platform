@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { use, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, Button, Input, Label, Textarea, Badge, ConfirmDialog, toast } from '@platform/ui';
 import {
@@ -59,7 +59,8 @@ interface CustomerStats {
   lastOrderDate: string | null;
 }
 
-export default function CustomerDetailPage({ params }: { params: { id: string } }) {
+export default function CustomerDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id: customerId } = use(params);
   const router = useRouter();
   const [customer, setCustomer] = useState<CustomerDetail | null>(null);
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
@@ -83,8 +84,8 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
   const loadCustomer = async () => {
     try {
       const [customerRes, ordersRes] = await Promise.all([
-        api.get(`/v1/store/admin/customers/${params.id}`),
-        api.get(`/v1/store/admin/customers/${params.id}/orders`),
+        api.get(`/v1/store/admin/customers/${customerId}`),
+        api.get(`/v1/store/admin/customers/${customerId}/orders`),
       ]);
 
       setCustomer(customerRes.data);
@@ -132,7 +133,7 @@ export default function CustomerDetailPage({ params }: { params: { id: string } 
 
   useEffect(() => {
     loadCustomer();
-  }, [params.id]);
+  }, [customerId]);
 
   const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
 

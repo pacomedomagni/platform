@@ -19,7 +19,7 @@ import {
   ShoppingCart,
   MessageSquare,
 } from 'lucide-react';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface ReturnDetail {
   id: string;
@@ -141,18 +141,15 @@ export default function MarketplaceReturnDetailPage() {
   const loadReturn = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/returns/${returnId}`, {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = unwrapJson(await res.json());
-        setReturnData(data);
-      } else {
-        toast({ title: 'Error', description: 'Failed to load return details', variant: 'destructive' });
-      }
-    } catch (error) {
+      const res = await api.get(`/v1/marketplace/returns/${returnId}`);
+      setReturnData(res.data);
+    } catch (error: any) {
       console.error('Failed to load return:', error);
-      toast({ title: 'Error', description: 'Failed to load return details', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.message || 'Failed to load return details',
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }
@@ -161,20 +158,16 @@ export default function MarketplaceReturnDetailPage() {
   const handleApprove = async () => {
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/returns/${returnId}/approve`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Return approved' });
-        loadReturn();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to approve return', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.post(`/v1/marketplace/returns/${returnId}/approve`);
+      toast({ title: 'Success', description: 'Return approved' });
+      loadReturn();
+    } catch (error: any) {
       console.error('Failed to approve return:', error);
-      toast({ title: 'Error', description: 'Failed to approve return', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to approve return',
+        variant: 'destructive',
+      });
     } finally {
       setActionLoading(false);
     }
@@ -188,23 +181,17 @@ export default function MarketplaceReturnDetailPage() {
     setDeclineModal(false);
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/returns/${returnId}/decline`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: declineReason }),
-      });
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Return declined' });
-        setDeclineReason('');
-        loadReturn();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to decline return', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.post(`/v1/marketplace/returns/${returnId}/decline`, { reason: declineReason });
+      toast({ title: 'Success', description: 'Return declined' });
+      setDeclineReason('');
+      loadReturn();
+    } catch (error: any) {
       console.error('Failed to decline return:', error);
-      toast({ title: 'Error', description: 'Failed to decline return', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to decline return',
+        variant: 'destructive',
+      });
     } finally {
       setActionLoading(false);
     }
@@ -218,24 +205,21 @@ export default function MarketplaceReturnDetailPage() {
     setRefundModal(false);
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/returns/${returnId}/refund`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: refundAmount, comment: refundComment.trim() || undefined }),
+      await api.post(`/v1/marketplace/returns/${returnId}/refund`, {
+        amount: refundAmount,
+        comment: refundComment.trim() || undefined,
       });
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Refund issued successfully' });
-        setRefundAmount('');
-        setRefundComment('');
-        loadReturn();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to issue refund', variant: 'destructive' });
-      }
-    } catch (error) {
+      toast({ title: 'Success', description: 'Refund issued successfully' });
+      setRefundAmount('');
+      setRefundComment('');
+      loadReturn();
+    } catch (error: any) {
       console.error('Failed to issue refund:', error);
-      toast({ title: 'Error', description: 'Failed to issue refund', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to issue refund',
+        variant: 'destructive',
+      });
     } finally {
       setActionLoading(false);
     }
@@ -244,18 +228,10 @@ export default function MarketplaceReturnDetailPage() {
   const handleMarkReceived = async () => {
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/returns/${returnId}/received`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Return marked as received' });
-        loadReturn();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to mark as received', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.post(`/v1/marketplace/returns/${returnId}/received`);
+      toast({ title: 'Success', description: 'Return marked as received' });
+      loadReturn();
+    } catch (error: any) {
       console.error('Failed to mark as received:', error);
       toast({ title: 'Error', description: 'Failed to mark as received', variant: 'destructive' });
     } finally {
@@ -270,23 +246,17 @@ export default function MarketplaceReturnDetailPage() {
     }
     setSendingMessage(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/returns/${returnId}/message`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: messageText }),
-      });
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Message sent' });
-        setMessageText('');
-        loadReturn();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to send message', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.post(`/v1/marketplace/returns/${returnId}/message`, { message: messageText });
+      toast({ title: 'Success', description: 'Message sent' });
+      setMessageText('');
+      loadReturn();
+    } catch (error: any) {
       console.error('Failed to send message:', error);
-      toast({ title: 'Error', description: 'Failed to send message', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to send message',
+        variant: 'destructive',
+      });
     } finally {
       setSendingMessage(false);
     }

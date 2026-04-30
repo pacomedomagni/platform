@@ -5,7 +5,7 @@ import { toast } from '@platform/ui';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Plus, RefreshCw, Search, X } from 'lucide-react';
 import Link from 'next/link';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface Connection {
   id: string;
@@ -50,15 +50,10 @@ export default function NewCampaignPage() {
 
   const loadConnections = async () => {
     try {
-      const res = await fetch('/api/v1/marketplace/connections', {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = unwrapJson<Connection[]>(await res.json());
-        setConnections(data);
-        if (data.length > 0) {
-          setSelectedConnection(data[0].id);
-        }
+      const res = await api.get<Connection[]>('/v1/marketplace/connections');
+      setConnections(res.data);
+      if (res.data.length > 0) {
+        setSelectedConnection(res.data[0].id);
       }
     } catch (error) {
       console.error('Failed to load connections:', error);
@@ -70,14 +65,14 @@ export default function NewCampaignPage() {
   const loadListings = async () => {
     setListingsLoading(true);
     try {
-      const res = await fetch(
-        `/api/v1/marketplace/listings?connectionId=${selectedConnection}&status=ACTIVE`,
-        { credentials: 'include' }
-      );
-      if (res.ok) {
-        const data = unwrapJson<Listing[]>(await res.json());
-        setListings(data);
-      }
+      // Backend ListingStatus values are lowercase (`draft`, `published`,
+      // `error`, etc.). The previous shape sent `ACTIVE` which matched no
+      // listings — Select Listings was permanently empty for users with
+      // real published inventory. See M90 in docs/ui-audit.md.
+      const res = await api.get<Listing[]>('/v1/marketplace/listings', {
+        params: { connectionId: selectedConnection, status: 'published' },
+      });
+      setListings(res.data);
     } catch (error) {
       console.error('Failed to load listings:', error);
     } finally {
@@ -134,27 +129,16 @@ export default function NewCampaignPage() {
         body.dailyBudget = parseFloat(dailyBudget);
       }
 
-      const res = await fetch('/api/v1/marketplace/campaigns', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Campaign created successfully!' });
-        router.push('/app/marketplace/campaigns');
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({
-          title: 'Error',
-          description: error.error || 'Failed to create campaign',
-          variant: 'destructive',
-        });
-      }
-    } catch (error) {
+      await api.post('/v1/marketplace/campaigns', body);
+      toast({ title: 'Success', description: 'Campaign created successfully!' });
+      router.push('/app/marketplace/campaigns');
+    } catch (error: any) {
       console.error('Failed to create campaign:', error);
-      toast({ title: 'Error', description: 'Failed to create campaign', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to create campaign',
+        variant: 'destructive',
+      });
     } finally {
       setCreating(false);
     }

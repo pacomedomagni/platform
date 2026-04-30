@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Upload, X, Loader2, Sparkles, Package, Shirt, Coffee, Gift } from 'lucide-react';
 import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface Category {
   id: string;
@@ -72,25 +72,13 @@ export default function NewProductPage() {
 
   useUnsavedChanges(isDirty);
 
-  const getHeaders = useCallback(() => {
-    const token = localStorage.getItem('access_token');
-    const tenantId = localStorage.getItem('tenantId');
-    return {
-      Authorization: `Bearer ${token}`,
-      'x-tenant-id': tenantId || '',
-    };
-  }, []);
-
   useEffect(() => {
     const fetchCategories = async () => {
       setCategoriesLoading(true);
       try {
-        const headers = getHeaders();
-        const res = await fetch('/api/v1/store/categories', { headers });
-        if (res.ok) {
-          const data = unwrapJson(await res.json());
-          setCategories(Array.isArray(data) ? data : data.data ?? []);
-        }
+        const res = await api.get<any>('/v1/store/categories');
+        const data = res.data;
+        setCategories(Array.isArray(data) ? data : data?.data ?? []);
       } catch {
         // Categories are optional; silently fail
       } finally {
@@ -98,7 +86,7 @@ export default function NewProductPage() {
       }
     };
     fetchCategories();
-  }, [getHeaders]);
+  }, []);
 
   const applyTemplate = (template: typeof PRODUCT_TEMPLATES[0]) => {
     if (template.displayName) setDisplayName(template.displayName);
@@ -120,26 +108,12 @@ export default function NewProductPage() {
         const formData = new FormData();
         formData.append('file', files[i]);
 
-        const headers = getHeaders();
-        const res = await fetch('/api/v1/store/admin/uploads', {
-          method: 'POST',
-          headers: {
-            Authorization: headers.Authorization,
-            'x-tenant-id': headers['x-tenant-id'],
-          },
-          body: formData,
-        });
-
-        if (!res.ok) {
-          throw new Error(`Failed to upload ${files[i].name}`);
-        }
-
-        const data = unwrapJson(await res.json());
-        setImages((prev) => [...prev, data.url]);
+        const res = await api.post<{ url: string }>('/v1/store/admin/uploads', formData);
+        setImages((prev) => [...prev, res.data.url]);
         setIsDirty(true);
       } catch (err: any) {
         console.error('Upload failed:', err);
-        setError(err.message || 'Image upload failed');
+        setError(err?.response?.data?.message || err.message || `Failed to upload ${files[i].name}`);
       }
     }
 
@@ -168,7 +142,6 @@ export default function NewProductPage() {
     setError(null);
 
     try {
-      const headers = getHeaders();
       const body: Record<string, any> = {
         name: displayName.trim(),
         price: parseFloat(price),
@@ -189,25 +162,13 @@ export default function NewProductPage() {
         body.categoryId = categoryId;
       }
 
-      const res = await fetch('/api/v1/store/admin/products/simple', {
-        method: 'POST',
-        headers: {
-          ...headers,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) {
-        const errData = unwrapJson(await res.json().catch(() => null));
-        throw new Error(errData?.message || 'Failed to create product');
-      }
+      await api.post('/v1/store/admin/products/simple', body);
 
       setIsDirty(false);
       router.push('/app/products');
     } catch (err: any) {
       console.error('Failed to create product:', err);
-      setError(err.message || 'Something went wrong');
+      setError(err?.response?.data?.message || err.message || 'Something went wrong');
     } finally {
       setSubmitting(false);
     }

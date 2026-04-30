@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface TenantPaymentInfo {
   paymentProvider: string | null;
@@ -26,12 +26,8 @@ export default function PaymentSettingsPage() {
   const fetchPaymentInfo = useCallback(async () => {
     if (!tenantId) return;
     try {
-      const token = localStorage.getItem('access_token');
-      const res = await fetch(`/api/v1/onboarding/${tenantId}/status`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Failed to fetch payment info');
-      const data = unwrapJson(await res.json());
+      const res = await api.get<any>(`/v1/onboarding/${tenantId}/status`);
+      const data = res.data;
       setInfo({
         paymentProvider: data.paymentProvider,
         paymentProviderStatus: data.paymentProviderStatus,
@@ -44,7 +40,7 @@ export default function PaymentSettingsPage() {
         platformFeeFixed: data.platformFeeFixed || 0.30,
       });
     } catch (err: any) {
-      setError(err.message);
+      setError(err?.response?.data?.message || err.message || 'Failed to fetch payment info');
     } finally {
       setLoading(false);
     }
@@ -56,31 +52,28 @@ export default function PaymentSettingsPage() {
 
   const handleOpenStripeDashboard = async () => {
     try {
-      const token = localStorage.getItem('access_token');
-      const res = await fetch(`/api/v1/onboarding/${tenantId}/stripe/dashboard`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Failed to get dashboard link');
-      const { url } = unwrapJson(await res.json());
-      window.open(url, '_blank');
+      const res = await api.get<{ url: string }>(`/v1/onboarding/${tenantId}/stripe/dashboard`);
+      window.open(res.data.url, '_blank');
     } catch (err: any) {
-      setError(err.message);
+      setError(err?.response?.data?.message || err.message || 'Failed to get dashboard link');
     }
   };
 
   const handleReconnect = async () => {
+    setError(null);
     setIsReconnecting(true);
     try {
-      const token = localStorage.getItem('access_token');
-      const res = await fetch(`/api/v1/onboarding/${tenantId}/payment/initiate`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Failed to initiate reconnection');
-      const { url } = unwrapJson(await res.json());
-      window.location.href = url;
+      const res = await api.post<{ url?: string }>(`/v1/onboarding/${tenantId}/payment/initiate`);
+      if (!res.data.url) throw new Error('Server returned no reconnection URL');
+      window.location.href = res.data.url;
+      // PA2: if the redirect is intercepted (popup blocker, mixed-content
+      // block, slow nav) the button would otherwise stay "Redirecting..."
+      // forever. Re-enable after a short window so the user can click
+      // again. The browser-side navigation usually wins; this is just a
+      // safety net.
+      setTimeout(() => setIsReconnecting(false), 5000);
     } catch (err: any) {
-      setError(err.message);
+      setError(err?.response?.data?.message || err.message || 'Failed to initiate reconnection');
       setIsReconnecting(false);
     }
   };
@@ -157,6 +150,23 @@ export default function PaymentSettingsPage() {
                 >
                   Open Stripe Dashboard
                 </button>
+              )}
+
+              {/*
+                PA5: Square users had no manage action at all when status
+                was 'active'. Send them to Square's seller dashboard.
+                Square doesn't expose a per-merchant deeplink in the same
+                way Stripe does, so we open the generic dashboard.
+              */}
+              {info.paymentProviderStatus === 'active' && info.paymentProvider === 'square' && (
+                <a
+                  href="https://app.squareup.com/dashboard"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Open Square Dashboard
+                </a>
               )}
 
               {info.paymentProviderStatus === 'disabled' && (

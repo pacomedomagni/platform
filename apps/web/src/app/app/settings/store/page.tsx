@@ -2,7 +2,9 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { unwrapJson } from '@/lib/admin-fetch';
+import { useRouter } from 'next/navigation';
+import api from '@/lib/api';
+import { useUnsavedChangesWarning } from '@/lib/hooks/use-unsaved-changes-warning';
 
 interface StoreSettings {
   businessName: string;
@@ -12,6 +14,7 @@ interface StoreSettings {
 }
 
 export default function StoreDetailsPage() {
+  const router = useRouter();
   const [settings, setSettings] = useState<StoreSettings | null>(null);
   const [businessName, setBusinessName] = useState('');
   const [loading, setLoading] = useState(true);
@@ -19,22 +22,20 @@ export default function StoreDetailsPage() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  // ST4: warn before discarding unsaved edits. Dirty when the local field
+  // diverges from what the server returned. Suppressed during save (the
+  // success path persists then leaves the field equal to the new server
+  // state on the next tick).
+  const isDirty = !saving && settings != null && businessName !== (settings.businessName || '');
+  useUnsavedChangesWarning(isDirty);
+
   const fetchSettings = useCallback(async () => {
     try {
-      const token = localStorage.getItem('access_token');
-      const tenantId = localStorage.getItem('tenantId');
-      const res = await fetch('/api/v1/store/admin/settings', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'x-tenant-id': tenantId || '',
-        },
-      });
-      if (!res.ok) throw new Error('Failed to fetch store settings');
-      const data = unwrapJson(await res.json());
-      setSettings(data);
-      setBusinessName(data.businessName || '');
+      const res = await api.get<StoreSettings>('/v1/store/admin/settings');
+      setSettings(res.data);
+      setBusinessName(res.data.businessName || '');
     } catch (err: any) {
-      setError(err.message);
+      setError(err?.response?.data?.message || err.message || 'Failed to fetch store settings');
     } finally {
       setLoading(false);
     }
@@ -51,22 +52,14 @@ export default function StoreDetailsPage() {
     setSuccessMessage(null);
 
     try {
-      const token = localStorage.getItem('access_token');
-      const tenantId = localStorage.getItem('tenantId');
-      const res = await fetch('/api/v1/store/admin/settings', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-          'x-tenant-id': tenantId || '',
-        },
-        body: JSON.stringify({ businessName }),
-      });
-      if (!res.ok) throw new Error('Failed to save store settings');
+      await api.put('/v1/store/admin/settings', { businessName });
+      // Sync the cached settings so the dirty check goes back to false
+      // immediately after a successful save.
+      setSettings((prev) => (prev ? { ...prev, businessName } : prev));
       setSuccessMessage('Store details saved successfully.');
       setTimeout(() => setSuccessMessage(null), 4000);
     } catch (err: any) {
-      setError(err.message);
+      setError(err?.response?.data?.message || err.message || 'Failed to save store settings');
     } finally {
       setSaving(false);
     }
@@ -217,12 +210,24 @@ export default function StoreDetailsPage() {
             >
               {saving ? 'Saving...' : 'Save Changes'}
             </button>
-            <Link
-              href="/app/settings"
+            <button
+              type="button"
+              onClick={() => {
+                // ST4: confirm if the user has unsaved changes. SPA
+                // navigation doesn't trigger beforeunload — we have to ask
+                // here too.
+                if (isDirty) {
+                  const proceed = window.confirm(
+                    'You have unsaved changes. Discard and leave this page?',
+                  );
+                  if (!proceed) return;
+                }
+                router.push('/app/settings');
+              }}
               className="rounded-lg border border-slate-300 px-5 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               Cancel
-            </Link>
+            </button>
           </div>
         </div>
       </form>

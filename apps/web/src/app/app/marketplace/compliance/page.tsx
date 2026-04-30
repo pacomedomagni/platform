@@ -15,7 +15,7 @@ import {
   Package,
   Tag,
 } from 'lucide-react';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -353,12 +353,9 @@ export default function MarketplaceCompliancePage() {
 
   const loadConnections = async () => {
     try {
-      const res = await fetch('/api/v1/marketplace/connections', { credentials: 'include' });
-      if (res.ok) {
-        const data = unwrapJson<Connection[]>(await res.json());
-        setConnections(data);
-        if (data.length > 0) setSelectedConnection(data[0].id);
-      }
+      const res = await api.get<Connection[]>('/v1/marketplace/connections');
+      setConnections(res.data);
+      if (res.data.length > 0) setSelectedConnection(res.data[0].id);
     } catch {
       toast({ title: 'Error', description: 'Failed to load connections', variant: 'destructive' });
     } finally {
@@ -370,16 +367,11 @@ export default function MarketplaceCompliancePage() {
     if (!selectedConnection) return;
     setLoadingSummary(true);
     try {
-      const params = new URLSearchParams({ connectionId: selectedConnection });
-      const res = await fetch(`/api/v1/marketplace/compliance/summary?${params}`, {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = unwrapJson<{ violationSummaries: ViolationSummaryItem[] }>(await res.json());
-        setSummary(data.violationSummaries ?? []);
-      } else {
-        setSummary([]);
-      }
+      const res = await api.get<{ violationSummaries: ViolationSummaryItem[] }>(
+        '/v1/marketplace/compliance/summary',
+        { params: { connectionId: selectedConnection } },
+      );
+      setSummary(res.data.violationSummaries ?? []);
     } catch {
       setSummary([]);
     } finally {
@@ -391,27 +383,20 @@ export default function MarketplaceCompliancePage() {
     if (!selectedConnection) return;
     setLoadingViolations(true);
     try {
-      const params = new URLSearchParams({
+      const params: Record<string, string | number> = {
         connectionId: selectedConnection,
-        limit: String(PAGE_SIZE),
-        offset: String(currentOffset),
-      });
-      if (selectedType !== 'all') params.set('complianceType', selectedType);
-      if (selectedStatus !== 'all') params.set('status', selectedStatus);
+        limit: PAGE_SIZE,
+        offset: currentOffset,
+      };
+      if (selectedType !== 'all') params.complianceType = selectedType;
+      if (selectedStatus !== 'all') params.status = selectedStatus;
 
-      const res = await fetch(`/api/v1/marketplace/compliance/local?${params}`, {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = unwrapJson<{ violations: LocalViolation[]; total: number }>(
-          await res.json()
-        );
-        setViolations(data.violations ?? []);
-        setTotal(data.total ?? 0);
-      } else {
-        setViolations([]);
-        setTotal(0);
-      }
+      const res = await api.get<{ violations: LocalViolation[]; total: number }>(
+        '/v1/marketplace/compliance/local',
+        { params },
+      );
+      setViolations(res.data.violations ?? []);
+      setTotal(res.data.total ?? 0);
     } catch {
       toast({ title: 'Error', description: 'Failed to load violations', variant: 'destructive' });
       setViolations([]);
@@ -441,27 +426,18 @@ export default function MarketplaceCompliancePage() {
     if (!selectedConnection) return;
     setSyncing(true);
     try {
-      const res = await fetch('/api/v1/marketplace/compliance/sync', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ connectionId: selectedConnection }),
+      const res = await api.post<{ message: string }>('/v1/marketplace/compliance/sync', {
+        connectionId: selectedConnection,
       });
-      if (res.ok) {
-        const data = unwrapJson<{ message: string }>(await res.json());
-        toast({ title: 'Sync complete', description: data.message });
-        loadSummary();
-        loadViolations(offset);
-      } else {
-        const err = unwrapJson(await res.json());
-        toast({
-          title: 'Sync failed',
-          description: (err as any).error || 'Failed to sync violations',
-          variant: 'destructive',
-        });
-      }
-    } catch {
-      toast({ title: 'Error', description: 'Failed to sync violations', variant: 'destructive' });
+      toast({ title: 'Sync complete', description: res.data.message });
+      loadSummary();
+      loadViolations(offset);
+    } catch (err: any) {
+      toast({
+        title: 'Sync failed',
+        description: err?.response?.data?.error || err?.response?.data?.message || 'Failed to sync violations',
+        variant: 'destructive',
+      });
     } finally {
       setSyncing(false);
     }
@@ -475,26 +451,19 @@ export default function MarketplaceCompliancePage() {
   ) => {
     setSuppressLoading(id);
     try {
-      const res = await fetch(`/api/v1/marketplace/compliance/${listingId}/suppress`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ connectionId, complianceType }),
+      await api.post(`/v1/marketplace/compliance/${listingId}/suppress`, {
+        connectionId,
+        complianceType,
       });
-      if (res.ok) {
-        toast({ title: 'Suppressed', description: `Violation for listing ${listingId} suppressed` });
-        loadViolations(offset);
-        loadSummary();
-      } else {
-        const err = unwrapJson(await res.json());
-        toast({
-          title: 'Error',
-          description: (err as any).error || 'Failed to suppress violation',
-          variant: 'destructive',
-        });
-      }
-    } catch {
-      toast({ title: 'Error', description: 'Failed to suppress violation', variant: 'destructive' });
+      toast({ title: 'Suppressed', description: `Violation for listing ${listingId} suppressed` });
+      loadViolations(offset);
+      loadSummary();
+    } catch (err: any) {
+      toast({
+        title: 'Error',
+        description: err?.response?.data?.error || err?.response?.data?.message || 'Failed to suppress violation',
+        variant: 'destructive',
+      });
     } finally {
       setSuppressLoading(null);
     }

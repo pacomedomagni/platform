@@ -13,15 +13,15 @@ export interface AuthenticatedUser {
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor() {
-    const devSecret = process.env.JWT_SECRET;
+    const devSecret = process.env['JWT_SECRET'];
     // Phase 3 hardening: even if env-validator regresses or someone explicitly
     // sets ENABLE_DEV_PASSWORD_LOGIN=true in production, the strategy itself
     // refuses to ever accept HS256 in prod. The only path that should ever
     // reach the dev JWKS fallback is non-production with the flag explicitly on.
-    const isProd = process.env.NODE_ENV === 'production';
+    const isProd = process.env['NODE_ENV'] === 'production';
     const useDevJwt =
       !isProd &&
-      process.env.ENABLE_DEV_PASSWORD_LOGIN === 'true' &&
+      process.env['ENABLE_DEV_PASSWORD_LOGIN'] === 'true' &&
       Boolean(devSecret);
 
     super({
@@ -29,7 +29,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       ignoreExpiration: false,
       ...(useDevJwt
         ? {
-            secretOrKey: devSecret,
+            // useDevJwt is gated on Boolean(devSecret), so the cast is safe.
+            secretOrKey: devSecret as string,
             algorithms: ['HS256'],
             issuer: 'admin',
             audience: 'admin',
@@ -39,9 +40,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
               cache: true,
               rateLimit: true,
               jwksRequestsPerMinute: 5,
-              jwksUri: process.env.KEYCLOAK_JWKS_URI || 'http://localhost:8080/realms/noslag/protocol/openid-connect/certs',
+              jwksUri:
+                process.env['KEYCLOAK_JWKS_URI'] ||
+                'http://localhost:8080/realms/noslag/protocol/openid-connect/certs',
             }),
-            issuer: process.env.KEYCLOAK_ISSUER || 'http://localhost:8080/realms/noslag',
+            issuer: process.env['KEYCLOAK_ISSUER'] || 'http://localhost:8080/realms/noslag',
             algorithms: ['RS256'],
           }),
     });

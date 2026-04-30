@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { use, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, Button, Badge, Textarea, ConfirmDialog, PromptDialog, toast } from '@platform/ui';
 import {
@@ -52,10 +52,14 @@ interface OrderDetail {
   cancelledAt?: string | null;
 }
 
-export default function OrderDetailPage({ params }: { params: { id: string } }) {
+export default function OrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  // Next.js 16: params is a Promise; React.use() unwraps it inside a client
+  // component the first time the component renders.
+  const { id: orderId } = use(params);
   const router = useRouter();
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [adminNotes, setAdminNotes] = useState('');
   const [showRefundModal, setShowRefundModal] = useState(false);
   const [trackingInfo, setTrackingInfo] = useState({ carrier: '', number: '' });
@@ -65,14 +69,29 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
 
   const loadOrder = async () => {
     try {
-      const res = await api.get(`/v1/store/orders/admin/${params.id}`);
+      const res = await api.get(`/v1/store/orders/admin/${orderId}`);
       setOrder(res.data);
       setTrackingInfo({
         carrier: res.data.shippingCarrier || '',
         number: res.data.trackingNumber || '',
       });
+      // Populate the admin-notes textarea from the loaded order. Was
+      // previously initialized to '' and never re-seeded; saving notes
+      // overwrote whatever was on the server with an empty string. See
+      // OD4 in docs/ui-audit.md.
+      setAdminNotes(res.data.adminNotes ?? '');
+      setLoadFailed(false);
     } catch (error: any) {
-      console.error('Failed to load order:', error);
+      // Distinguish "not found" (404) from real load failure so the
+      // empty-state below doesn't misdirect users with a 500. See OD2.
+      const status = error?.response?.status;
+      if (status === 404) {
+        setOrder(null);
+        setLoadFailed(false);
+      } else {
+        console.error('Failed to load order:', error);
+        setLoadFailed(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -189,7 +208,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
 
   useEffect(() => {
     loadOrder();
-  }, [params.id]);
+  }, [orderId]);
 
   const formatCurrency = (amount: number) => {
     const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US';
@@ -221,10 +240,24 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
     return (
       <div className="p-6 lg:p-8">
         <div className="text-center py-12">
-          <p className="text-muted-foreground">Order not found</p>
-          <Button variant="outline" className="mt-4" onClick={() => router.push('/app/orders')}>
-            Back to Orders
-          </Button>
+          {loadFailed ? (
+            <>
+              <p className="text-muted-foreground">Could not load this order</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Network or server error. The order may still exist.
+              </p>
+              <Button variant="outline" className="mt-4" onClick={() => loadOrder()}>
+                Try again
+              </Button>
+            </>
+          ) : (
+            <>
+              <p className="text-muted-foreground">Order not found</p>
+              <Button variant="outline" className="mt-4" onClick={() => router.push('/app/orders')}>
+                Back to Orders
+              </Button>
+            </>
+          )}
         </div>
       </div>
     );

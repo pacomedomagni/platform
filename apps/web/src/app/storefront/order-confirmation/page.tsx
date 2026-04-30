@@ -76,15 +76,41 @@ function OrderConfirmationContent() {
     setReordering(true);
     try {
       // Sequential adds — the cart API isn't bulk-aware in this codebase.
+      // Use the snapshot's product/variant IDs (NOT the line-item id, which
+      // was the previous bug — passing a line-item id to addItem silently
+      // failed and the user was told "items added" when zero had been).
+      let added = 0;
+      let skipped = 0;
       for (const item of order.items) {
+        const idToAdd = item.variantId ?? item.productId;
+        if (!idToAdd) {
+          // Snapshot-only line (product deleted since order placed). Skip.
+          skipped += 1;
+          continue;
+        }
         // eslint-disable-next-line no-await-in-loop
-        await addItem(item.id, item.quantity).catch(() => {
-          // skip individual item failures so the rest still go through
-        });
+        const ok = await addItem(idToAdd, item.quantity)
+          .then(() => true)
+          .catch(() => false);
+        if (ok) added += 1;
+        else skipped += 1;
       }
+
+      if (added === 0) {
+        toast({
+          title: 'Could not reorder',
+          description:
+            skipped > 0
+              ? `${skipped} item${skipped === 1 ? '' : 's'} are no longer available.`
+              : 'Something went wrong adding these items to your cart.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
       toast({
-        title: 'Items added to cart',
-        description: `${order.items.length} item${order.items.length === 1 ? '' : 's'} added`,
+        title: `${added} item${added === 1 ? '' : 's'} added to cart`,
+        description: skipped > 0 ? `${skipped} item${skipped === 1 ? '' : 's'} skipped (no longer available).` : undefined,
         action: (
           <ToastAction altText="View cart" onClick={() => router.push('/storefront/cart')}>
             View cart

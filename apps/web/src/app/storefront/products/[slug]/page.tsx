@@ -6,8 +6,7 @@ import { Check, ShieldCheck, Truck } from 'lucide-react';
 import { ProductCard } from '../../_components/product-card';
 import { ProductReviews } from './_components/product-reviews';
 import { ProductPrice } from './_components/product-price';
-import { VariantSelector } from './_components/variant-selector';
-import { AddToCartButton } from './_components/add-to-cart-button';
+import { BuySection } from './_components/buy-section';
 import { ImageGallery } from './_components/image-gallery';
 import {
   LocalizedProductName,
@@ -21,7 +20,8 @@ import {
 } from '@/lib/seo/schema';
 
 type ProductPageProps = {
-  params: { slug: string };
+  // Next.js 16: dynamic-route params arrive as a Promise.
+  params: Promise<{ slug: string }>;
 };
 
 // Base URL for canonical URLs and schemas
@@ -32,7 +32,8 @@ const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://storefront.example
  * Improves SEO with product-specific titles, descriptions, and OpenGraph data
  */
 export async function generateMetadata({ params }: ProductPageProps): Promise<Metadata> {
-  const product = await productsApi.get(params.slug).catch(() => null);
+  const { slug } = await params;
+  const product = await productsApi.get(slug).catch(() => null);
 
   if (!product) {
     return {
@@ -75,7 +76,8 @@ export async function generateMetadata({ params }: ProductPageProps): Promise<Me
 }
 
 export default async function ProductPage({ params }: ProductPageProps) {
-  const product = await productsApi.get(params.slug).catch(() => null);
+  const { slug } = await params;
+  const product = await productsApi.get(slug).catch(() => null);
 
   if (!product) {
     notFound();
@@ -198,37 +200,24 @@ export default async function ProductPage({ params }: ProductPageProps) {
             <ProductPrice price={product.price} compareAtPrice={product.compareAtPrice} />
           </div>
 
-          {/* Variant Selector */}
-          <VariantSelector
-            productSlug={product.slug}
+          {/*
+            Client wrapper that owns selectedVariant state and shares it
+            with both AddToCartButton renders. Replaces the previous shape
+            where the variant selector and AddToCart were independent —
+            buyers selecting Red/XL silently got the default SKU added.
+            See SF-PD1/SF-PD2 in docs/ui-audit.md.
+          */}
+          <BuySection
             productId={product.id}
+            productSlug={product.slug}
+            productName={product.displayName}
             basePrice={product.price}
+            stockStatus={product.stockStatus}
+            leadTime={product.leadTime ?? null}
           />
-          <Card className="space-y-4 border-border bg-card p-5 shadow-sm">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Availability</span>
-              <span className="font-semibold text-emerald-600">
-                {product.stockStatus === 'in_stock' ? 'In Stock' : product.stockStatus.replace('_', ' ')}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Lead time</span>
-              <span className="font-semibold text-foreground">3-5 business days</span>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <AddToCartButton
-                productId={product.id}
-                productSlug={product.slug}
-                productName={product.displayName}
-              />
-              <AddToCartButton
-                productId={product.id}
-                productSlug={product.slug}
-                productName={product.displayName}
-                buyNow
-              />
-            </div>
-          </Card>
+          {/* Hardcoded "3-5 business days" lead-time copy moved into BuySection;
+             when the API returns a real leadTime it is used, otherwise the
+             field is hidden rather than lying to the buyer. */}
           <div className="grid gap-3 md:grid-cols-3">
             {[
               { title: 'Quality guarantee', icon: ShieldCheck },

@@ -1,6 +1,7 @@
 import { Injectable, Logger, BadRequestException, OnModuleDestroy } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { PrismaService, bypassTenantGuard, runWithTenant } from '@platform/db';
+import { Prisma } from '@prisma/client';
 import { EbayStoreService } from './ebay-store.service';
 import { MarketplaceAuditService } from '../shared/marketplace-audit.service';
 
@@ -144,6 +145,17 @@ export class EbayAuthService implements OnModuleDestroy {
           accessTokenExpiry: new Date(Date.now() + tokens.expires_in * 1000),
         });
 
+        // Fetch and persist the eBay seller's userId. This is required for
+        // (a) the GDPR account-deletion webhook to find which connection
+        //     to anonymize, and (b) routing inbound order notifications to
+        //     the right tenant before the order has been synced.
+        // The lookup uses platformConfig.ebayUserId — without this write
+        // the entire account-deletion compliance path silently no-ops.
+        await this.fetchAndSaveEbayUserId(
+          connectionId,
+          tokens.access_token,
+        );
+
         // Fetch and save business policies (pass tenantId explicitly since OAuth callback has no CLS context)
         await this.ebayStore.fetchAndSaveBusinessPolicies(connectionId, tenantId);
 
@@ -169,6 +181,81 @@ export class EbayAuthService implements OnModuleDestroy {
         throw new BadRequestException('OAuth connection failed. Please try again.');
       }
     });
+  }
+
+  /**
+   * Fetch the connected eBay seller's identity via the Commerce Identity API
+   * and persist it in MarketplaceConnection.platformConfig.ebayUserId.
+   *
+   * Note the `apiz` subdomain — production eBay routes the Commerce APIs
+   * under apiz.ebay.com, not api.ebay.com. Sandbox uses apiz.sandbox.
+   */
+  private async fetchAndSaveEbayUserId(
+    connectionId: string,
+    accessToken: string,
+  ): Promise<void> {
+    let userId: string;
+    let username: string | null;
+
+    if (process.env['MOCK_EXTERNAL_SERVICES'] === 'true') {
+      userId = `mock_user_${connectionId.slice(0, 8)}`;
+      username = null;
+    } else {
+      const isSandbox = process.env['EBAY_SANDBOX'] === 'true';
+      const baseUrl = isSandbox
+        ? 'https://apiz.sandbox.ebay.com'
+        : 'https://apiz.ebay.com';
+      const url = `${baseUrl}/commerce/identity/v1/user`;
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => '<no body>');
+        // Hard-fail. Without ebayUserId the connection is unusable for
+        // webhook-driven flows (account-deletion compliance, real-time
+        // order notifications). Better to fail OAuth here than to ship a
+        // half-broken connection that silently misroutes notifications.
+        throw new Error(
+          `Failed to fetch eBay user identity: ${response.status} - ${errorText}`,
+        );
+      }
+
+      const data = (await response.json()) as { userId?: string; username?: string };
+      if (!data.userId) {
+        throw new Error('eBay identity response missing userId');
+      }
+      userId = data.userId;
+      username = data.username ?? null;
+    }
+
+    // Prisma treats Json columns as scalars, so the naive
+    //   data: { platformConfig: { ebayUserId, ebayUsername } }
+    // would clobber any other keys that future code adds to platformConfig.
+    // Read-modify-write under a transaction so concurrent writers can't
+    // race and lose keys.
+    await this.prisma.$transaction(async (tx) => {
+      const current = await tx.marketplaceConnection.findUniqueOrThrow({
+        where: { id: connectionId },
+        select: { platformConfig: true },
+      });
+      const merged = {
+        ...((current.platformConfig as Record<string, unknown>) ?? {}),
+        ebayUserId: userId,
+        ebayUsername: username,
+      };
+      await tx.marketplaceConnection.update({
+        where: { id: connectionId },
+        data: { platformConfig: merged as Prisma.InputJsonValue },
+      });
+    });
+
+    this.logger.log(`Saved ebayUserId=${userId} for connection ${connectionId}`);
   }
 
   /**

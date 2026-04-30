@@ -2764,11 +2764,14 @@ model MarketplaceListing {
 
   @@unique([connectionId, sku])
   @@unique([tenantId, externalOfferId])
-  @@unique([tenantId, externalListingId])
+  // externalListingId is NOT unique. A multi-variation listing is one
+  // eBay listing serving N variants — every variant row legitimately
+  // carries the same group listingId. Per-variant uniqueness lives on
+  // externalOfferId instead.
+  @@index([tenantId, externalListingId])
   @@index([tenantId, status])
   @@index([connectionId])
   @@index([productListingId])
-  @@index([externalListingId])
   @@map("marketplace_listings")
 }
 
@@ -2792,14 +2795,18 @@ model MarketplaceOrder {
   buyerUsername String
   buyerEmail    String?
 
-  // Shipping address
-  shippingName       String
-  shippingStreet1    String
+  // Shipping address. All fields nullable — digital-goods eBay orders
+  // ship no physical address at all, and even physical orders sometimes
+  // omit individual fields (state-less countries, PO boxes without
+  // addressLine1, etc.). Storing empty strings as a workaround broke
+  // every downstream shipping integration with blank-string addresses.
+  shippingName       String?
+  shippingStreet1    String?
   shippingStreet2    String?
-  shippingCity       String
+  shippingCity       String?
   shippingState      String?
-  shippingPostalCode String
-  shippingCountry    String
+  shippingPostalCode String?
+  shippingCountry    String?
 
   // Financial
   subtotal     Decimal @db.Decimal(18, 2)
@@ -3098,6 +3105,12 @@ enum OperationType {
   // Phase 3 W3.5: marketplace per-order sync failures route here so the
   // retry cron picks them up rather than relying on the next full sync run.
   MARKETPLACE_SYNC
+  // eBay's offer-purge is asynchronous; deleting the inventory item that
+  // backed a withdrawn offer can fail with "inventory item is referenced
+  // by an offer" until eBay finishes purging. Failed publish-rollback
+  // delete attempts route here for exponential-backoff retry instead of
+  // leaving orphans in the seller's eBay account.
+  EBAY_INVENTORY_ITEM_DELETE
 }
 
 enum OperationStatus {

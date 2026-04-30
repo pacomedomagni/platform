@@ -1,11 +1,13 @@
 'use client';
-import { Studio, DocTypeDefinition, Card, Button, toast } from '@platform/ui';
+import { Studio, DocTypeDefinition, Card, toast } from '@platform/ui';
 import { useState, useEffect } from 'react';
 import api from '../../../lib/api';
 
 export default function StudioPage() {
     const [docTypes, setDocTypes] = useState<DocTypeDefinition[]>([]);
     const [loading, setLoading] = useState(true);
+
+    const [loadError, setLoadError] = useState<string | null>(null);
 
     useEffect(() => {
         const fetchDocTypes = async () => {
@@ -16,6 +18,13 @@ export default function StudioPage() {
                 }
             } catch (err) {
                 console.error("Failed to fetch meta", err);
+                const msg = err instanceof Error ? err.message : 'Could not load DocTypes.';
+                setLoadError(msg);
+                toast({
+                    title: 'Could not load DocTypes',
+                    description: msg,
+                    variant: 'destructive',
+                });
             } finally {
                 setLoading(false);
             }
@@ -35,6 +44,22 @@ export default function StudioPage() {
     };
 
     if (loading) return <div className="p-8 text-sm text-slate-500">Loading Schema Engine...</div>;
+    if (loadError && docTypes.length === 0) {
+        return (
+            <div className="p-8">
+                <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-center">
+                    <p className="text-sm font-medium text-red-700">Could not load DocTypes</p>
+                    <p className="mt-1 text-xs text-red-600">{loadError}</p>
+                    <button
+                        onClick={() => window.location.reload()}
+                        className="mt-3 text-sm font-medium text-red-700 underline hover:no-underline"
+                    >
+                        Try again
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="p-6 lg:p-8 space-y-6">
@@ -43,7 +68,6 @@ export default function StudioPage() {
                     <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Studio Builder</h1>
                     <p className="text-sm text-slate-500">Design DocTypes, fields, and layouts.</p>
                 </div>
-                <Button variant="outline">Documentation</Button>
             </div>
             <Card className="p-4 md:p-6 bg-white/90 dark:bg-slate-950/80 backdrop-blur">
                 <Studio 

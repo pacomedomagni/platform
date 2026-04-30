@@ -6,11 +6,24 @@ WORKDIR /app
 COPY package*.json ./
 COPY .npmrc* ./
 
-# Install dependencies
-RUN npm install
+# Install dependencies. See apps/api/Dockerfile for the rationale on
+# `npm ci` + retry-tuning — same registry-flakiness mitigation.
+RUN npm config set fetch-retries 5 \
+ && npm config set fetch-retry-mintimeout 20000 \
+ && npm config set fetch-retry-maxtimeout 120000 \
+ && npm ci
 
 ENV NX_DAEMON=false
 ENV NEXT_TELEMETRY_DISABLED=1
+
+# Next.js 16 evaluates next.config.js `rewrites()` at build time, so the
+# proxy destination for /api/* gets baked into the standalone output.
+# The default in next.config.js is http://localhost:3000 (correct for
+# `nx serve web` on the developer host); when building inside docker we
+# need the API container's network hostname instead. Compose passes
+# this as a build arg.
+ARG API_INTERNAL_URL=http://noslag_api:3000
+ENV API_INTERNAL_URL=$API_INTERNAL_URL
 
 # Copy source code
 COPY . .

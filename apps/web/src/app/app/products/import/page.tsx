@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { Upload, FileText, CheckCircle, XCircle, Loader2, Download, AlertTriangle } from 'lucide-react';
 import { Card } from '@platform/ui';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface ImportJob {
   id: string;
@@ -20,15 +20,6 @@ interface ImportJob {
   createdAt: string;
 }
 
-function getHeaders() {
-  const token = localStorage.getItem('access_token');
-  const tenantId = localStorage.getItem('tenantId');
-  return {
-    Authorization: `Bearer ${token}`,
-    'x-tenant-id': tenantId || '',
-  };
-}
-
 export default function ProductImportPage() {
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -40,17 +31,12 @@ export default function ProductImportPage() {
 
   const pollJobStatus = useCallback(async (jobId: string) => {
     try {
-      const res = await fetch(`/api/v1/store/admin/products/import/${jobId}`, {
-        headers: getHeaders(),
-      });
-      if (res.ok) {
-        const data: ImportJob = unwrapJson(await res.json());
-        setActiveJob(data);
-        if (data.status === 'completed' || data.status === 'failed') {
-          if (pollRef.current) {
-            clearInterval(pollRef.current);
-            pollRef.current = null;
-          }
+      const res = await api.get<ImportJob>(`/v1/store/admin/products/import/${jobId}`);
+      setActiveJob(res.data);
+      if (res.data.status === 'completed' || res.data.status === 'failed') {
+        if (pollRef.current) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
         }
       }
     } catch {
@@ -74,30 +60,22 @@ export default function ProductImportPage() {
       const formData = new FormData();
       formData.append('file', file);
 
-      const headers = getHeaders();
-      const res = await fetch('/api/v1/store/admin/products/import', {
-        method: 'POST',
-        headers: {
-          Authorization: headers.Authorization,
-          'x-tenant-id': headers['x-tenant-id'],
-        },
-        body: formData,
-      });
+      // axios will set the multipart Content-Type with the correct boundary
+      // when given a FormData body. Auth + tenant headers attach via the
+      // request interceptor.
+      const res = await api.post<{ jobId: string }>(
+        '/v1/store/admin/products/import',
+        formData,
+      );
 
-      if (!res.ok) {
-        const err = unwrapJson(await res.json());
-        throw new Error(err.message || 'Upload failed');
-      }
-
-      const data = unwrapJson(await res.json());
       setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
 
       // Start polling
-      pollRef.current = setInterval(() => pollJobStatus(data.jobId), 2000);
-      await pollJobStatus(data.jobId);
+      pollRef.current = setInterval(() => pollJobStatus(res.data.jobId), 2000);
+      await pollJobStatus(res.data.jobId);
     } catch (err: any) {
-      setError(err.message);
+      setError(err?.response?.data?.message || err.message || 'Upload failed');
     } finally {
       setUploading(false);
     }

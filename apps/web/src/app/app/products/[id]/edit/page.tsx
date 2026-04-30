@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Upload, X, Loader2, Save } from 'lucide-react';
 import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface Category {
   id: string;
@@ -58,45 +58,25 @@ export default function EditProductPage() {
 
   useUnsavedChanges(isDirty);
 
-  const getHeaders = useCallback(() => {
-    const token = localStorage.getItem('access_token');
-    const tenantId = localStorage.getItem('tenantId');
-    return {
-      Authorization: `Bearer ${token}`,
-      'x-tenant-id': tenantId || '',
-    };
-  }, []);
-
   const fetchCategories = useCallback(async () => {
     setCategoriesLoading(true);
     try {
-      const headers = getHeaders();
-      const res = await fetch('/api/v1/store/categories', { headers });
-      if (res.ok) {
-        const data = unwrapJson(await res.json());
-        setCategories(Array.isArray(data) ? data : data.data ?? []);
-      }
+      const res = await api.get<any>('/v1/store/categories');
+      const data = res.data;
+      setCategories(Array.isArray(data) ? data : data?.data ?? []);
     } catch {
       // Categories are optional; silently fail
     } finally {
       setCategoriesLoading(false);
     }
-  }, [getHeaders]);
+  }, []);
 
   const fetchProduct = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const headers = getHeaders();
-      const res = await fetch(`/api/v1/store/admin/products/${productId}`, {
-        headers,
-      });
-
-      if (!res.ok) {
-        throw new Error('Failed to load product');
-      }
-
-      const product: Product = unwrapJson(await res.json());
+      const res = await api.get<Product>(`/v1/store/admin/products/${productId}`);
+      const product = res.data;
 
       setDisplayName(product.displayName || '');
       setSlug(product.slug || '');
@@ -109,11 +89,11 @@ export default function EditProductPage() {
       setImages(product.images || []);
     } catch (err: any) {
       console.error('Failed to fetch product:', err);
-      setError(err.message || 'Failed to load product');
+      setError(err?.response?.data?.message || err.message || 'Failed to load product');
     } finally {
       setLoading(false);
     }
-  }, [productId, getHeaders]);
+  }, [productId]);
 
   useEffect(() => {
     if (productId) {
@@ -134,26 +114,12 @@ export default function EditProductPage() {
         const formData = new FormData();
         formData.append('file', files[i]);
 
-        const headers = getHeaders();
-        const res = await fetch('/api/v1/store/admin/uploads', {
-          method: 'POST',
-          headers: {
-            Authorization: headers.Authorization,
-            'x-tenant-id': headers['x-tenant-id'],
-          },
-          body: formData,
-        });
-
-        if (!res.ok) {
-          throw new Error(`Failed to upload ${files[i].name}`);
-        }
-
-        const data = unwrapJson(await res.json());
-        setImages((prev) => [...prev, data.url]);
+        const res = await api.post<{ url: string }>('/v1/store/admin/uploads', formData);
+        setImages((prev) => [...prev, res.data.url]);
         setIsDirty(true);
       } catch (err: any) {
         console.error('Upload failed:', err);
-        setError(err.message || 'Image upload failed');
+        setError(err?.response?.data?.message || err.message || `Failed to upload ${files[i].name}`);
       }
     }
 
@@ -182,7 +148,6 @@ export default function EditProductPage() {
     setSuccess(false);
 
     try {
-      const headers = getHeaders();
       const body: Record<string, any> = {
         displayName: displayName.trim(),
         price: parseFloat(price),
@@ -208,26 +173,14 @@ export default function EditProductPage() {
         body.categoryId = null;
       }
 
-      const res = await fetch(`/api/v1/store/admin/products/${productId}`, {
-        method: 'PUT',
-        headers: {
-          ...headers,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) {
-        const errData = unwrapJson(await res.json().catch(() => null));
-        throw new Error(errData?.message || 'Failed to update product');
-      }
+      await api.put(`/v1/store/admin/products/${productId}`, body);
 
       setIsDirty(false);
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err: any) {
       console.error('Failed to update product:', err);
-      setError(err.message || 'Something went wrong');
+      setError(err?.response?.data?.message || err.message || 'Something went wrong');
     } finally {
       setSubmitting(false);
     }
@@ -278,8 +231,17 @@ export default function EditProductPage() {
           </div>
         )}
 
-        {/* Form */}
-        <div className="space-y-6">
+        {/* Form. Wrapping in <form> so Enter-to-submit works on text
+            inputs; previous shape was a div with a type="button" save
+            button so HTML5 required-field constraints never triggered.
+            See PE4 in docs/ui-audit.md. */}
+        <form
+          className="space-y-6"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!submitting) handleSubmit();
+          }}
+        >
           {/* Basic Information */}
           <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-700 dark:bg-slate-800">
             <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
@@ -553,8 +515,7 @@ export default function EditProductPage() {
               Cancel
             </Link>
             <button
-              type="button"
-              onClick={handleSubmit}
+              type="submit"
               disabled={submitting}
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -571,7 +532,7 @@ export default function EditProductPage() {
               )}
             </button>
           </div>
-        </div>
+        </form>
       </div>
     </div>
   );

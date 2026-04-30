@@ -343,7 +343,7 @@ function StoreCategoriesSection({ connectionId }: { connectionId: string }) {
         setShowForm(false);
         await loadCategories();
       } else {
-        const err = unwrapJson(await res.json());
+        const err = unwrapJson(await res.json().catch(() => null));
         toast({ title: 'Error', description: (err as any)?.error || 'Failed to save', variant: 'destructive' });
       }
     } catch (err) {
@@ -367,7 +367,7 @@ function StoreCategoriesSection({ connectionId }: { connectionId: string }) {
         toast({ title: 'Success', description: 'Category deleted' });
         setCategories((prev) => prev.filter((c) => c.categoryId !== id));
       } else {
-        const err = unwrapJson(await res.json());
+        const err = unwrapJson(await res.json().catch(() => null));
         toast({ title: 'Error', description: (err as any)?.error || 'Failed to delete', variant: 'destructive' });
       }
     } catch (err) {
@@ -660,7 +660,7 @@ function InventoryLocationsSection({ connectionId }: { connectionId: string }) {
         setShowForm(false);
         await loadLocations();
       } else {
-        const err = unwrapJson(await res.json());
+        const err = unwrapJson(await res.json().catch(() => null));
         toast({
           title: 'Error',
           description: (err as any)?.error || 'Failed to save location',
@@ -688,7 +688,7 @@ function InventoryLocationsSection({ connectionId }: { connectionId: string }) {
         toast({ title: 'Success', description: 'Location deleted' });
         setLocations((prev) => prev.filter((l) => l.merchantLocationKey !== key));
       } else {
-        const err = unwrapJson(await res.json());
+        const err = unwrapJson(await res.json().catch(() => null));
         toast({ title: 'Error', description: (err as any)?.error || 'Failed to delete', variant: 'destructive' });
       }
     } catch (err) {
@@ -714,7 +714,7 @@ function InventoryLocationsSection({ connectionId }: { connectionId: string }) {
         toast({ title: 'Success', description: `Location ${action}d` });
         await loadLocations();
       } else {
-        const err = unwrapJson(await res.json());
+        const err = unwrapJson(await res.json().catch(() => null));
         toast({ title: 'Error', description: (err as any)?.error || `Failed to ${action}`, variant: 'destructive' });
       }
     } catch (err) {
@@ -1019,18 +1019,6 @@ function PermissionsSection() {
     load();
   }, []);
 
-  const togglePermission = (perm: string) => {
-    setEnabled((prev) => {
-      const next = new Set(prev);
-      if (next.has(perm)) {
-        next.delete(perm);
-      } else {
-        next.add(perm);
-      }
-      return next;
-    });
-  };
-
   const applyTemplate = (templateName: string) => {
     const tpl = templates.find((t) => t.name === templateName);
     if (!tpl) return;
@@ -1056,7 +1044,11 @@ function PermissionsSection() {
       <div className="mb-4">
         <h2 className="text-lg font-semibold text-gray-900">Marketplace Permissions</h2>
         <p className="text-sm text-gray-500 mt-0.5">
-          View available permissions and role templates for marketplace access control
+          Read-only view of available permissions and role templates. Editing
+          per-role permission overrides is not yet wired to a backend endpoint;
+          the toggles below are illustrative — applying a template previews
+          which permissions the role would grant. Manage actual role
+          assignments via the user-management page for now.
         </p>
       </div>
 
@@ -1111,20 +1103,25 @@ function PermissionsSection() {
                       </p>
                       <p className="text-xs text-gray-400 font-mono">{perm}</p>
                     </div>
-                    <button
-                      onClick={() => togglePermission(perm)}
-                      className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
-                        isEnabled ? 'bg-blue-600' : 'bg-gray-200'
+                    {/*
+                      Read-only state pill. Was a clickable toggle, but with no
+                      Save button and no backend persistence the toggle was
+                      lying — closing the tab discarded "edits" silently.
+                      Until an endpoint exists, this just visualizes what each
+                      role template would grant when the picker above is used.
+                      See M123 in docs/ui-audit.md.
+                    */}
+                    <span
+                      role="status"
+                      aria-label={isEnabled ? 'Granted' : 'Not granted'}
+                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                        isEnabled
+                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          : 'bg-gray-50 text-gray-500 border border-gray-200'
                       }`}
-                      role="switch"
-                      aria-checked={isEnabled}
                     >
-                      <span
-                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                          isEnabled ? 'translate-x-5' : 'translate-x-0'
-                        }`}
-                      />
-                    </button>
+                      {isEnabled ? 'Granted' : 'Not granted'}
+                    </span>
                   </div>
                 );
               })}

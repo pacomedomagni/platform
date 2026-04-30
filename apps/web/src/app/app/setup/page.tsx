@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Button, Card, Skeleton, StatusBadge } from '@platform/ui';
+import { Card, Skeleton, StatusBadge } from '@platform/ui';
 import { CheckCircle2, Circle, ExternalLink } from 'lucide-react';
 import api from '../../../lib/api';
 
@@ -30,20 +30,43 @@ export default function SetupPage() {
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
 
+  // Track which doctype counts came from a successful response vs. a
+  // failed/timed-out call. Without this, a 5xx looked identical to "0
+  // records exist," pushing the user to "create one" when they may have
+  // had ten that the API just failed to return. See SE1/SE2.
+  const [failedTypes, setFailedTypes] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     let alive = true;
     const load = async () => {
       const docTypes = Array.from(new Set(STEPS.map((s) => s.docType).filter(Boolean) as string[]));
-      const results = await Promise.allSettled(docTypes.map((dt) => api.get(`/v1/doc/${encodeURIComponent(dt)}`)));
+
+      // SE1: timeout each call so a hung API doesn't leave the user
+      // staring at a Skeleton forever.
+      const withTimeout = <T,>(p: Promise<T>, ms: number): Promise<T> =>
+        Promise.race([
+          p,
+          new Promise<T>((_, reject) =>
+            setTimeout(() => reject(new Error('Timed out')), ms)
+          ),
+        ]);
+
+      const results = await Promise.allSettled(
+        docTypes.map((dt) => withTimeout(api.get(`/v1/doc/${encodeURIComponent(dt)}`), 8000))
+      );
       if (!alive) return;
       const next: Record<string, number> = {};
+      const failed = new Set<string>();
       results.forEach((r, i) => {
         if (r.status === 'fulfilled') {
           const arr = Array.isArray(r.value.data) ? r.value.data : [];
           next[docTypes[i]] = arr.length;
+        } else {
+          failed.add(docTypes[i]);
         }
       });
       setCounts(next);
+      setFailedTypes(failed);
       setLoading(false);
     };
     load();
@@ -63,7 +86,6 @@ export default function SetupPage() {
           <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Setup Checklist</h1>
           <p className="text-sm text-slate-500">Complete these steps to start transacting.</p>
         </div>
-        <Button variant="outline">View Setup Guide</Button>
       </div>
 
       {/* Progress overview */}
@@ -108,8 +130,15 @@ export default function SetupPage() {
                   >
                     {step.label}
                   </Link>
-                  {step.required && !complete && <StatusBadge kind="customer" status="UNVERIFIED" label="Required" />}
+                  {step.required && !complete && !failedTypes.has(step.docType ?? '') && (
+                    <StatusBadge kind="customer" status="UNVERIFIED" label="Required" />
+                  )}
                   {complete && <StatusBadge kind="customer" status="VERIFIED" label={`${count} record${count === 1 ? '' : 's'}`} />}
+                  {step.docType && failedTypes.has(step.docType) && (
+                    <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+                      Couldn&apos;t load
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-slate-500 mt-1">{step.description}</p>
               </div>

@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import api from '../../../../lib/api';
-import { ReportAlert, ReportCard, ReportEmpty, ReportPage, ReportTable } from '../_components/report-shell';
+import { ReportAlert, ReportCard, ReportEmpty, ReportLoading, ReportPage, ReportTable } from '../_components/report-shell';
 import { ReportToolbar, downloadCSV, toCSV } from '../_components/report-toolbar';
+import { useUrlFilters } from '@/lib/hooks/use-url-filters';
 
 type CashMovement = {
   posting_date: string;
@@ -45,6 +46,8 @@ export default function CashFlowPage() {
   const [data, setData] = useState<CashFlow | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useUrlFilters({ fromDate, toDate }, { fromDate: setFromDate, toDate: setToDate });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -108,7 +111,8 @@ export default function CashFlowPage() {
                 </tr>
               </thead>
               <tbody>
-                {data.movements.length === 0 && <ReportEmpty colSpan={6} />}
+                {loading && <ReportLoading colSpan={6} />}
+                {!loading && data.movements.length === 0 && <ReportEmpty colSpan={6} />}
                 {data.movements.map((row, idx) => (
                   <tr key={`${row.voucher_type}-${row.voucher_no}-${idx}`} className="border-b last:border-0">
                     <td className="p-3">{row.posting_date}</td>

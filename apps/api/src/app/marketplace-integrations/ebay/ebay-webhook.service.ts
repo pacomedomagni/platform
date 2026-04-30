@@ -211,27 +211,19 @@ export class EbayWebhookService {
     // Cross-tenant scan: look up every connection that belongs to this eBay
     // user, regardless of which tenant owns it. The bypass is required —
     // we have no tenant context yet at this point in the webhook flow.
-    const candidates = await bypassTenantGuard(() =>
+    // Lookup is by platformConfig.ebayUserId only — that's the canonical
+    // key written at OAuth callback time (see EbayAuthService
+    // .fetchAndSaveEbayUserId).
+    const matches = await bypassTenantGuard(() =>
       this.prisma.marketplaceConnection.findMany({
         where: {
           platform: 'EBAY',
           isConnected: true,
-          OR: [
-            { platformConfig: { path: ['ebayUserId'], equals: userId } },
-            { platformConfig: { path: ['userId'], equals: userId } },
-            { platformConfig: { path: ['username'], equals: userId } },
-          ],
+          platformConfig: { path: ['ebayUserId'], equals: userId },
         },
         select: { id: true, tenantId: true },
       }),
     );
-
-    const seen = new Set<string>();
-    const matches = candidates.filter((c) => {
-      if (seen.has(c.id)) return false;
-      seen.add(c.id);
-      return true;
-    });
 
     // Per-tenant anonymization — pin each tenant's id for the update so the
     // RLS policy matches. eBay sends one notification per user globally,

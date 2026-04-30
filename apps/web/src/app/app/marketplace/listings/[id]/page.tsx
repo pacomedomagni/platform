@@ -33,7 +33,7 @@ import {
   Layers,
   BookOpen,
 } from 'lucide-react';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -443,20 +443,17 @@ export default function ListingDetailPage() {
   const loadListing = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/listings/${listingId}`, {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = unwrapJson<ListingDetail>(await res.json());
-        setListing(data);
-        populateEditForm(data);
-        populateOfferData(data);
-      } else {
-        toast({ title: 'Error', description: 'Failed to load listing details', variant: 'destructive' });
-      }
-    } catch (error) {
+      const res = await api.get<ListingDetail>(`/v1/marketplace/listings/${listingId}`);
+      setListing(res.data);
+      populateEditForm(res.data);
+      populateOfferData(res.data);
+    } catch (error: any) {
       console.error('Failed to load listing:', error);
-      toast({ title: 'Error', description: 'Failed to load listing details', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.message || 'Failed to load listing details',
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }
@@ -567,8 +564,14 @@ export default function ListingDetailPage() {
         body.itemSpecifics = editForm.itemSpecifics;
       }
 
-      // Include platform data overrides
-      const platformData: Record<string, any> = {};
+      // Include platform data overrides. Spread the existing platformData
+      // first so we don't wipe brand/mpn/upc/ean/isbn/videoIds set during
+      // create. The previous shape sent only the four edit fields and the
+      // backend's PATCH overwrites the whole object — every product
+      // identifier was lost on every save. See M40 in docs/ui-audit.md.
+      const platformData: Record<string, any> = {
+        ...(listing?.platformData ?? {}),
+      };
       if (editForm.format) platformData.format = editForm.format;
       if (editForm.fulfillmentPolicyId) platformData.fulfillmentPolicyId = editForm.fulfillmentPolicyId;
       if (editForm.paymentPolicyId) platformData.paymentPolicyId = editForm.paymentPolicyId;
@@ -577,24 +580,17 @@ export default function ListingDetailPage() {
         body.platformData = platformData;
       }
 
-      const res = await fetch(`/api/v1/marketplace/listings/${listingId}`, {
-        method: 'PATCH',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Listing updated successfully' });
-        setEditing(false);
-        loadListing();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to update listing', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.patch(`/v1/marketplace/listings/${listingId}`, body);
+      toast({ title: 'Success', description: 'Listing updated successfully' });
+      setEditing(false);
+      loadListing();
+    } catch (error: any) {
       console.error('Failed to save listing:', error);
-      toast({ title: 'Error', description: 'Failed to update listing', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to update listing',
+        variant: 'destructive',
+      });
     } finally {
       setSaving(false);
     }
@@ -616,31 +612,24 @@ export default function ListingDetailPage() {
 
     setUpdatingOffer(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/listings/${listingId}/offer`, {
-        method: 'PATCH',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          price: {
-            value: parseFloat(offerData.price),
-            currency: offerData.currency,
-          },
-          quantity: parseInt(offerData.quantity),
-          description: offerData.description,
-        }),
+      await api.patch(`/v1/marketplace/listings/${listingId}/offer`, {
+        price: {
+          value: parseFloat(offerData.price),
+          currency: offerData.currency,
+        },
+        quantity: parseInt(offerData.quantity),
+        description: offerData.description,
       });
-
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Offer updated successfully on eBay' });
-        setShowOfferUpdate(false);
-        loadListing();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to update offer', variant: 'destructive' });
-      }
-    } catch (error) {
+      toast({ title: 'Success', description: 'Offer updated successfully on eBay' });
+      setShowOfferUpdate(false);
+      loadListing();
+    } catch (error: any) {
       console.error('Failed to update offer:', error);
-      toast({ title: 'Error', description: 'Failed to update offer', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to update offer',
+        variant: 'destructive',
+      });
     } finally {
       setUpdatingOffer(false);
     }
@@ -654,20 +643,16 @@ export default function ListingDetailPage() {
     setPublishConfirm(false);
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/listings/${listingId}/publish`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Listing published successfully!' });
-        loadListing();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to publish listing', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.post(`/v1/marketplace/listings/${listingId}/publish`);
+      toast({ title: 'Success', description: 'Listing published successfully!' });
+      loadListing();
+    } catch (error: any) {
       console.error('Failed to publish:', error);
-      toast({ title: 'Error', description: 'Failed to publish listing', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to publish listing',
+        variant: 'destructive',
+      });
     } finally {
       setActionLoading(false);
     }
@@ -681,22 +666,20 @@ export default function ListingDetailPage() {
     setShowSchedule(false);
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/listings/${listingId}/schedule`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ scheduledAt: new Date(scheduleDate).toISOString() }),
+      // Field name must match the backend DTO at marketplace.dto.ts —
+      // ScheduleListingDto.scheduledDate. See M23/M39 in docs/ui-audit.md.
+      await api.post(`/v1/marketplace/listings/${listingId}/schedule`, {
+        scheduledDate: new Date(scheduleDate).toISOString(),
       });
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Listing scheduled for publishing' });
-        loadListing();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to schedule listing', variant: 'destructive' });
-      }
-    } catch (error) {
+      toast({ title: 'Success', description: 'Listing scheduled for publishing' });
+      loadListing();
+    } catch (error: any) {
       console.error('Failed to schedule:', error);
-      toast({ title: 'Error', description: 'Failed to schedule listing', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to schedule listing',
+        variant: 'destructive',
+      });
     } finally {
       setActionLoading(false);
     }
@@ -705,20 +688,16 @@ export default function ListingDetailPage() {
   const handleSyncInventory = async () => {
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/listings/${listingId}/sync-inventory`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Inventory synced successfully' });
-        loadListing();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to sync inventory', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.post(`/v1/marketplace/listings/${listingId}/sync-inventory`);
+      toast({ title: 'Success', description: 'Inventory synced successfully' });
+      loadListing();
+    } catch (error: any) {
       console.error('Failed to sync inventory:', error);
-      toast({ title: 'Error', description: 'Failed to sync inventory', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to sync inventory',
+        variant: 'destructive',
+      });
     } finally {
       setActionLoading(false);
     }
@@ -728,20 +707,16 @@ export default function ListingDetailPage() {
     setEndConfirm(false);
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/listings/${listingId}/end`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Listing ended successfully' });
-        loadListing();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to end listing', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.post(`/v1/marketplace/listings/${listingId}/end`);
+      toast({ title: 'Success', description: 'Listing ended successfully' });
+      loadListing();
+    } catch (error: any) {
       console.error('Failed to end listing:', error);
-      toast({ title: 'Error', description: 'Failed to end listing', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to end listing',
+        variant: 'destructive',
+      });
     } finally {
       setActionLoading(false);
     }
@@ -751,20 +726,16 @@ export default function ListingDetailPage() {
     setDeleteConfirm(false);
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/listings/${listingId}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Listing deleted' });
-        router.push('/app/marketplace/listings');
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to delete listing', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.delete(`/v1/marketplace/listings/${listingId}`);
+      toast({ title: 'Success', description: 'Listing deleted' });
+      router.push('/app/marketplace/listings');
+    } catch (error: any) {
       console.error('Failed to delete:', error);
-      toast({ title: 'Error', description: 'Failed to delete listing', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to delete listing',
+        variant: 'destructive',
+      });
     } finally {
       setActionLoading(false);
     }
@@ -773,20 +744,16 @@ export default function ListingDetailPage() {
   const handleApprove = async () => {
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/listings/${listingId}/approve`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Listing approved' });
-        loadListing();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to approve listing', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.post(`/v1/marketplace/listings/${listingId}/approve`);
+      toast({ title: 'Success', description: 'Listing approved' });
+      loadListing();
+    } catch (error: any) {
       console.error('Failed to approve:', error);
-      toast({ title: 'Error', description: 'Failed to approve listing', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to approve listing',
+        variant: 'destructive',
+      });
     } finally {
       setActionLoading(false);
     }
@@ -800,23 +767,17 @@ export default function ListingDetailPage() {
     setShowReject(false);
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/listings/${listingId}/reject`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: rejectReason }),
-      });
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Listing rejected' });
-        setRejectReason('');
-        loadListing();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to reject listing', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.post(`/v1/marketplace/listings/${listingId}/reject`, { reason: rejectReason });
+      toast({ title: 'Success', description: 'Listing rejected' });
+      setRejectReason('');
+      loadListing();
+    } catch (error: any) {
       console.error('Failed to reject:', error);
-      toast({ title: 'Error', description: 'Failed to reject listing', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to reject listing',
+        variant: 'destructive',
+      });
     } finally {
       setActionLoading(false);
     }

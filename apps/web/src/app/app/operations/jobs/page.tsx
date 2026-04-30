@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { Button, Card, Badge, ConfirmDialog } from '@platform/ui';
 import api from '../../../../lib/api';
@@ -143,15 +143,39 @@ export default function BackgroundJobsPage() {
     setLoading(false);
   }, [loadStats, loadJobs]);
 
-  // Initial load and auto-refresh
+  // Initial load.
   useEffect(() => {
     loadAll();
-    const interval = setInterval(() => {
-      loadStats();
-      loadJobs();
+  }, [loadAll]);
+
+  // Auto-refresh polling. JB1: keep the interval stable across filter
+  // changes so we don't tear down + recreate (which previously could
+  // double-fire mid-keystroke). Use refs for the latest fetchers.
+  // JB2: if a poll fails with a 401-ish error twice in a row we stop
+  // polling — the api.ts interceptor will redirect on its own; pinging
+  // every 10s in the meantime is wasteful.
+  const loadStatsRef = useRef(loadStats);
+  const loadJobsRef = useRef(loadJobs);
+  useEffect(() => { loadStatsRef.current = loadStats; }, [loadStats]);
+  useEffect(() => { loadJobsRef.current = loadJobs; }, [loadJobs]);
+
+  useEffect(() => {
+    let consecutiveAuthFailures = 0;
+    const interval = setInterval(async () => {
+      try {
+        await Promise.all([loadStatsRef.current(), loadJobsRef.current()]);
+        consecutiveAuthFailures = 0;
+      } catch (e: any) {
+        if (e?.response?.status === 401) {
+          consecutiveAuthFailures++;
+          if (consecutiveAuthFailures >= 2) {
+            clearInterval(interval);
+          }
+        }
+      }
     }, REFRESH_INTERVAL);
     return () => clearInterval(interval);
-  }, [loadAll, loadStats, loadJobs]);
+  }, []);
 
   // Reset page when filters change
   useEffect(() => {

@@ -31,7 +31,13 @@ interface ThemeCardProps {
   onDuplicate: () => void;
   onDelete: () => void;
   /** Open the preview drawer for this theme. Owner page wires this up to a Sheet. */
-  onPreview: () => void;
+  /**
+   * Render a Preview button. Currently hidden at the page level because
+   * the storefront does not honour ?theme= overrides — the iframe always
+   * shows the active theme regardless of which row was clicked, which
+   * was actively misleading. See T1 in docs/ui-audit.md.
+   */
+  onPreview?: () => void;
 }
 
 export function ThemeCard({
@@ -159,22 +165,20 @@ export function ThemeCard({
             <span className="font-mono">{theme.typography.bodyFont}</span>
           </div>
         </div>
-        {/*
-          Preview opens the storefront in a side-sheet iframe; cheap and works without
-          relying on a per-theme query param the storefront doesn't yet honour.
-        */}
-        <Button
-          variant="outline"
-          size="sm"
-          className="w-full"
-          onClick={(e) => {
-            e.stopPropagation();
-            onPreview();
-          }}
-        >
-          <Eye className="mr-2 h-4 w-4" />
-          Preview
-        </Button>
+        {onPreview && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full"
+            onClick={(e) => {
+              e.stopPropagation();
+              onPreview();
+            }}
+          >
+            <Eye className="mr-2 h-4 w-4" />
+            Preview
+          </Button>
+        )}
       </CardFooter>
 
       {/* Hover Overlay */}

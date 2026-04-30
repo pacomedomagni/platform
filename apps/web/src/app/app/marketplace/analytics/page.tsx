@@ -11,7 +11,7 @@ import {
   Clock,
   RefreshCw,
 } from 'lucide-react';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface Connection {
   id: string;
@@ -88,15 +88,10 @@ export default function MarketplaceAnalyticsPage() {
 
   const loadConnections = async () => {
     try {
-      const res = await fetch('/api/v1/marketplace/connections', {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = unwrapJson<Connection[]>(await res.json());
-        setConnections(data);
-        if (data.length > 0) {
-          setSelectedConnection(data[0].id);
-        }
+      const res = await api.get<Connection[]>('/v1/marketplace/connections');
+      setConnections(res.data);
+      if (res.data.length > 0) {
+        setSelectedConnection(res.data[0].id);
       }
     } catch (error) {
       console.error('Failed to load connections:', error);
@@ -118,25 +113,17 @@ export default function MarketplaceAnalyticsPage() {
       const startDate = new Date(now.getTime() - daysBack * 86400000).toISOString().split('T')[0];
       const endDate = now.toISOString().split('T')[0];
 
-      const params = new URLSearchParams({
-        connectionId: selectedConnection,
-        startDate,
-        endDate,
+      const res = await api.get<TrafficReport>('/v1/marketplace/analytics/traffic', {
+        params: { connectionId: selectedConnection, startDate, endDate },
       });
-      const res = await fetch(`/api/v1/marketplace/analytics/traffic?${params}`, {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = unwrapJson<TrafficReport>(await res.json());
-        setTraffic(data);
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to load traffic data', variant: 'destructive' });
-        setTraffic(null);
-      }
-    } catch (error) {
+      setTraffic(res.data);
+    } catch (error: any) {
       console.error('Failed to load traffic:', error);
-      toast({ title: 'Error', description: 'Failed to load traffic data', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to load traffic data',
+        variant: 'destructive',
+      });
       setTraffic(null);
     } finally {
       setTrafficLoading(false);
@@ -147,23 +134,17 @@ export default function MarketplaceAnalyticsPage() {
     if (!selectedConnection) return;
     setSellerLoading(true);
     try {
-      const params = new URLSearchParams({
-        connectionId: selectedConnection,
+      const res = await api.get<SellerStandards>('/v1/marketplace/analytics/seller-standards', {
+        params: { connectionId: selectedConnection },
       });
-      const res = await fetch(`/api/v1/marketplace/analytics/seller-standards?${params}`, {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = unwrapJson<SellerStandards>(await res.json());
-        setSellerStandards(data);
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to load seller standards', variant: 'destructive' });
-        setSellerStandards(null);
-      }
-    } catch (error) {
+      setSellerStandards(res.data);
+    } catch (error: any) {
       console.error('Failed to load seller standards:', error);
-      toast({ title: 'Error', description: 'Failed to load seller standards', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to load seller standards',
+        variant: 'destructive',
+      });
       setSellerStandards(null);
     } finally {
       setSellerLoading(false);
@@ -174,23 +155,18 @@ export default function MarketplaceAnalyticsPage() {
     if (!selectedConnection) return;
     setServiceLoading(true);
     try {
-      const params = new URLSearchParams({
-        connectionId: selectedConnection,
-      });
-      const res = await fetch(`/api/v1/marketplace/analytics/customer-service?${params}`, {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = unwrapJson<CustomerServiceMetrics>(await res.json());
-        setCustomerService(data);
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to load customer service metrics', variant: 'destructive' });
-        setCustomerService(null);
-      }
-    } catch (error) {
+      const res = await api.get<CustomerServiceMetrics>(
+        '/v1/marketplace/analytics/customer-service',
+        { params: { connectionId: selectedConnection } },
+      );
+      setCustomerService(res.data);
+    } catch (error: any) {
       console.error('Failed to load customer service metrics:', error);
-      toast({ title: 'Error', description: 'Failed to load customer service metrics', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to load customer service metrics',
+        variant: 'destructive',
+      });
       setCustomerService(null);
     } finally {
       setServiceLoading(false);

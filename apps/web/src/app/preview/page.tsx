@@ -2,8 +2,14 @@
 
 /**
  * Theme Preview Page
- * This page is loaded in an iframe to show theme previews
+ * Loaded inside an iframe by the theme picker so the user can see how a
+ * theme's tokens render. The dummy links below intentionally do nothing —
+ * they used to be `<a href="#">`, which scrolled the iframe to top each
+ * click. `type="button"` + onClick noop preserves the visual styling
+ * without the navigation side-effect.
  */
+
+const noop = (e: React.MouseEvent) => e.preventDefault();
 
 export default function ThemePreviewPage() {
   return (
@@ -14,9 +20,9 @@ export default function ThemePreviewPage() {
           <div className="flex items-center justify-between">
             <h1 className="text-2xl font-bold">Store Name</h1>
             <nav className="flex gap-6">
-              <a href="#" className="hover:text-primary">Shop</a>
-              <a href="#" className="hover:text-primary">About</a>
-              <a href="#" className="hover:text-primary">Contact</a>
+              <a href="#" onClick={noop} className="hover:text-primary">Shop</a>
+              <a href="#" onClick={noop} className="hover:text-primary">About</a>
+              <a href="#" onClick={noop} className="hover:text-primary">Contact</a>
             </nav>
           </div>
         </div>
@@ -29,7 +35,10 @@ export default function ThemePreviewPage() {
           <p className="text-lg text-muted-foreground mb-8">
             Discover amazing products at great prices
           </p>
-          <button className="bg-primary text-primary-foreground px-6 py-3 rounded-md font-semibold hover:bg-primary/90">
+          <button
+            type="button"
+            className="bg-primary text-primary-foreground px-6 py-3 rounded-md font-semibold hover:bg-primary/90"
+          >
             Shop Now
           </button>
         </div>
@@ -50,7 +59,10 @@ export default function ThemePreviewPage() {
                   </p>
                   <div className="flex items-center justify-between">
                     <span className="text-lg font-bold">$99.99</span>
-                    <button className="bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm hover:bg-primary/90">
+                    <button
+                      type="button"
+                      className="bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm hover:bg-primary/90"
+                    >
                       Add to Cart
                     </button>
                   </div>
@@ -64,7 +76,7 @@ export default function ThemePreviewPage() {
       {/* Footer */}
       <footer className="border-t mt-12 py-8 bg-muted/50">
         <div className="container mx-auto px-4 text-center text-sm text-muted-foreground">
-          <p>&copy; 2024 Store Name. All rights reserved.</p>
+          <p>&copy; {new Date().getFullYear()} Store Name. All rights reserved.</p>
         </div>
       </footer>
     </div>

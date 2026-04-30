@@ -2,8 +2,12 @@
 
 import { useState } from 'react';
 import { Button, Input } from '@platform/ui';
+import { Download } from 'lucide-react';
 import api from '../../../../lib/api';
-import { ReportAlert, ReportCard, ReportEmpty, ReportFilters, ReportPage, ReportTable } from '../_components/report-shell';
+import { ReportAlert, ReportCard, ReportEmpty, ReportFilters, ReportLoading, ReportPage, ReportTable } from '../_components/report-shell';
+import { downloadCsv, formatMoney, formatQty } from '../_components/report-format';
+import { useUrlFilters } from '@/lib/hooks/use-url-filters';
+import { CodeTypeahead } from '../_components/code-typeahead';
 
 type LedgerRow = {
   postingTs: string;
@@ -29,6 +33,17 @@ export default function StockLedgerPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useUrlFilters(
+    { itemCode, warehouseCode, batchNo, fromDate, toDate },
+    {
+      itemCode: setItemCode,
+      warehouseCode: setWarehouseCode,
+      batchNo: setBatchNo,
+      fromDate: setFromDate,
+      toDate: setToDate,
+    },
+  );
+
   const load = async () => {
     setLoading(true);
     setError(null);
@@ -50,19 +65,39 @@ export default function StockLedgerPage() {
     }
   };
 
+  const handleExport = () => {
+    downloadCsv(
+      'stock-ledger',
+      ['Posting', 'Item', 'Warehouse', 'From', 'To', 'Batch', 'Qty', 'Rate', 'Value', 'Voucher'],
+      rows.map((r) => [
+        new Date(r.postingTs).toISOString(),
+        r.itemCode,
+        r.warehouseCode,
+        r.fromLocation ?? '',
+        r.toLocation ?? '',
+        r.batchNo ?? '',
+        formatQty(r.qty, 4),
+        formatMoney(r.valuationRate),
+        formatMoney(r.stockValueDifference),
+        `${r.voucherType} ${r.voucherNo}`,
+      ]),
+    );
+  };
+
   return (
-    <ReportPage title="Stock Ledger" description="All stock movements.">
+    <ReportPage
+      title="Stock Ledger"
+      description="All stock movements."
+      actions={
+        <Button variant="outline" size="sm" onClick={handleExport} disabled={rows.length === 0}>
+          <Download className="w-4 h-4 mr-2" />
+          Export CSV
+        </Button>
+      }
+    >
       <ReportFilters className="md:grid-cols-6">
-        <Input
-          placeholder="Item Code"
-          value={itemCode}
-          onChange={(e) => setItemCode(e.target.value)}
-        />
-        <Input
-          placeholder="Warehouse Code"
-          value={warehouseCode}
-          onChange={(e) => setWarehouseCode(e.target.value)}
-        />
+        <CodeTypeahead docType="Item" value={itemCode} onChange={setItemCode} placeholder="Item Code" />
+        <CodeTypeahead docType="Warehouse" value={warehouseCode} onChange={setWarehouseCode} placeholder="Warehouse Code" />
         <Input
           placeholder="Batch No"
           value={batchNo}
@@ -102,7 +137,8 @@ export default function StockLedgerPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && <ReportEmpty colSpan={10} />}
+            {loading && <ReportLoading colSpan={10} />}
+            {!loading && rows.length === 0 && <ReportEmpty colSpan={10} />}
             {rows.map((row, idx) => (
               <tr key={`${row.voucherType}-${row.voucherNo}-${idx}`} className="border-b last:border-0">
                 <td className="p-3">{new Date(row.postingTs).toLocaleString()}</td>
@@ -111,9 +147,9 @@ export default function StockLedgerPage() {
                 <td className="p-3">{row.fromLocation ?? '-'}</td>
                 <td className="p-3">{row.toLocation ?? '-'}</td>
                 <td className="p-3">{row.batchNo ?? '-'}</td>
-                <td className="p-3 text-right">{row.qty}</td>
-                <td className="p-3 text-right">{row.valuationRate}</td>
-                <td className="p-3 text-right">{row.stockValueDifference}</td>
+                <td className="p-3 text-right tabular-nums">{formatQty(row.qty, 4)}</td>
+                <td className="p-3 text-right tabular-nums">{formatMoney(row.valuationRate)}</td>
+                <td className="p-3 text-right tabular-nums">{formatMoney(row.stockValueDifference)}</td>
                 <td className="p-3">{row.voucherType} {row.voucherNo}</td>
               </tr>
             ))}

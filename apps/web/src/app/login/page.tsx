@@ -33,6 +33,12 @@ function LoginForm() {
             if (user?.tenantId) {
                 localStorage.setItem('tenantId', user.tenantId);
             }
+            // 6.13: persist tenant currency so the dashboards/products/reports
+            // pages format prices in the tenant's base currency. Reads
+            // `tenantCurrency` via the existing `localStorage.getItem` calls.
+            if (user?.baseCurrency) {
+                localStorage.setItem('tenantCurrency', user.baseCurrency);
+            }
 
             router.replace(redirectTo || '/app');
         } catch (err: any) {
@@ -87,9 +93,12 @@ function LoginForm() {
                         <div className="space-y-2">
                             <div className="flex items-center justify-between">
                                 <Label htmlFor="login-password">Password</Label>
-                                <Link href="/forgot-password" className="text-sm font-medium text-indigo-600 hover:text-indigo-500">
-                                    Forgot password?
-                                </Link>
+                                {/*
+                                  Admin password reset route does not exist on the API yet
+                                  (no /onboarding/forgot-password handler, no admin-side
+                                  reset endpoint). Re-wire this link the moment that ships:
+                                  point it at /forgot-password and create the page.
+                                */}
                             </div>
                             <div className="relative">
                                 <Input

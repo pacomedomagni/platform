@@ -996,6 +996,13 @@ export class OrdersService {
         : null,
       items: order.items.map((item) => ({
         id: item.id,
+        // productId / variantId expose the original product references so
+        // a "reorder" flow can call addItem(productId, qty). Without these,
+        // clients fell back to passing line-item id which adds zero items
+        // (the cart API expects a product/variant id). Both can be null
+        // for snapshot-only items where the product has since been deleted.
+        productId: item.productId,
+        variantId: item.variantId,
         name: item.name,
         sku: item.sku,
         quantity: item.quantity,

@@ -5,7 +5,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Card, Button, Badge } from '@platform/ui';
+import { Card, Button, Badge, toast } from '@platform/ui';
 import {
   Bell,
   BellOff,
@@ -21,7 +21,7 @@ import {
   FileText,
   Loader2,
 } from 'lucide-react';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface Notification {
   id: string;
@@ -39,70 +39,33 @@ interface Notification {
   createdAt: string;
 }
 
-const API_BASE = '/api/v1';
-
-function getHeaders() {
-  const token = localStorage.getItem('access_token');
-  const tenantId = localStorage.getItem('tenantId');
-  return {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
-    'x-tenant-id': tenantId || '',
-  };
-}
-
 async function fetchNotifications(params?: {
   types?: string;
   isRead?: string;
   page?: number;
   limit?: number;
 }): Promise<{ data: Notification[]; total: number; unreadCount: number }> {
-  const query = new URLSearchParams();
-  if (params?.types) query.set('types', params.types);
-  if (params?.isRead !== undefined) query.set('isRead', params.isRead);
-  if (params?.page) query.set('page', String(params.page));
-  if (params?.limit) query.set('limit', String(params.limit));
-
-  const res = await fetch(`${API_BASE}/operations/notifications?${query}`, {
-    headers: getHeaders(),
-  });
-  if (!res.ok) throw new Error('Failed to fetch notifications');
-  return unwrapJson(await res.json());
+  const res = await api.get('/v1/operations/notifications', { params });
+  return res.data;
 }
 
 async function markAsRead(id: string) {
-  const res = await fetch(`${API_BASE}/operations/notifications/${id}/read`, {
-    method: 'PUT',
-    headers: getHeaders(),
-  });
-  if (!res.ok) throw new Error('Failed to mark as read');
-  return unwrapJson(await res.json());
+  const res = await api.put(`/v1/operations/notifications/${id}/read`);
+  return res.data;
 }
 
 async function markAllAsRead() {
-  const res = await fetch(`${API_BASE}/operations/notifications/read-all`, {
-    method: 'PUT',
-    headers: getHeaders(),
-  });
-  if (!res.ok) throw new Error('Failed to mark all as read');
-  return unwrapJson(await res.json());
+  const res = await api.put('/v1/operations/notifications/read-all');
+  return res.data;
 }
 
 async function deleteNotification(id: string) {
-  const res = await fetch(`${API_BASE}/operations/notifications/${id}`, {
-    method: 'DELETE',
-    headers: getHeaders(),
-  });
-  if (!res.ok) throw new Error('Failed to delete');
+  await api.delete(`/v1/operations/notifications/${id}`);
 }
 
 async function deleteRead() {
-  const res = await fetch(`${API_BASE}/operations/notifications/read`, {
-    method: 'DELETE',
-    headers: getHeaders(),
-  });
-  if (!res.ok) throw new Error('Failed to delete read');
-  return unwrapJson(await res.json());
+  const res = await api.delete('/v1/operations/notifications/read');
+  return res.data;
 }
 
 const ICON_MAP: Record<string, typeof Bell> = {
@@ -148,8 +111,13 @@ export default function NotificationsPage() {
       setNotifications(result.data);
       setUnreadCount(result.unreadCount);
       setTotal(result.total);
-    } catch {
-      // silent fail
+    } catch (err) {
+      console.error('Failed to load notifications', err);
+      toast({
+        title: 'Could not load notifications',
+        description: err instanceof Error ? err.message : 'Please try refreshing.',
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }
@@ -160,36 +128,80 @@ export default function NotificationsPage() {
   }, [loadNotifications]);
 
   const handleMarkAsRead = async (id: string) => {
+    // Optimistic update with rollback on failure (NO4).
+    const prev = notifications;
+    const prevCount = unreadCount;
+    setNotifications(p =>
+      p.map(n => n.id === id ? { ...n, isRead: true, readAt: new Date().toISOString() } : n)
+    );
+    setUnreadCount(c => Math.max(0, c - 1));
     try {
       await markAsRead(id);
-      setNotifications(prev =>
-        prev.map(n => n.id === id ? { ...n, isRead: true, readAt: new Date().toISOString() } : n)
-      );
-      setUnreadCount(prev => Math.max(0, prev - 1));
-    } catch { /* */ }
+    } catch (err) {
+      console.error('Mark-as-read failed', err);
+      setNotifications(prev);
+      setUnreadCount(prevCount);
+      toast({
+        title: 'Could not mark as read',
+        description: err instanceof Error ? err.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    }
   };
 
   const handleMarkAllAsRead = async () => {
+    const prev = notifications;
+    const prevCount = unreadCount;
+    setNotifications(p => p.map(n => ({ ...n, isRead: true, readAt: new Date().toISOString() })));
+    setUnreadCount(0);
     try {
       await markAllAsRead();
-      setNotifications(prev => prev.map(n => ({ ...n, isRead: true, readAt: new Date().toISOString() })));
-      setUnreadCount(0);
-    } catch { /* */ }
+    } catch (err) {
+      console.error('Mark-all-as-read failed', err);
+      setNotifications(prev);
+      setUnreadCount(prevCount);
+      toast({
+        title: 'Could not mark all as read',
+        description: err instanceof Error ? err.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    }
   };
 
   const handleDelete = async (id: string) => {
+    const prev = notifications;
+    const prevTotal = total;
+    setNotifications(p => p.filter(n => n.id !== id));
+    setTotal(t => t - 1);
     try {
       await deleteNotification(id);
-      setNotifications(prev => prev.filter(n => n.id !== id));
-      setTotal(prev => prev - 1);
-    } catch { /* */ }
+    } catch (err) {
+      console.error('Delete failed', err);
+      setNotifications(prev);
+      setTotal(prevTotal);
+      toast({
+        title: 'Could not delete notification',
+        description: err instanceof Error ? err.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    }
   };
 
   const handleDeleteRead = async () => {
     try {
       await deleteRead();
+      // Pagination reset (NO6) — after clearing the read entries, page=N
+      // can be past the new total; reset to the first page.
+      setPage(1);
       loadNotifications();
-    } catch { /* */ }
+    } catch (err) {
+      console.error('Delete-read failed', err);
+      toast({
+        title: 'Could not clear read notifications',
+        description: err instanceof Error ? err.message : 'Please try again.',
+        variant: 'destructive',
+      });
+    }
   };
 
   const formatDate = (dateStr: string) => {

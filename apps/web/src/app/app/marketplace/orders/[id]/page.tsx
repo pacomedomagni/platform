@@ -20,7 +20,7 @@ import {
   ShoppingCart,
   FileText,
 } from 'lucide-react';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface Connection {
   id: string;
@@ -155,18 +155,19 @@ export default function MarketplaceOrderDetailPage() {
   const loadOrder = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/orders/${orderId}`, {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = unwrapJson<Order>(await res.json());
-        setOrder(data);
-      } else {
-        setOrder(null);
-      }
-    } catch (error) {
+      const res = await api.get<Order>(`/v1/marketplace/orders/${orderId}`);
+      setOrder(res.data);
+    } catch (error: any) {
       console.error('Failed to load order:', error);
-      toast({ title: 'Error', description: 'Failed to load order details', variant: 'destructive' });
+      if (error?.response?.status === 404) {
+        setOrder(null);
+      } else {
+        toast({
+          title: 'Error',
+          description: error?.response?.data?.message || 'Failed to load order details',
+          variant: 'destructive',
+        });
+      }
     } finally {
       setLoading(false);
     }
@@ -202,25 +203,21 @@ export default function MarketplaceOrderDetailPage() {
 
     setFulfilling(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/orders/${order.id}/fulfill`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trackingNumber: trackingNumber.trim(), carrier }),
+      await api.post(`/v1/marketplace/orders/${order.id}/fulfill`, {
+        trackingNumber: trackingNumber.trim(),
+        carrier,
       });
-
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Order marked as shipped!' });
-        setTrackingNumber('');
-        setCarrier('');
-        loadOrder();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to fulfill order', variant: 'destructive' });
-      }
-    } catch (error) {
+      toast({ title: 'Success', description: 'Order marked as shipped!' });
+      setTrackingNumber('');
+      setCarrier('');
+      loadOrder();
+    } catch (error: any) {
       console.error('Failed to fulfill order:', error);
-      toast({ title: 'Error', description: 'Failed to fulfill order', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to fulfill order',
+        variant: 'destructive',
+      });
     } finally {
       setFulfilling(false);
     }
@@ -236,28 +233,21 @@ export default function MarketplaceOrderDetailPage() {
     setCancelling(true);
     setCancelConfirm(false);
     try {
-      const res = await fetch('/api/v1/marketplace/cancellations', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          connectionId: order.connectionId,
-          orderId: order.id,
-          reason: cancelReason.trim(),
-        }),
+      await api.post('/v1/marketplace/cancellations', {
+        connectionId: order.connectionId,
+        orderId: order.id,
+        reason: cancelReason.trim(),
       });
-
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Order cancellation submitted' });
-        setCancelReason('');
-        loadOrder();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to cancel order', variant: 'destructive' });
-      }
-    } catch (error) {
+      toast({ title: 'Success', description: 'Order cancellation submitted' });
+      setCancelReason('');
+      loadOrder();
+    } catch (error: any) {
       console.error('Failed to cancel order:', error);
-      toast({ title: 'Error', description: 'Failed to cancel order', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to cancel order',
+        variant: 'destructive',
+      });
     } finally {
       setCancelling(false);
     }
@@ -273,29 +263,22 @@ export default function MarketplaceOrderDetailPage() {
     setRefunding(true);
     setRefundModal(false);
     try {
-      const res = await fetch(`/api/v1/marketplace/orders/${order.id}/refund`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          connectionId: order.connectionId,
-          amount: refundAmount.trim(),
-          reason: refundReason.trim(),
-        }),
+      await api.post(`/v1/marketplace/orders/${order.id}/refund`, {
+        connectionId: order.connectionId,
+        amount: refundAmount.trim(),
+        reason: refundReason.trim(),
       });
-
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Refund issued successfully' });
-        setRefundAmount('');
-        setRefundReason('');
-        loadOrder();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to issue refund', variant: 'destructive' });
-      }
-    } catch (error) {
+      toast({ title: 'Success', description: 'Refund issued successfully' });
+      setRefundAmount('');
+      setRefundReason('');
+      loadOrder();
+    } catch (error: any) {
       console.error('Failed to issue refund:', error);
-      toast({ title: 'Error', description: 'Failed to issue refund', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to issue refund',
+        variant: 'destructive',
+      });
     } finally {
       setRefunding(false);
     }

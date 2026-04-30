@@ -17,7 +17,7 @@ import {
   Plus,
   Trash2,
 } from 'lucide-react';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface Campaign {
   id: string;
@@ -73,21 +73,14 @@ export default function CampaignDetailPage() {
   const loadCampaign = async () => {
     setLoading(true);
     try {
-      const [campRes, adsRes, reportRes] = await Promise.all([
-        fetch(`/api/v1/marketplace/campaigns/${campaignId}`, { credentials: 'include' }),
-        fetch(`/api/v1/marketplace/campaigns/${campaignId}/ads`, { credentials: 'include' }),
-        fetch(`/api/v1/marketplace/campaigns/${campaignId}/report`, { credentials: 'include' }),
+      const [campRes, adsRes, reportRes] = await Promise.allSettled([
+        api.get<Campaign>(`/v1/marketplace/campaigns/${campaignId}`),
+        api.get<CampaignAd[]>(`/v1/marketplace/campaigns/${campaignId}/ads`),
+        api.get<CampaignReport>(`/v1/marketplace/campaigns/${campaignId}/report`),
       ]);
-
-      if (campRes.ok) {
-        setCampaign(unwrapJson<Campaign>(await campRes.json()));
-      }
-      if (adsRes.ok) {
-        setAds(unwrapJson<CampaignAd[]>(await adsRes.json()));
-      }
-      if (reportRes.ok) {
-        setReport(unwrapJson<CampaignReport>(await reportRes.json()));
-      }
+      if (campRes.status === 'fulfilled') setCampaign(campRes.value.data);
+      if (adsRes.status === 'fulfilled') setAds(adsRes.value.data);
+      if (reportRes.status === 'fulfilled') setReport(reportRes.value.data);
     } catch (error) {
       console.error('Failed to load campaign:', error);
       toast({ title: 'Error', description: 'Failed to load campaign details', variant: 'destructive' });
@@ -96,23 +89,41 @@ export default function CampaignDetailPage() {
     }
   };
 
+  // M97: confirm before destructive campaign actions. End is irreversible
+  // per eBay; pause silently stops impressions. Pause and end both prompt;
+  // resume is harmless.
+  // M100: action labels — `${action}d` produced "endd" for "end". Use a
+  // proper map.
+  const ACTION_LABELS: Record<'pause' | 'resume' | 'end', string> = {
+    pause: 'paused',
+    resume: 'resumed',
+    end: 'ended',
+  };
   const handleAction = async (action: 'pause' | 'resume' | 'end') => {
+    if (action === 'end') {
+      const ok = window.confirm(
+        'End this campaign? This is irreversible and the campaign cannot be restarted on eBay.'
+      );
+      if (!ok) return;
+    } else if (action === 'pause') {
+      const ok = window.confirm(
+        'Pause this campaign? Promoted-listing impressions will stop until you resume it.'
+      );
+      if (!ok) return;
+    }
+
     setActionLoading(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/campaigns/${campaignId}/${action}`, {
-        method: 'POST',
-        credentials: 'include',
-      });
-      if (res.ok) {
-        toast({ title: 'Success', description: `Campaign ${action}d successfully` });
-        loadCampaign();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || `Failed to ${action} campaign`, variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.post(`/v1/marketplace/campaigns/${campaignId}/${action}`);
+      toast({ title: 'Success', description: `Campaign ${ACTION_LABELS[action]} successfully` });
+      loadCampaign();
+    } catch (error: any) {
       console.error(`Failed to ${action} campaign:`, error);
-      toast({ title: 'Error', description: `Failed to ${action} campaign`, variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || `Failed to ${action} campaign`,
+        variant: 'destructive',
+      });
     } finally {
       setActionLoading(false);
     }
@@ -122,44 +133,41 @@ export default function CampaignDetailPage() {
     if (!addListingId.trim()) return;
     setAddingAd(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/campaigns/${campaignId}/ads`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ listingId: addListingId.trim(), bidPercentage: addBidPct }),
+      await api.post(`/v1/marketplace/campaigns/${campaignId}/ads`, {
+        listingId: addListingId.trim(),
+        bidPercentage: addBidPct,
       });
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Ad added successfully' });
-        setAddListingId('');
-        loadCampaign();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to add ad', variant: 'destructive' });
-      }
-    } catch (error) {
+      toast({ title: 'Success', description: 'Ad added successfully' });
+      setAddListingId('');
+      loadCampaign();
+    } catch (error: any) {
       console.error('Failed to add ad:', error);
-      toast({ title: 'Error', description: 'Failed to add ad', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to add ad',
+        variant: 'destructive',
+      });
     } finally {
       setAddingAd(false);
     }
   };
 
   const handleRemoveAd = async (listingId: string) => {
+    // M95: removing an ad while a campaign is live is hostile to one-click;
+    // confirm.
+    const ok = window.confirm('Remove this listing from the campaign?');
+    if (!ok) return;
     try {
-      const res = await fetch(`/api/v1/marketplace/campaigns/${campaignId}/ads/${listingId}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Ad removed successfully' });
-        loadCampaign();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to remove ad', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.delete(`/v1/marketplace/campaigns/${campaignId}/ads/${listingId}`);
+      toast({ title: 'Success', description: 'Ad removed successfully' });
+      loadCampaign();
+    } catch (error: any) {
       console.error('Failed to remove ad:', error);
-      toast({ title: 'Error', description: 'Failed to remove ad', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to remove ad',
+        variant: 'destructive',
+      });
     }
   };
 

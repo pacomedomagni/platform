@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button, Card, Input, Label, Badge, Spinner, ConfirmDialog, toast } from '@platform/ui';
 import { Plus, Edit2, Trash2, Package, DollarSign, Image as ImageIcon } from 'lucide-react';
@@ -27,6 +27,12 @@ export default function ProductVariantsPage() {
   const [editingVariant, setEditingVariant] = useState<ProductVariant | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; variantId: string | null }>({ open: false, variantId: null });
   const [isBulkGenerating, setIsBulkGenerating] = useState(false);
+  // Progress + cancel for the bulk-variant generator. Without these, the
+  // user clicked a button that fired up to 125 sequential POSTs (5×5×5
+  // attribute matrix is realistic) with no visible progress and no way
+  // to abort if the server slowed down. See PV1 in docs/ui-audit.md.
+  const [bulkProgress, setBulkProgress] = useState<{ created: number; total: number } | null>(null);
+  const bulkCancelRef = useRef(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -39,6 +45,12 @@ export default function ProductVariantsPage() {
       setAttributeTypes(attributesData);
     } catch (error) {
       console.error('Failed to load data:', error);
+      toast({
+        title: 'Could not load variants',
+        description:
+          'Something went wrong while loading variants for this product. Try refreshing.',
+        variant: 'destructive',
+      });
     } finally {
       setIsLoading(false);
     }
@@ -60,6 +72,11 @@ export default function ProductVariantsPage() {
       await loadData();
     } catch (error) {
       console.error('Failed to delete variant:', error);
+      toast({
+        title: 'Delete failed',
+        description: error instanceof Error ? error.message : 'Could not delete the variant.',
+        variant: 'destructive',
+      });
     } finally {
       setDeleteConfirm({ open: false, variantId: null });
     }
@@ -71,6 +88,13 @@ export default function ProductVariantsPage() {
       await loadData();
     } catch (error) {
       console.error('Failed to update stock:', error);
+      toast({
+        title: 'Stock update failed',
+        description: error instanceof Error ? error.message : 'Could not update stock.',
+        variant: 'destructive',
+      });
+      // Re-throw so the calling component can keep its edit-mode UI open.
+      throw error;
     }
   };
 
@@ -203,45 +227,76 @@ export default function ProductVariantsPage() {
                 [[]]
               );
 
+              const total = cartesian.length;
+              bulkCancelRef.current = false;
               setIsBulkGenerating(true);
+              setBulkProgress({ created: 0, total });
               let created = 0;
 
               try {
                 for (const attributes of cartesian) {
+                  if (bulkCancelRef.current) {
+                    toast({
+                      title: 'Bulk generation cancelled',
+                      description: `Created ${created} of ${total} variant${total === 1 ? '' : 's'} before cancel.`,
+                    });
+                    break;
+                  }
                   const dto: CreateVariantDto = {
                     productListingId: productId,
                     attributes,
                   };
+                  // eslint-disable-next-line no-await-in-loop
                   await variantsApi.create(dto);
                   created++;
+                  setBulkProgress({ created, total });
                 }
 
-                toast({
-                  title: 'Bulk generation complete',
-                  description: `Successfully created ${created} variant${created === 1 ? '' : 's'}.`,
-                });
+                if (!bulkCancelRef.current) {
+                  toast({
+                    title: 'Bulk generation complete',
+                    description: `Successfully created ${created} variant${created === 1 ? '' : 's'}.`,
+                  });
+                }
                 await loadData();
               } catch (err) {
                 console.error('Bulk generation failed:', err);
                 toast({
                   title: 'Bulk generation failed',
-                  description: `Created ${created} variant${created === 1 ? '' : 's'} before encountering an error: ${err instanceof Error ? err.message : 'Unknown error'}`,
+                  description: `Created ${created} of ${total} variant${total === 1 ? '' : 's'} before encountering an error: ${err instanceof Error ? err.message : 'Unknown error'}`,
+                  variant: 'destructive',
                 });
                 await loadData();
               } finally {
                 setIsBulkGenerating(false);
+                setBulkProgress(null);
+                bulkCancelRef.current = false;
               }
             }}
           >
             {isBulkGenerating ? (
               <>
                 <Spinner className="mr-2 h-4 w-4" />
-                Generating...
+                {bulkProgress
+                  ? `Generating ${bulkProgress.created}/${bulkProgress.total}…`
+                  : 'Generating...'}
               </>
             ) : (
               'Generate All Combinations'
             )}
           </Button>
+          {isBulkGenerating && (
+            <Button
+              type="button"
+              variant="outline"
+              className="ml-2"
+              onClick={() => {
+                bulkCancelRef.current = true;
+              }}
+            >
+              Cancel
+            </Button>
+          )}
         </Card>
       )}
     </div>

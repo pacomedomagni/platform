@@ -3,6 +3,7 @@ import {
   Logger,
   NotFoundException,
   BadRequestException,
+  ConflictException,
   OnModuleInit,
   OnModuleDestroy,
   Optional,
@@ -99,22 +100,26 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Extract shipping address from an eBay order
+   * Extract shipping address from an eBay order. Returns nullable fields
+   * because eBay legitimately omits individual fields (state-less
+   * countries, PO boxes without an addressLine1) and digital-goods
+   * orders ship no address at all. Downstream shipping logic checks
+   * for null rather than ''.
    */
   private extractShippingAddress(ebayOrder: EbayOrder) {
     const fulfillmentStartInstructions = ebayOrder.fulfillmentStartInstructions || [];
     const shippingStep = fulfillmentStartInstructions[0]?.shippingStep;
     const address = shippingStep?.shipTo?.contactAddress || {};
-    const fullName = shippingStep?.shipTo?.fullName || 'Unknown';
+    const fullName = shippingStep?.shipTo?.fullName ?? null;
 
     return {
       shippingName: fullName,
-      shippingStreet1: address.addressLine1 || '',
-      shippingStreet2: address.addressLine2 || null,
-      shippingCity: address.city || '',
-      shippingState: address.stateOrProvince || null,
-      shippingPostalCode: address.postalCode || '',
-      shippingCountry: address.countryCode || 'US',
+      shippingStreet1: address.addressLine1 ?? null,
+      shippingStreet2: address.addressLine2 ?? null,
+      shippingCity: address.city ?? null,
+      shippingState: address.stateOrProvince ?? null,
+      shippingPostalCode: address.postalCode ?? null,
+      shippingCountry: address.countryCode ?? null,
     };
   }
 
@@ -216,8 +221,11 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
       // watermark. A small overlap window absorbs eBay's clock skew.
       let pageCheckpoint: Date | null = null;
       while (true) {
+        // No status filter — we want post-fulfillment changes too (refunds,
+        // dispute resolutions, late returns). lastModifiedDate already gates
+        // the result set; eBay only returns orders changed within the window.
         const pageOrders = await this.ebayClient.getOrders(client, {
-          filter: `${filterField}:[${filterDate}..],orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS}`,
+          filter: `${filterField}:[${filterDate}..]`,
           limit: PAGE_SIZE,
           offset,
         });
@@ -268,7 +276,15 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
               ? new Date(ebayOrder.paymentSummary.payments[0].paymentDate)
               : null;
 
-          // Upsert into MarketplaceOrder
+          // Upsert into MarketplaceOrder.
+          //
+          // The update path deliberately does NOT touch shippingAddress.
+          // Once an address has been written, it may have been corrected
+          // by a CS rep (typo'd street name, missing apartment number,
+          // wrong country code). Re-syncing from eBay would clobber that
+          // correction with eBay's stale data on every cron tick.
+          // Financials and statuses, on the other hand, are eBay's
+          // source of truth — keep those eBay-authoritative.
           const upsertedOrder = await this.prisma.marketplaceOrder.upsert({
             where: { tenantId_externalOrderId: { tenantId, externalOrderId } },
             create: {
@@ -290,7 +306,6 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
               externalStatus,
               paymentStatus,
               fulfillmentStatus,
-              ...shippingAddress,
               ...financials,
               itemsData: lineItems as unknown as Prisma.InputJsonValue,
               syncStatus: SyncStatus.SYNCED,
@@ -298,15 +313,30 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
             },
           });
 
-          // Auto-create NoSlag Order for paid orders that aren't yet linked
+          // Auto-create NoSlag Order for paid orders that aren't yet linked.
+          // If unified-order creation fails, mark the marketplace order as
+          // ERROR so it shows up in the operator's "errors" filter and can
+          // be retried via POST /api/marketplace/orders/:id/create-order.
+          // Without this, failures became silent — there was no signal to
+          // ever try again.
           if (paymentStatus === 'PAID' && !upsertedOrder.orderId) {
             try {
               await this.createNoSlagOrder(tenantId, upsertedOrder.id);
             } catch (orderCreateError) {
-              this.logger.warn(
-                `Failed to create NoSlag order for marketplace order ${upsertedOrder.id}: ${orderCreateError?.message}`,
+              const errMsg =
+                orderCreateError instanceof Error
+                  ? orderCreateError.message
+                  : String(orderCreateError);
+              this.logger.error(
+                `Failed to create NoSlag order for marketplace order ${upsertedOrder.id}: ${errMsg}`,
               );
-              // Non-fatal: the marketplace order is still synced, NoSlag order can be created later
+              await this.prisma.marketplaceOrder.update({
+                where: { id: upsertedOrder.id },
+                data: {
+                  syncStatus: SyncStatus.ERROR,
+                  errorMessage: `Order creation failed: ${errMsg}`,
+                },
+              });
             }
           }
 
@@ -558,23 +588,91 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
   /**
    * Issue a refund for a marketplace order via the eBay Fulfillment API.
    * Supports full-order refunds, partial amount refunds, and line-item-level refunds.
+   *
+   * Concurrency model: claim-then-call. We atomically transition the row
+   * from a refundable state (PAID / PARTIALLY_REFUNDED) to a transient
+   * REFUNDING state via a conditional updateMany. The first caller wins;
+   * any concurrent caller's updateMany returns count=0 and throws
+   * ConflictException. The eBay API call happens *after* the claim, so
+   * we don't hold a row lock across a network round-trip. On failure we
+   * roll the status back to whatever it was before the claim.
    */
   async issueRefund(
     tenantId: string,
     orderId: string,
     data: { amount?: number; comment?: string; lineItemIds?: string[] }
   ): Promise<Record<string, unknown>> {
+    const REFUNDABLE_STATUSES = ['PAID', 'PARTIALLY_REFUNDED'];
+
+    // Atomic claim using typed Prisma: read the candidate previous
+    // status, then conditionally transition only if the row still has
+    // that exact status. Two concurrent callers will see the same
+    // candidate, but only one of their updateMany calls returns count=1
+    // — the other returns 0 and bails. Race-safe at READ COMMITTED.
+    //
+    // Both queries run inside a transaction so a connection-level
+    // disconnect between them doesn't leave the row mid-transition.
+    const previousStatus = await this.prisma.$transaction(async (tx) => {
+      const candidate = await tx.marketplaceOrder.findFirst({
+        where: {
+          id: orderId,
+          tenantId,
+          paymentStatus: { in: REFUNDABLE_STATUSES },
+        },
+        select: { paymentStatus: true },
+      });
+
+      if (!candidate) {
+        // Either the row doesn't exist or it's not in a refundable
+        // state. Distinguish for the caller.
+        const exists = await tx.marketplaceOrder.findFirst({
+          where: { id: orderId, tenantId },
+          select: { paymentStatus: true },
+        });
+        if (!exists) {
+          throw new NotFoundException(`Marketplace order ${orderId} not found`);
+        }
+        throw new ConflictException(
+          `Cannot refund: order is ${exists.paymentStatus}. ` +
+          `Refunds require PAID or PARTIALLY_REFUNDED.`
+        );
+      }
+
+      const claim = await tx.marketplaceOrder.updateMany({
+        where: {
+          id: orderId,
+          tenantId,
+          // Precondition pinned to the exact value we just read. If a
+          // concurrent caller flipped the row between findFirst and
+          // here, their write changed the status away from this value
+          // and our updateMany matches zero rows.
+          paymentStatus: candidate.paymentStatus,
+        },
+        data: { paymentStatus: 'REFUNDING' },
+      });
+
+      if (claim.count === 0) {
+        throw new ConflictException(
+          'Another refund is in progress for this order, or the order is no longer refundable.'
+        );
+      }
+
+      return candidate.paymentStatus;
+    });
+
+    // Now that we own the row, read the data we need to build the refund.
     const order = await this.getOrder(tenantId, orderId);
+
+    const orderTotal = order.total?.toNumber?.() || 0;
+    const newPaymentStatus =
+      data.amount && data.amount < orderTotal
+        ? 'PARTIALLY_REFUNDED'
+        : 'REFUNDED';
 
     if (this.mockMode) {
       this.logger.log(
         `[MOCK] Issued refund for order ${order.externalOrderId}: amount=${data.amount}, lineItems=${data.lineItemIds?.join(',') || 'all'}`
       );
-
-      const newPaymentStatus = data.amount && data.amount < (order.total?.toNumber?.() || 0)
-        ? 'PARTIALLY_REFUNDED'
-        : 'REFUNDED';
-
       await this.prisma.marketplaceOrder.update({
         where: { id: orderId },
         data: {
@@ -583,27 +681,25 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
           errorMessage: null,
         },
       });
-
       return {
         refundId: `mock_refund_${Date.now()}`,
         orderId: order.externalOrderId,
         refundStatus: 'PENDING',
-        amount: data.amount || order.total?.toNumber?.() || 0,
+        amount: data.amount || orderTotal,
         comment: data.comment || null,
         createdDate: new Date().toISOString(),
       };
     }
 
-    const client = await this.ebayStore.getClient(order.connectionId, tenantId);
-
     try {
+      const client = await this.ebayStore.getClient(order.connectionId, tenantId);
+
       const refundPayload: Record<string, unknown> = {
         reasonForRefund: 'OTHER',
         comment: data.comment || 'Refund issued by seller',
       };
 
       if (data.lineItemIds && data.lineItemIds.length > 0) {
-        // Line-item-level refund
         const lineItems = (order.itemsData as MappedOrderLineItem[]) || [];
         refundPayload.refundItems = data.lineItemIds.map((lineItemId) => {
           const lineItem = lineItems.find((li) => li.lineItemId === lineItemId);
@@ -615,7 +711,6 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
             },
           };
         });
-
         if (data.amount) {
           refundPayload.orderLevelRefundAmount = {
             value: data.amount.toFixed(2),
@@ -623,7 +718,6 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
           };
         }
       } else if (data.amount) {
-        // Order-level partial refund
         refundPayload.orderLevelRefundAmount = {
           value: data.amount.toFixed(2),
           currency: order.currency || 'USD',
@@ -635,13 +729,6 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
         order.externalOrderId,
         refundPayload
       );
-
-      // Determine new payment status
-      const orderTotal = order.total?.toNumber?.() || 0;
-      const newPaymentStatus =
-        data.amount && data.amount < orderTotal
-          ? 'PARTIALLY_REFUNDED'
-          : 'REFUNDED';
 
       await this.prisma.marketplaceOrder.update({
         where: { id: orderId },
@@ -665,19 +752,22 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
         ...result,
       };
     } catch (error) {
+      const errMsg = error instanceof Error ? error.message : String(error);
       this.logger.error(
         `Failed to issue refund for eBay order ${order.externalOrderId}`,
         error
       );
-
-      await this.prisma.marketplaceOrder.update({
-        where: { id: orderId },
+      // Roll the claim back so the order is refundable again. Only do
+      // this if the row is still in REFUNDING (a concurrent flow could
+      // have moved it, though our claim should prevent that).
+      await this.prisma.marketplaceOrder.updateMany({
+        where: { id: orderId, tenantId, paymentStatus: 'REFUNDING' },
         data: {
+          paymentStatus: previousStatus,
           syncStatus: SyncStatus.ERROR,
-          errorMessage: `Refund failed: ${error?.message || String(error)}`,
+          errorMessage: `Refund failed: ${errMsg}`,
         },
       });
-
       throw error;
     }
   }

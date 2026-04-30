@@ -11,17 +11,7 @@ import { ChevronDown, ChevronUp, Truck } from 'lucide-react';
 import { shippingApi, type ShippingRate } from '@/lib/store-api';
 import { useCartStore } from '@/lib/cart-store';
 import { formatCurrency } from '../../_lib/format';
-
-const COUNTRIES = [
-  { code: 'US', name: 'United States' },
-  { code: 'CA', name: 'Canada' },
-  { code: 'GB', name: 'United Kingdom' },
-  { code: 'AU', name: 'Australia' },
-  { code: 'DE', name: 'Germany' },
-  { code: 'FR', name: 'France' },
-  { code: 'AE', name: 'United Arab Emirates' },
-  { code: 'NG', name: 'Nigeria' },
-];
+import { COUNTRIES } from '@/lib/countries';
 
 // Conservative US-style estimate when no tax preview endpoint exists.
 // Clearly labelled "Estimated tax" downstream.

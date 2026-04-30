@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService, bypassTenantGuard, runWithTenant } from '@platform/db';
 import { DistributedLockService } from '@platform/queue';
-import { EbayStoreService } from './ebay-store.service';
 import { EbayOrderSyncService } from './ebay-order-sync.service';
 import { EbayWebhookService } from './ebay-webhook.service';
 
@@ -23,7 +22,6 @@ export class EbayNotificationService {
 
   constructor(
     private prisma: PrismaService,
-    private ebayStore: EbayStoreService,
     private orderSync: EbayOrderSyncService,
     private webhookService: EbayWebhookService,
     private lockService: DistributedLockService,
@@ -109,8 +107,16 @@ export class EbayNotificationService {
 
   /**
    * Handle order-related notifications.
-   * Looks up the connection by the eBay user ID or order reference in the payload,
-   * then triggers an incremental order sync for the matching connection.
+   *
+   * Resolves which tenant + connection the notification belongs to by the
+   * seller's ebayUserId (persisted at OAuth callback). Once we have the
+   * tenant we kick off an incremental sync that will upsert the order.
+   *
+   * Doing it seller-first — instead of looking up the order by
+   * externalOrderId across all tenants — keeps every read tenant-scoped
+   * and avoids the structural unsoundness of `findFirst` against a
+   * (tenantId, externalOrderId) composite-unique row without supplying
+   * the tenant.
    */
   async handleOrderNotification(payload: any): Promise<void> {
     const externalOrderId = payload?.metadata?.orderId || payload?.resource?.orderId;
@@ -119,59 +125,28 @@ export class EbayNotificationService {
       return;
     }
 
-    this.logger.log(`Handling order notification for eBay order ${externalOrderId}`);
-
-    // We don't know the tenant yet — bypass for the lookup, then pin the
-    // tenant for the per-order sync work.
-    const existingOrder = await bypassTenantGuard(() =>
-      this.prisma.marketplaceOrder.findFirst({
-        where: { externalOrderId },
-        select: { connectionId: true, tenantId: true },
-      }),
-    );
-
-    if (existingOrder) {
-      try {
-        await runWithTenant(existingOrder.tenantId, () =>
-          this.orderSync.syncOrders(existingOrder.tenantId, existingOrder.connectionId),
-        );
-      } catch (error) {
-        this.logger.error(
-          `Incremental order sync failed for connection ${existingOrder.connectionId}`,
-          error
-        );
-      }
-      return;
-    }
-
-    // Order not yet synced. The notification's `username` is the buyer's
-    // eBay username, NOT the seller's — so it cannot be used to identify
-    // our connection. The seller identity is in `payload.metadata.userId`
-    // (eBay-assigned seller ID, stored as `ebayUserId` in platformConfig
-    // at connect time). Resolve the connection by that exact ID via a
-    // JSONB-path filter so the query plan only touches one row.
     const sellerUserId =
       payload?.metadata?.userId ||
       payload?.resource?.seller?.username;
 
     if (!sellerUserId) {
       this.logger.warn(
-        `Order notification for unknown order ${externalOrderId} — no seller identifier in payload, dropping`
+        `Order notification for ${externalOrderId} dropped — no seller identifier in payload`
       );
       return;
     }
 
+    this.logger.log(`Handling order notification for eBay order ${externalOrderId} (seller=${sellerUserId})`);
+
+    // Cross-tenant lookup keyed only on platformConfig.ebayUserId, which
+    // is the canonical seller key written at OAuth callback time.
     const connection = await bypassTenantGuard(() =>
       this.prisma.marketplaceConnection.findFirst({
         where: {
           platform: 'EBAY',
           isActive: true,
           isConnected: true,
-          OR: [
-            { platformConfig: { path: ['ebayUserId'], equals: sellerUserId } },
-            { platformConfig: { path: ['userId'], equals: sellerUserId } },
-            { platformConfig: { path: ['username'], equals: sellerUserId } },
-          ],
+          platformConfig: { path: ['ebayUserId'], equals: sellerUserId },
         },
         select: { id: true, tenantId: true },
       }),

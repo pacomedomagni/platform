@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card, Skeleton, StatusBadge } from '@platform/ui';
 import {
   DollarSign,
@@ -16,7 +17,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import Link from 'next/link';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface BalanceAmount {
   amount: number;
@@ -94,6 +95,7 @@ function PayoutStatusBadge({ status }: { status: string }) {
 }
 
 export default function EarningsPage() {
+  const router = useRouter();
   const [data, setData] = useState<EarningsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -104,35 +106,22 @@ export default function EarningsPage() {
     setError(null);
     try {
       const token = localStorage.getItem('access_token');
-      const tenantId = localStorage.getItem('tenantId');
-
-      if (!token || !tenantId) {
-        window.location.href = '/login';
+      if (!token) {
+        router.push('/login');
         return;
       }
 
-      const res = await fetch('/api/v1/store/admin/dashboard/earnings', {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'x-tenant-id': tenantId || '',
-        },
-      });
-
-      if (res.status === 401) {
-        localStorage.removeItem('access_token');
-        window.location.href = '/login';
-        return;
-      }
-      if (!res.ok) throw new Error('Failed to load earnings');
-      const json = unwrapJson(await res.json());
-      setData(json);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      // 6.1: axios interceptor handles 401 → /login redirect already, so
+      // we don't have to clear the token + redirect manually.
+      const res = await api.get('/v1/store/admin/dashboard/earnings');
+      setData(res.data);
+    } catch (err: any) {
+      setError(err?.response?.data?.message || (err instanceof Error ? err.message : 'An error occurred'));
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     fetchEarnings();
@@ -140,16 +129,11 @@ export default function EarningsPage() {
 
   const handleOpenStripeDashboard = async () => {
     try {
-      const token = localStorage.getItem('access_token');
       const tenantId = localStorage.getItem('tenantId');
-      const res = await fetch(`/api/v1/onboarding/${tenantId}/stripe/dashboard`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Failed to get dashboard link');
-      const { url } = unwrapJson(await res.json());
-      window.open(url, '_blank');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to open dashboard');
+      const res = await api.get<{ url: string }>(`/v1/onboarding/${tenantId}/stripe/dashboard`);
+      window.open(res.data.url, '_blank');
+    } catch (err: any) {
+      setError(err?.response?.data?.message || (err instanceof Error ? err.message : 'Failed to open dashboard'));
     }
   };
 

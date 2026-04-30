@@ -10,7 +10,7 @@ import {
   Send,
   ExternalLink,
 } from 'lucide-react';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface Message {
   id: string;
@@ -68,22 +68,15 @@ export default function MarketplaceMessageThreadPage() {
   const loadThread = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/messages/${threadId}`, {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = unwrapJson<MessageThread>(await res.json());
-        setThread(data);
-      } else {
-        toast({
-          title: 'Error',
-          description: 'Failed to load message thread',
-          variant: 'destructive',
-        });
-      }
-    } catch (error) {
+      const res = await api.get<MessageThread>(`/v1/marketplace/messages/${threadId}`);
+      setThread(res.data);
+    } catch (error: any) {
       console.error('Failed to load thread:', error);
-      toast({ title: 'Error', description: 'Failed to load message thread', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.message || 'Failed to load message thread',
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }
@@ -91,10 +84,7 @@ export default function MarketplaceMessageThreadPage() {
 
   const markAsRead = async () => {
     try {
-      await fetch(`/api/v1/marketplace/messages/${threadId}/read`, {
-        method: 'POST',
-        credentials: 'include',
-      });
+      await api.post(`/v1/marketplace/messages/${threadId}/read`);
     } catch (error) {
       console.error('Failed to mark as read:', error);
     }
@@ -106,36 +96,25 @@ export default function MarketplaceMessageThreadPage() {
 
     setSending(true);
     try {
-      const res = await fetch(`/api/v1/marketplace/messages/${threadId}/reply`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ body }),
+      const res = await api.post<Message>(`/v1/marketplace/messages/${threadId}/reply`, { body });
+      const newMessage = res.data;
+      setThread((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          status: 'RESPONDED',
+          messages: [...prev.messages, newMessage],
+        };
       });
-
-      if (res.ok) {
-        const newMessage = unwrapJson<Message>(await res.json());
-        setThread((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            status: 'RESPONDED',
-            messages: [...prev.messages, newMessage],
-          };
-        });
-        setReplyBody('');
-        toast({ title: 'Sent', description: 'Reply sent successfully' });
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({
-          title: 'Error',
-          description: error.error || 'Failed to send reply',
-          variant: 'destructive',
-        });
-      }
-    } catch (error) {
+      setReplyBody('');
+      toast({ title: 'Sent', description: 'Reply sent successfully' });
+    } catch (error: any) {
       console.error('Failed to send reply:', error);
-      toast({ title: 'Error', description: 'Failed to send reply', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to send reply',
+        variant: 'destructive',
+      });
     } finally {
       setSending(false);
     }

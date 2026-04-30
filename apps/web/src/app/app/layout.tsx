@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppShell, GlobalCommandBar, type CommandRoute } from '@platform/ui';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 import {
   LayoutDashboard,
   Package,
@@ -96,16 +96,10 @@ export default function AppLayout({
     (async () => {
       try {
         const token = localStorage.getItem('access_token');
-        const tenantId = localStorage.getItem('tenantId');
         if (!token) return;
-        const res = await fetch('/api/v1/store/admin/dashboard', {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'x-tenant-id': tenantId || '',
-          },
-        });
-        if (!res.ok) return;
-        const data = unwrapJson<{
+        // 6.1: route through axios singleton — auth + tenant headers
+        // attach automatically and the response envelope is unwrapped.
+        const res = await api.get<{
           totalRevenue?: number;
           totalOrders?: number;
           checklist?: {
@@ -116,7 +110,8 @@ export default function AppLayout({
             hasLegalPages?: boolean;
             storePublished?: boolean;
           };
-        }>(await res.json());
+        }>('/v1/store/admin/dashboard');
+        const data = res.data;
         if (cancelled) return;
         const checklist = data.checklist ?? {};
         const allDone =

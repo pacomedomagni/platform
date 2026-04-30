@@ -11,7 +11,7 @@ import {
   Filter,
   Download,
 } from 'lucide-react';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface Connection {
   id: string;
@@ -61,13 +61,8 @@ export default function MarketplaceMessagesPage() {
 
   const loadConnections = async () => {
     try {
-      const res = await fetch('/api/v1/marketplace/connections', {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = unwrapJson<Connection[]>(await res.json());
-        setConnections(data);
-      }
+      const res = await api.get<Connection[]>('/v1/marketplace/connections');
+      setConnections(res.data);
     } catch (error) {
       console.error('Failed to load connections:', error);
     }
@@ -75,13 +70,8 @@ export default function MarketplaceMessagesPage() {
 
   const loadUnreadCount = async () => {
     try {
-      const res = await fetch('/api/v1/marketplace/messages/unread-count', {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = unwrapJson<{ count: number }>(await res.json());
-        setUnreadCount(data.count);
-      }
+      const res = await api.get<{ count: number }>('/v1/marketplace/messages/unread-count');
+      setUnreadCount(res.data.count);
     } catch (error) {
       console.error('Failed to load unread count:', error);
     }
@@ -90,24 +80,12 @@ export default function MarketplaceMessagesPage() {
   const loadThreads = async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (selectedConnection !== 'all') {
-        params.append('connectionId', selectedConnection);
-      }
-      if (selectedStatus !== 'all') {
-        params.append('status', selectedStatus);
-      }
-      if (unreadOnly) {
-        params.append('unreadOnly', 'true');
-      }
-
-      const res = await fetch(`/api/v1/marketplace/messages?${params}`, {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = unwrapJson<MessageThread[]>(await res.json());
-        setThreads(data);
-      }
+      const params: Record<string, string> = {};
+      if (selectedConnection !== 'all') params.connectionId = selectedConnection;
+      if (selectedStatus !== 'all') params.status = selectedStatus;
+      if (unreadOnly) params.unreadOnly = 'true';
+      const res = await api.get<MessageThread[]>('/v1/marketplace/messages', { params });
+      setThreads(res.data);
     } catch (error) {
       console.error('Failed to load threads:', error);
     } finally {
@@ -118,26 +96,17 @@ export default function MarketplaceMessagesPage() {
   const handleSync = async () => {
     setSyncing(true);
     try {
-      const res = await fetch('/api/v1/marketplace/messages/sync', {
-        method: 'POST',
-        credentials: 'include',
-      });
-
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Messages synced successfully' });
-        loadThreads();
-        loadUnreadCount();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({
-          title: 'Error',
-          description: error.error || 'Failed to sync messages',
-          variant: 'destructive',
-        });
-      }
-    } catch (error) {
+      await api.post('/v1/marketplace/messages/sync');
+      toast({ title: 'Success', description: 'Messages synced successfully' });
+      loadThreads();
+      loadUnreadCount();
+    } catch (error: any) {
       console.error('Failed to sync messages:', error);
-      toast({ title: 'Error', description: 'Failed to sync messages', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to sync messages',
+        variant: 'destructive',
+      });
     } finally {
       setSyncing(false);
     }

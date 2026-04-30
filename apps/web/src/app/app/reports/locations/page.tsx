@@ -2,8 +2,12 @@
 
 import { useState } from 'react';
 import { Button, Input, Badge } from '@platform/ui';
+import { Download } from 'lucide-react';
 import api from '../../../../lib/api';
-import { ReportAlert, ReportCard, ReportEmpty, ReportFilters, ReportPage, ReportTable } from '../_components/report-shell';
+import { ReportAlert, ReportCard, ReportEmpty, ReportFilters, ReportLoading, ReportPage, ReportTable } from '../_components/report-shell';
+import { downloadCsv } from '../_components/report-format';
+import { useUrlFilters } from '@/lib/hooks/use-url-filters';
+import { CodeTypeahead } from '../_components/code-typeahead';
 
 type LocationRow = {
   code: string;
@@ -21,6 +25,8 @@ export default function LocationsReportPage() {
   const [rows, setRows] = useState<LocationRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useUrlFilters({ warehouseCode }, { warehouseCode: setWarehouseCode });
 
   const load = async () => {
     setLoading(true);
@@ -42,14 +48,35 @@ export default function LocationsReportPage() {
     return { paddingLeft: `${depth * 16}px` };
   };
 
+  const handleExport = () => {
+    downloadCsv(
+      'locations',
+      ['Location', 'Code', 'Path', 'Pickable', 'Putaway', 'Staging', 'Active'],
+      rows.map((r) => [
+        r.name ?? r.code,
+        r.code,
+        r.path,
+        r.isPickable ? 'Yes' : 'No',
+        r.isPutaway ? 'Yes' : 'No',
+        r.isStaging ? 'Yes' : 'No',
+        r.isActive ? 'Active' : 'Inactive',
+      ]),
+    );
+  };
+
   return (
-    <ReportPage title="Locations" description="Warehouse location tree.">
+    <ReportPage
+      title="Locations"
+      description="Warehouse location tree."
+      actions={
+        <Button variant="outline" size="sm" onClick={handleExport} disabled={rows.length === 0}>
+          <Download className="w-4 h-4 mr-2" />
+          Export CSV
+        </Button>
+      }
+    >
       <ReportFilters className="md:grid-cols-3">
-        <Input
-          placeholder="Warehouse Code"
-          value={warehouseCode}
-          onChange={(e) => setWarehouseCode(e.target.value)}
-        />
+        <CodeTypeahead docType="Warehouse" value={warehouseCode} onChange={setWarehouseCode} placeholder="Warehouse Code" />
         <Button onClick={load} disabled={loading}>
           {loading ? 'Loading...' : 'Load'}
         </Button>
@@ -71,7 +98,8 @@ export default function LocationsReportPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 && <ReportEmpty colSpan={7} />}
+            {loading && <ReportLoading colSpan={7} />}
+            {!loading && rows.length === 0 && <ReportEmpty colSpan={7} />}
             {rows.map((row, idx) => (
               <tr key={`${row.code}-${idx}`} className="border-b last:border-0">
                 <td className="p-3" style={indentForPath(row.path)}>{row.name ?? row.code}</td>

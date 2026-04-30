@@ -14,24 +14,33 @@ export default function DocTypeListPage() {
     const [data, setData] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
 
+    const [loadError, setLoadError] = useState<string | null>(null);
+
     const loadData = useCallback(async () => {
         try {
             const dataRes = await api.get(`/v1/doc/${docTypeName}`);
             if (Array.isArray(dataRes.data)) setData(dataRes.data);
         } catch (err) {
             console.error(err);
+            const msg = err instanceof Error ? err.message : `Could not load ${docTypeName}.`;
+            setLoadError(msg);
+            toast({ title: 'Could not load records', description: msg, variant: 'destructive' });
         }
     }, [docTypeName]);
 
     useEffect(() => {
         const init = async () => {
             setLoading(true);
+            setLoadError(null);
             try {
                 const metaRes = await api.get(`/v1/doc/meta/${docTypeName}`);
                 if (metaRes.data) setDocType(metaRes.data);
                 await loadData();
             } catch (err) {
                 console.error(err);
+                const msg = err instanceof Error ? err.message : `Could not load ${docTypeName} meta.`;
+                setLoadError(msg);
+                toast({ title: 'Could not load DocType', description: msg, variant: 'destructive' });
             } finally {
                 setLoading(false);
             }
@@ -71,7 +80,28 @@ export default function DocTypeListPage() {
     }
 
     if (!docType) {
-        return <div>DocType not found</div>;
+        // Distinguish real-not-found (404 from API would return null meta)
+        // from a transient load failure (network/auth/5xx). The previous
+        // bare div misdirected users to "DocType not found" when in fact
+        // the meta endpoint had errored. See DT3 in docs/ui-audit.md.
+        return (
+            <div className="p-8">
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-6 text-center">
+                    <p className="text-sm font-medium text-amber-800">
+                        {loadError ? 'Could not load DocType' : `DocType '${docTypeName}' not found`}
+                    </p>
+                    {loadError && (
+                        <p className="mt-1 text-xs text-amber-700">{loadError}</p>
+                    )}
+                    <button
+                        onClick={() => window.location.reload()}
+                        className="mt-3 text-sm font-medium text-amber-700 underline hover:no-underline"
+                    >
+                        Try again
+                    </button>
+                </div>
+            </div>
+        );
     }
 
     return (

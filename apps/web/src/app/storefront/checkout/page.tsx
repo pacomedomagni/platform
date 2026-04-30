@@ -20,17 +20,7 @@ import { CheckoutProgress } from './_components/checkout-progress';
 import { TrustBadges } from './_components/trust-badges';
 import { PromoCode } from './_components/promo-code';
 import { MobileOrderSummary } from './_components/mobile-order-summary';
-
-const countries = [
-  { code: 'US', name: 'United States' },
-  { code: 'GB', name: 'United Kingdom' },
-  { code: 'AE', name: 'United Arab Emirates' },
-  { code: 'NG', name: 'Nigeria' },
-  { code: 'CA', name: 'Canada' },
-  { code: 'AU', name: 'Australia' },
-  { code: 'DE', name: 'Germany' },
-  { code: 'FR', name: 'France' },
-];
+import { COUNTRIES as countries } from '@/lib/countries';
 
 export default function CheckoutPage() {
   const router = useRouter();
@@ -60,6 +50,14 @@ export default function CheckoutPage() {
   const [selectedShippingRateId, setSelectedShippingRateId] = useState<string | null>(null);
   const [isLoadingShippingRates, setIsLoadingShippingRates] = useState(false);
   const [shippingRatesError, setShippingRatesError] = useState<string | null>(null);
+  // SF-CK8: error shown inline if the user submits without choosing a method.
+  const [shippingMethodError, setShippingMethodError] = useState<string | null>(null);
+
+  // SF-CK11/CK12: surface payment-config errors instead of leaving the user
+  // staring at a forever-loading Stripe/Square form. Two failure modes:
+  //   - getConfig() throws (network / 500 / tenant misconfigured)
+  //   - getConfig() succeeds but isConfigured=false or required IDs missing
+  const [paymentConfigError, setPaymentConfigError] = useState<string | null>(null);
 
   const {
     register,
@@ -96,37 +94,70 @@ export default function CheckoutPage() {
     // Load payment config (Stripe or Square depending on tenant)
     paymentsApi.getConfig().then(config => {
       if (cancelled) return;
-      setPaymentProvider(config.paymentProvider || 'stripe');
-      if (config.paymentProvider === 'square') {
+      const provider = config.paymentProvider || 'stripe';
+      setPaymentProvider(provider);
+      // SF-CK11/CK12: validate the config so we don't render a stuck
+      // payment form when the tenant hasn't finished payments setup.
+      if (provider === 'square') {
+        if (!config.squareApplicationId || !config.squareLocationId) {
+          setPaymentConfigError(
+            'Payments are not fully configured for this store yet. Please contact the store owner.',
+          );
+          return;
+        }
         setSquareApplicationId(config.squareApplicationId);
         setSquareLocationId(config.squareLocationId);
-      } else if (config.publicKey) {
+        setPaymentConfigError(null);
+      } else {
+        if (!config.publicKey) {
+          setPaymentConfigError(
+            'Payments are not fully configured for this store yet. Please contact the store owner.',
+          );
+          return;
+        }
         setStripePublicKey(config.publicKey);
+        setPaymentConfigError(null);
       }
-    }).catch(err => { if (!cancelled) console.error(err); });
+    }).catch(err => {
+      if (cancelled) return;
+      console.error('Failed to load payment config:', err);
+      setPaymentConfigError(
+        err instanceof Error
+          ? `Could not load payment options: ${err.message}`
+          : 'Could not load payment options. Please refresh and try again.',
+      );
+    });
 
     return () => { cancelled = true; };
   }, [initializeCart]);
 
-  // Pre-fill form if customer is logged in
+  // Pre-fill form if customer is logged in. Runs ONCE per checkout session.
+  // The previous shape ran on every `customer` reference change; if
+  // `useAuthStore` re-resolved the customer mid-typing (e.g. a refresh-on-401
+  // retriggered loadProfile), every setValue() would clobber what the user
+  // had just typed. The ref-guard below ensures we only seed once and
+  // user edits afterwards always win.
+  const didSeedFromCustomerRef = useRef(false);
   useEffect(() => {
-    if (customer) {
-      if (customer.email) setValue('email', customer.email);
-      if (customer.firstName) setValue('firstName', customer.firstName);
-      if (customer.lastName) setValue('lastName', customer.lastName);
-      if (customer.phone) setValue('phone', customer.phone);
+    if (didSeedFromCustomerRef.current) return;
+    if (!customer) return;
+    didSeedFromCustomerRef.current = true;
 
-      // If customer has a default address, use it
-      if (customer.addresses?.length) {
-        const defaultAddr = customer.addresses.find(a => a.isDefault) || customer.addresses[0];
-        if (defaultAddr.company) setValue('company', defaultAddr.company);
-        if (defaultAddr.addressLine1) setValue('addressLine1', defaultAddr.addressLine1);
-        if (defaultAddr.addressLine2) setValue('addressLine2', defaultAddr.addressLine2);
-        if (defaultAddr.city) setValue('city', defaultAddr.city);
-        if (defaultAddr.state) setValue('state', defaultAddr.state);
-        if (defaultAddr.postalCode) setValue('postalCode', defaultAddr.postalCode);
-        if (defaultAddr.country) setValue('country', defaultAddr.country);
-      }
+    if (customer.email) setValue('email', customer.email);
+    if (customer.firstName) setValue('firstName', customer.firstName);
+    if (customer.lastName) setValue('lastName', customer.lastName);
+    if (customer.phone) setValue('phone', customer.phone);
+
+    // If customer has a default address, use it
+    if (customer.addresses?.length) {
+      const defaultAddr = customer.addresses.find(a => a.isDefault) || customer.addresses[0];
+      if (defaultAddr.company) setValue('company', defaultAddr.company);
+      if (defaultAddr.addressLine1) setValue('addressLine1', defaultAddr.addressLine1);
+      if (defaultAddr.addressLine2) setValue('addressLine2', defaultAddr.addressLine2);
+      if (defaultAddr.city) setValue('city', defaultAddr.city);
+      if (defaultAddr.state) setValue('state', defaultAddr.state);
+      if (defaultAddr.postalCode) setValue('postalCode', defaultAddr.postalCode);
+      if (defaultAddr.country) setValue('country', defaultAddr.country);
     }
   }, [customer, setValue]);
 
@@ -153,18 +184,30 @@ export default function CheckoutPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shippingEstimate, customer]);
 
-  // Fetch shipping rates when address country/state/postalCode changes
-  const fetchShippingRates = async (country: string, state?: string, postalCode?: string) => {
+  // SF-CK5: fetch shipping rates with a signal so the cleanup effect can
+  // abort an in-flight request when the user keeps editing address fields.
+  // Without this, fast typing produced a flurry of overlapping requests and
+  // the last response to land — not the latest the user typed — won.
+  const fetchShippingRates = async (
+    country: string,
+    state: string | undefined,
+    postalCode: string | undefined,
+    signal: AbortSignal,
+  ) => {
     if (!country) return;
     setIsLoadingShippingRates(true);
     setShippingRatesError(null);
     try {
-      const result = await shippingApi.getRates({
-        country,
-        state,
-        zipCode: postalCode,
-        cartTotal: subtotal,
-      });
+      const result = await shippingApi.getRates(
+        {
+          country,
+          state,
+          zipCode: postalCode,
+          cartTotal: subtotal,
+        },
+        { signal },
+      );
+      if (signal.aborted) return;
       setShippingRates(result.rates || []);
       // Functional updater so back-to-back fetches don't race against a stale
       // closure (country + state setValue in the same tick each trigger a
@@ -180,11 +223,12 @@ export default function CheckoutPage() {
           return preferred?.id ?? result.rates[0].id;
         });
       }
-    } catch {
+    } catch (err) {
+      if (signal.aborted || (err as { name?: string })?.name === 'AbortError') return;
       setShippingRates([]);
       setShippingRatesError('Could not load shipping rates. Default shipping will be applied.');
     } finally {
-      setIsLoadingShippingRates(false);
+      if (!signal.aborted) setIsLoadingShippingRates(false);
     }
   };
 
@@ -193,11 +237,10 @@ export default function CheckoutPage() {
   const watchedPostalCode = watch('postalCode');
 
   useEffect(() => {
-    if (watchedCountry && items.length > 0) {
-      const controller = new AbortController();
-      fetchShippingRates(watchedCountry, watchedState, watchedPostalCode);
-      return () => controller.abort();
-    }
+    if (!watchedCountry || items.length === 0) return;
+    const controller = new AbortController();
+    fetchShippingRates(watchedCountry, watchedState, watchedPostalCode, controller.signal);
+    return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watchedCountry, watchedState, watchedPostalCode, subtotal]);
 
@@ -240,6 +283,16 @@ export default function CheckoutPage() {
     if (isCreatingOrder) {
       return;
     }
+
+    // SF-CK8: if rates loaded but the user hasn't picked one (rare — we
+    // auto-select — but possible if they actively cleared the radio), block
+    // submit with an inline error rather than silently using the cart's
+    // default shipping.
+    if (shippingRates.length > 0 && !selectedShippingRateId) {
+      setShippingMethodError('Please select a shipping method to continue.');
+      return;
+    }
+    setShippingMethodError(null);
 
     setIsCreatingOrder(true);
     setError(null);
@@ -295,6 +348,18 @@ export default function CheckoutPage() {
       setIsCreatingOrder(false);
     }
   };
+
+  // SF-CK1: derive an effective shipping cost from the user's chosen rate.
+  // The cart-store `shipping` lags the picker until the backend reconciles
+  // on order create, so the summary used to show "Calculated" while the
+  // user clicked Continue with no idea what they were about to pay. Prefer
+  // the chosen rate's price; fall back to the cart-store value.
+  const selectedShippingRate = shippingRates.find((r) => r.id === selectedShippingRateId) ?? null;
+  const effectiveShipping =
+    selectedShippingRate
+      ? Number(selectedShippingRate.price ?? 0)
+      : shipping;
+  const effectiveTotal = subtotal + effectiveShipping + tax - discount;
 
   const handlePaymentSuccess = async () => {
     await clearCart();
@@ -370,6 +435,17 @@ export default function CheckoutPage() {
         >
           <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" aria-hidden="true" />
           <p className="text-sm text-red-700">{error}</p>
+        </Card>
+      )}
+
+      {paymentConfigError && step === 'info' && (
+        <Card
+          className="flex items-center gap-3 border-amber-200 bg-amber-50 p-4"
+          role="status"
+          aria-live="polite"
+        >
+          <AlertCircle className="h-5 w-5 text-amber-600 flex-shrink-0" aria-hidden="true" />
+          <p className="text-sm text-amber-800">{paymentConfigError}</p>
         </Card>
       )}
 
@@ -583,14 +659,22 @@ export default function CheckoutPage() {
                       Loading shipping rates...
                     </div>
                   ) : shippingRates.length > 0 ? (
-                    <div className="space-y-2">
+                    <div
+                      className="space-y-2"
+                      role="radiogroup"
+                      aria-labelledby="shipping-method-heading"
+                      aria-invalid={shippingMethodError ? 'true' : 'false'}
+                      aria-describedby={shippingMethodError ? 'shipping-method-error' : undefined}
+                    >
                       {shippingRates.map((rate) => (
                         <label
                           key={rate.id}
                           className={`flex items-center justify-between rounded-lg border p-3 cursor-pointer transition-colors ${
                             selectedShippingRateId === rate.id
                               ? 'border-primary bg-primary/5'
-                              : 'border-border hover:border-primary/50'
+                              : shippingMethodError
+                                ? 'border-red-300'
+                                : 'border-border hover:border-primary/50'
                           }`}
                         >
                           <div className="flex items-center gap-3">
@@ -599,7 +683,10 @@ export default function CheckoutPage() {
                               name="shippingRate"
                               value={rate.id}
                               checked={selectedShippingRateId === rate.id}
-                              onChange={() => setSelectedShippingRateId(rate.id)}
+                              onChange={() => {
+                                setSelectedShippingRateId(rate.id);
+                                if (shippingMethodError) setShippingMethodError(null);
+                              }}
                               className="h-4 w-4 text-primary"
                             />
                             <div>
@@ -614,6 +701,15 @@ export default function CheckoutPage() {
                           </span>
                         </label>
                       ))}
+                      {shippingMethodError && (
+                        <p
+                          id="shipping-method-error"
+                          className="text-xs text-red-600"
+                          role="alert"
+                        >
+                          {shippingMethodError}
+                        </p>
+                      )}
                     </div>
                   ) : (
                     <p className="text-sm text-muted-foreground">
@@ -678,7 +774,25 @@ export default function CheckoutPage() {
                 </address>
               </div>
 
-              {paymentProvider === 'square' ? (
+              {paymentConfigError ? (
+                <div
+                  className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-4"
+                  role="alert"
+                  aria-live="assertive"
+                >
+                  <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" aria-hidden="true" />
+                  <div className="space-y-2">
+                    <p className="text-sm text-red-700">{paymentConfigError}</p>
+                    <button
+                      type="button"
+                      onClick={() => setStep('info')}
+                      className="text-sm font-medium text-red-700 underline focus:outline-none focus:ring-2 focus:ring-red-300 rounded"
+                    >
+                      Return to shipping
+                    </button>
+                  </div>
+                </div>
+              ) : paymentProvider === 'square' ? (
                 squareApplicationId && squareLocationId && orderId ? (
                   <SquarePayment
                     orderId={orderId}
@@ -827,9 +941,20 @@ export default function CheckoutPage() {
                 <span className="font-semibold text-foreground">{formatCurrency(subtotal)}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span>Shipping</span>
+                <span>
+                  Shipping
+                  {selectedShippingRate && (
+                    <span className="ml-1 text-xs text-muted-foreground">
+                      ({selectedShippingRate.name})
+                    </span>
+                  )}
+                </span>
                 <span className="font-semibold text-foreground">
-                  {shipping > 0 ? formatCurrency(shipping) : 'Calculated'}
+                  {effectiveShipping > 0
+                    ? formatCurrency(effectiveShipping)
+                    : selectedShippingRate
+                      ? 'Free'
+                      : 'Calculated'}
                 </span>
               </div>
               <div className="flex items-center justify-between">
@@ -848,7 +973,7 @@ export default function CheckoutPage() {
                 <div className="flex items-center justify-between text-green-600">
                   <span>Gift Card</span>
                   <span className="font-semibold">
-                    -{formatCurrency(Math.min(giftCardApplied.balance, total))}
+                    -{formatCurrency(Math.min(giftCardApplied.balance, effectiveTotal))}
                   </span>
                 </div>
               )}
@@ -856,8 +981,10 @@ export default function CheckoutPage() {
                 <span>Total</span>
                 <span>
                   {giftCardApplied
-                    ? formatCurrency(Math.max(0, total - Math.min(giftCardApplied.balance, total)))
-                    : formatCurrency(total)}
+                    ? formatCurrency(
+                        Math.max(0, effectiveTotal - Math.min(giftCardApplied.balance, effectiveTotal)),
+                      )
+                    : formatCurrency(effectiveTotal)}
                 </span>
               </div>
             </div>

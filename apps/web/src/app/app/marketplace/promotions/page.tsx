@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { toast } from '@platform/ui';
 import { Tag, Plus, Play, Pause, Trash2, RefreshCw, PercentCircle } from 'lucide-react';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface Connection {
   id: string;
@@ -83,17 +83,10 @@ export default function MarketplacePromotionsPage() {
 
   const loadConnections = async () => {
     try {
-      const res = await fetch('/api/v1/marketplace/connections', {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = unwrapJson(await res.json());
-        setConnections(data);
-        if (data.length > 0) {
-          setSelectedConnection(data[0].id);
-        } else {
-          setLoading(false);
-        }
+      const res = await api.get<Connection[]>('/v1/marketplace/connections');
+      setConnections(res.data);
+      if (res.data.length > 0) {
+        setSelectedConnection(res.data[0].id);
       } else {
         setLoading(false);
       }
@@ -108,14 +101,11 @@ export default function MarketplacePromotionsPage() {
     try {
       const conn = connections.find((c) => c.id === selectedConnection);
       const marketplaceId = conn?.marketplaceId || 'EBAY_US';
-      const res = await fetch(
-        `/api/v1/marketplace/promotions?connectionId=${selectedConnection}&marketplaceId=${marketplaceId}`,
-        { credentials: 'include' }
-      );
-      if (res.ok) {
-        const data = unwrapJson(await res.json());
-        setPromotions(Array.isArray(data) ? data : data.promotions ?? []);
-      }
+      const res = await api.get<any>('/v1/marketplace/promotions', {
+        params: { connectionId: selectedConnection, marketplaceId },
+      });
+      const data = res.data;
+      setPromotions(Array.isArray(data) ? data : data?.promotions ?? []);
     } catch (error) {
       console.error('Failed to load promotions:', error);
     } finally {
@@ -126,22 +116,16 @@ export default function MarketplacePromotionsPage() {
   const handlePause = async (promotionId: string) => {
     setActionLoading(promotionId);
     try {
-      const res = await fetch(`/api/v1/marketplace/promotions/${promotionId}/pause`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ connectionId: selectedConnection }),
-      });
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Promotion paused successfully' });
-        loadPromotions();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.message || 'Failed to pause promotion', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.post(`/v1/marketplace/promotions/${promotionId}/pause`, { connectionId: selectedConnection });
+      toast({ title: 'Success', description: 'Promotion paused successfully' });
+      loadPromotions();
+    } catch (error: any) {
       console.error('Failed to pause promotion:', error);
-      toast({ title: 'Error', description: 'Failed to pause promotion', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.message || 'Failed to pause promotion',
+        variant: 'destructive',
+      });
     } finally {
       setActionLoading(null);
     }
@@ -150,22 +134,16 @@ export default function MarketplacePromotionsPage() {
   const handleResume = async (promotionId: string) => {
     setActionLoading(promotionId);
     try {
-      const res = await fetch(`/api/v1/marketplace/promotions/${promotionId}/resume`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ connectionId: selectedConnection }),
-      });
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Promotion resumed successfully' });
-        loadPromotions();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.message || 'Failed to resume promotion', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.post(`/v1/marketplace/promotions/${promotionId}/resume`, { connectionId: selectedConnection });
+      toast({ title: 'Success', description: 'Promotion resumed successfully' });
+      loadPromotions();
+    } catch (error: any) {
       console.error('Failed to resume promotion:', error);
-      toast({ title: 'Error', description: 'Failed to resume promotion', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.message || 'Failed to resume promotion',
+        variant: 'destructive',
+      });
     } finally {
       setActionLoading(null);
     }
@@ -175,20 +153,18 @@ export default function MarketplacePromotionsPage() {
     if (!confirm('Are you sure you want to delete this promotion?')) return;
     setActionLoading(promotionId);
     try {
-      const res = await fetch(
-        `/api/v1/marketplace/promotions/${promotionId}?connectionId=${selectedConnection}`,
-        { method: 'DELETE', credentials: 'include' }
-      );
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Promotion deleted successfully' });
-        loadPromotions();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.message || 'Failed to delete promotion', variant: 'destructive' });
-      }
-    } catch (error) {
+      await api.delete(`/v1/marketplace/promotions/${promotionId}`, {
+        params: { connectionId: selectedConnection },
+      });
+      toast({ title: 'Success', description: 'Promotion deleted successfully' });
+      loadPromotions();
+    } catch (error: any) {
       console.error('Failed to delete promotion:', error);
-      toast({ title: 'Error', description: 'Failed to delete promotion', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.message || 'Failed to delete promotion',
+        variant: 'destructive',
+      });
     } finally {
       setActionLoading(null);
     }
@@ -210,25 +186,21 @@ export default function MarketplacePromotionsPage() {
           <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
             <PercentCircle className="w-8 h-8 text-blue-600" />
             Promotions
+            <span className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
+              Read-only · Beta
+            </span>
           </h1>
-          <p className="text-gray-600 mt-2">Manage markdown sales, order discounts, and coupons</p>
+          <p className="text-gray-600 mt-2">
+            View and manage existing eBay promotions. Create-flows for Markdown Sales
+            and Order Discounts are not yet available — manage those in eBay Seller Hub
+            for now.
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => toast({ title: 'Coming soon', description: 'Markdown Sale builder is on the roadmap.' })}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-          >
-            <Plus className="w-4 h-4" />
-            Markdown Sale
-          </button>
-          <button
-            onClick={() => toast({ title: 'Coming soon', description: 'Order Discount builder is on the roadmap.' })}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-          >
-            <Plus className="w-4 h-4" />
-            Order Discount
-          </button>
-        </div>
+        {/*
+          Create-flow CTAs hidden until the builder ships. The previous shape
+          rendered tempting buttons that toast'd "Coming soon" — see M82 in
+          docs/ui-audit.md.
+        */}
       </div>
 
       {/* Connection Selector */}
@@ -271,24 +243,9 @@ export default function MarketplacePromotionsPage() {
           </div>
           <h3 className="text-lg font-medium text-gray-900 mb-2">No promotions found</h3>
           <p className="text-gray-600 mb-4">
-            Create a markdown sale or order discount to attract more buyers
+            Promotions you create in eBay Seller Hub will appear here. The
+            in-app create-flow is on the roadmap.
           </p>
-          <div className="flex items-center justify-center gap-2">
-            <button
-              onClick={() => toast({ title: 'Coming soon', description: 'Markdown Sale builder is on the roadmap.' })}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
-            >
-              <Plus className="w-4 h-4" />
-              Markdown Sale
-            </button>
-            <button
-              onClick={() => toast({ title: 'Coming soon', description: 'Order Discount builder is on the roadmap.' })}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-            >
-              <Plus className="w-4 h-4" />
-              Order Discount
-            </button>
-          </div>
         </div>
       ) : (
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">

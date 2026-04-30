@@ -42,15 +42,22 @@ export default async function StorefrontLanding() {
         />
         <div className="grid gap-4 md:grid-cols-2">
           {categories.map((category) => (
-            <Card key={category.name} className="flex items-center justify-between border-border bg-card p-6 shadow-sm">
-              <div className="space-y-2">
-                <p className="text-lg font-semibold text-foreground">{category.name}</p>
-                <p className="text-sm text-muted-foreground">{category.description}</p>
-              </div>
-              <div className="rounded-full bg-primary/10 px-4 py-2 text-xs font-semibold text-primary">
-                {category.productCount} items
-              </div>
-            </Card>
+            <Link
+              key={category.slug || category.name}
+              href={`/storefront/products?category=${encodeURIComponent(category.slug || category.name)}`}
+              className="block rounded-lg focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              aria-label={`Shop ${category.name}`}
+            >
+              <Card className="flex items-center justify-between border-border bg-card p-6 shadow-sm transition-shadow hover:shadow-md">
+                <div className="space-y-2">
+                  <p className="text-lg font-semibold text-foreground">{category.name}</p>
+                  <p className="text-sm text-muted-foreground">{category.description}</p>
+                </div>
+                <div className="rounded-full bg-primary/10 px-4 py-2 text-xs font-semibold text-primary">
+                  {category.productCount} items
+                </div>
+              </Card>
+            </Link>
           ))}
         </div>
       </section>
@@ -99,7 +106,12 @@ export default async function StorefrontLanding() {
                 mind.
               </p>
             </div>
-            <Button className="mt-6 bg-foreground text-background hover:opacity-90">Book a design session</Button>
+            <a
+              href="mailto:sales@noslag.com?subject=Custom%20storefront%20design%20session"
+              className="mt-6 inline-flex items-center justify-center rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+            >
+              Book a design session
+            </a>
           </Card>
         </div>
       </section>

@@ -146,6 +146,11 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        # Bake the API hostname into Next.js's compiled rewrites. Next 16
+        # evaluates next.config.js `rewrites()` at build time, so this
+        # has to be a build arg, not a runtime env var.
+        API_INTERNAL_URL: http://noslag_api:3000
     image: platform-web
     container_name: noslag_web
     restart: always

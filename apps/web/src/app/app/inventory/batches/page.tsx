@@ -163,6 +163,15 @@ export default function BatchTrackingPage() {
     loadBatches();
   }, []);
 
+  // Re-load whenever the page index changes. The previous shape called
+  // `setBatchPage(p => p + 1); loadBatches()` inline — `loadBatches`
+  // captured the old page via closure, so clicking Next loaded the same
+  // page. See IB2 in docs/ui-audit.md.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadBatches reads filter state; only re-fire on page changes
+  useEffect(() => {
+    loadBatches();
+  }, [batchPage]);
+
   return (
     <ReportPage
       title="Batch Tracking"
@@ -294,7 +303,7 @@ export default function BatchTrackingPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => { setBatchPage((p) => Math.max(0, p - 1)); loadBatches(); }}
+                onClick={() => setBatchPage((p) => Math.max(0, p - 1))}
                 disabled={batchPage === 0}
               >
                 Previous
@@ -302,7 +311,7 @@ export default function BatchTrackingPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => { setBatchPage((p) => p + 1); loadBatches(); }}
+                onClick={() => setBatchPage((p) => p + 1)}
                 disabled={(batchPage + 1) * PAGE_SIZE >= pagination.total}
               >
                 Next
@@ -320,74 +329,88 @@ export default function BatchTrackingPage() {
               {editingBatch ? 'Edit Batch' : 'Create New Batch'}
             </h2>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium text-muted-foreground">Batch Number</label>
-                <Input
-                  className="mt-1"
-                  value={formData.batchNo}
-                  onChange={(e) => setFormData({ ...formData, batchNo: e.target.value })}
-                  disabled={!!editingBatch}
-                />
+            {/* IB3: wrap in <form> so Enter submits and the browser's native
+                required-field validation runs. */}
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (editingBatch) updateBatch();
+                else createBatch();
+              }}
+            >
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">Batch Number</label>
+                  <Input
+                    className="mt-1"
+                    value={formData.batchNo}
+                    onChange={(e) => setFormData({ ...formData, batchNo: e.target.value })}
+                    disabled={!!editingBatch}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">Item Code</label>
+                  <Input
+                    className="mt-1"
+                    value={formData.itemCode}
+                    onChange={(e) => setFormData({ ...formData, itemCode: e.target.value })}
+                    disabled={!!editingBatch}
+                    required
+                  />
+                </div>
               </div>
-              <div>
-                <label className="text-sm font-medium text-muted-foreground">Item Code</label>
-                <Input
-                  className="mt-1"
-                  value={formData.itemCode}
-                  onChange={(e) => setFormData({ ...formData, itemCode: e.target.value })}
-                  disabled={!!editingBatch}
-                />
-              </div>
-            </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-sm font-medium text-muted-foreground">Manufacturing Date</label>
-                <Input
-                  type="date"
-                  className="mt-1"
-                  value={formData.mfgDate}
-                  onChange={(e) => setFormData({ ...formData, mfgDate: e.target.value })}
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">Manufacturing Date</label>
+                  <Input
+                    type="date"
+                    className="mt-1"
+                    value={formData.mfgDate}
+                    onChange={(e) => setFormData({ ...formData, mfgDate: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">Expiry Date</label>
+                  <Input
+                    type="date"
+                    className="mt-1"
+                    value={formData.expDate}
+                    onChange={(e) => setFormData({ ...formData, expDate: e.target.value })}
+                  />
+                </div>
               </div>
-              <div>
-                <label className="text-sm font-medium text-muted-foreground">Expiry Date</label>
-                <Input
-                  type="date"
-                  className="mt-1"
-                  value={formData.expDate}
-                  onChange={(e) => setFormData({ ...formData, expDate: e.target.value })}
-                />
+
+              {editingBatch && (
+                <label className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={formData.isActive}
+                    onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
+                  />
+                  Active
+                </label>
+              )}
+
+              <div className="flex justify-end gap-3 pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setShowCreateModal(false);
+                    setEditingBatch(null);
+                    resetForm();
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit">
+                  {editingBatch ? 'Update Batch' : 'Create Batch'}
+                </Button>
               </div>
-            </div>
-
-            {editingBatch && (
-              <label className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={formData.isActive}
-                  onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
-                />
-                Active
-              </label>
-            )}
-
-            <div className="flex justify-end gap-3 pt-4">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setShowCreateModal(false);
-                  setEditingBatch(null);
-                  resetForm();
-                }}
-              >
-                Cancel
-              </Button>
-              <Button onClick={editingBatch ? updateBatch : createBatch}>
-                {editingBatch ? 'Update Batch' : 'Create Batch'}
-              </Button>
-            </div>
+            </form>
           </Card>
         </div>
       )}

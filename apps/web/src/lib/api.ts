@@ -34,9 +34,17 @@ api.interceptors.request.use((config) => {
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-    const tenantId = localStorage.getItem('tenantId');
-    if (tenantId) {
-      config.headers['x-tenant-id'] = tenantId;
+    // 6.10: only send x-tenant-id when the API is running with
+    // ALLOW_TENANT_HEADER=true (local dev / staging). Production resolves
+    // the tenant from the JWT or Host header and ignores this header
+    // anyway, so sending it just inflates the request and gives a false
+    // sense of tenant scoping. Mirroring that here prevents accidental
+    // reliance and removes a per-request localStorage read in prod.
+    if (process.env['NEXT_PUBLIC_ALLOW_TENANT_HEADER'] === 'true') {
+      const tenantId = localStorage.getItem('tenantId');
+      if (tenantId) {
+        config.headers['x-tenant-id'] = tenantId;
+      }
     }
     // Attach storefront session token if present
     const cartSession = localStorage.getItem('cart_session');
@@ -75,7 +83,7 @@ api.interceptors.response.use(
 
       // Don't attempt refresh on login pages or refresh endpoint itself
       if (
-        path.startsWith('/app/login') ||
+        path.startsWith('/login') ||
         path.startsWith('/storefront/account/login') ||
         originalRequest.url?.includes('/auth/refresh')
       ) {
@@ -86,7 +94,7 @@ api.interceptors.response.use(
       const refreshTokenKey = isStorefront ? 'customer_refresh_token' : 'refresh_token';
       const accessTokenKey = isStorefront ? 'customer_token' : 'access_token';
       const refreshEndpoint = isStorefront ? '/v1/store/auth/refresh' : '/v1/auth/refresh';
-      const loginPath = isStorefront ? '/storefront/account/login' : '/app/login';
+      const loginPath = isStorefront ? '/storefront/account/login' : '/login';
 
       const refreshToken = localStorage.getItem(refreshTokenKey);
 
@@ -119,8 +127,10 @@ api.interceptors.response.use(
         const refreshHeaders: Record<string, string> = {
           'Content-Type': 'application/json',
         };
-        const tenantId = localStorage.getItem('tenantId');
-        if (tenantId) refreshHeaders['x-tenant-id'] = tenantId;
+        if (process.env['NEXT_PUBLIC_ALLOW_TENANT_HEADER'] === 'true') {
+          const tenantId = localStorage.getItem('tenantId');
+          if (tenantId) refreshHeaders['x-tenant-id'] = tenantId;
+        }
         if (isStorefront) {
           const cartSession = localStorage.getItem('cart_session');
           if (cartSession) refreshHeaders['x-cart-session'] = cartSession;

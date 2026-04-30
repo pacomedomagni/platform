@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { PrismaService } from '@platform/db';
+import { PrismaService, runWithTenant } from '@platform/db';
 import { DistributedLockService } from '@platform/queue';
 import { OperationType, OperationStatus, Prisma, FailedOperation } from '@prisma/client';
 import { StockMovementService } from '../inventory-management/stock-movement.service';
@@ -31,6 +32,10 @@ export class FailedOperationsService {
     private readonly webhookService: WebhookService,
     private readonly emailService: EmailService,
     private readonly lockService: DistributedLockService,
+    // ModuleRef lets us lazy-resolve services from other modules without
+    // creating a static circular dependency. Used for the EbayInventoryItem
+    // retry path, which lives in the eBay module but is invoked from here.
+    private readonly moduleRef: ModuleRef,
   ) {}
 
   /** Phase 3 W3.2: distributed-lock wrapper for cron handlers. */
@@ -224,9 +229,72 @@ export class FailedOperationsService {
         await this.retryStockReturn(operation);
         break;
 
+      case OperationType.EBAY_INVENTORY_ITEM_DELETE:
+        await this.retryEbayInventoryItemDelete(operation);
+        break;
+
       default:
         throw new Error(`Unknown operation type: ${operation.operationType}`);
     }
+  }
+
+  /**
+   * Retry deletion of an orphaned eBay inventory item that survived a
+   * publish-rollback. eBay's offer purge is async, so the original delete
+   * frequently fails with "inventory item is referenced by an offer";
+   * this retry path waits out the eBay-side cleanup before trying again.
+   *
+   * Resolves the eBay services via ModuleRef to avoid a static circular
+   * dependency between the eBay module and the workers module. If the
+   * eBay module isn't part of the running app (e.g. a deployment flag
+   * disabled it), we mark the operation permanently failed instead of
+   * crash-looping the cron — these orphans need an operator to clean
+   * up but shouldn't block other retry types from making progress.
+   */
+  private async retryEbayInventoryItemDelete(operation: FailedOperation): Promise<void> {
+    const payload = operation.payload as { connectionId?: string; sku?: string };
+    if (!payload.connectionId || !payload.sku) {
+      throw new Error('EBAY_INVENTORY_ITEM_DELETE payload missing connectionId or sku');
+    }
+
+    // Lazy-resolve to break the module-level circular dep. strict:false
+    // walks the entire app's provider tree.
+    const { EbayStoreService } = await import(
+      '../marketplace-integrations/ebay/ebay-store.service'
+    );
+    const { EbayClientService } = await import(
+      '../marketplace-integrations/ebay/ebay-client.service'
+    );
+
+    let ebayStore;
+    let ebayClient;
+    try {
+      ebayStore = this.moduleRef.get(EbayStoreService, { strict: false });
+      ebayClient = this.moduleRef.get(EbayClientService, { strict: false });
+    } catch (resolveError) {
+      // The eBay module is not loaded in this app instance. Don't
+      // crash-loop — log loudly and rethrow as a typed error so the
+      // generic retry loop above counts an attempt and eventually
+      // marks the operation permanently failed (after maxAttempts).
+      // The orphan needs manual cleanup; surfacing it via FAILED state
+      // is better than silently retrying every 5 minutes forever.
+      const err = resolveError instanceof Error ? resolveError : new Error(String(resolveError));
+      this.logger.error(
+        `eBay module not available to handle EBAY_INVENTORY_ITEM_DELETE for sku=${payload.sku}: ${err.message}. Orphan requires manual cleanup.`
+      );
+      throw new Error(
+        `eBay module unavailable in this app instance; cannot retry inventory-item delete for sku=${payload.sku}`
+      );
+    }
+
+    await runWithTenant(operation.tenantId, async () => {
+      const client = await ebayStore.getClient(payload.connectionId!, operation.tenantId);
+      await ebayClient.deleteInventoryItem(client, payload.sku!);
+    });
+
+    this.logger.log(
+      `Successfully deleted orphaned eBay inventory item ${payload.sku} (connection ${payload.connectionId})`
+    );
   }
 
   /**

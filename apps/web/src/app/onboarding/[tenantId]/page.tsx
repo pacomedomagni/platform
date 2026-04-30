@@ -29,7 +29,7 @@ export default function OnboardingStatusPage() {
     try {
       const res = await fetch(`/api/v1/onboarding/${tenantId}/status`);
       if (!res.ok) throw new Error('Failed to fetch status');
-      const data = unwrapJson(await res.json());
+      const data = unwrapJson(await res.json().catch(() => null));
       setStatus(data);
       return data;
     } catch (err: any) {
@@ -39,24 +39,46 @@ export default function OnboardingStatusPage() {
   }, [tenantId]);
 
   useEffect(() => {
-    fetchStatus();
-    const interval = setInterval(async () => {
-      const data = await fetchStatus();
-      if (!data) return;
-
-      // Stop polling once provisioning is done and payment is active
-      if (data.provisioningStatus === 'READY' && data.paymentProviderStatus === 'active') {
-        clearInterval(interval);
-        router.push('/app');
-      }
-
-      // Stop polling once provisioning is complete (user needs to click to continue)
+    let cancelled = false;
+    fetchStatus().then((data) => {
+      // If the page mounts already in a terminal state we don't need to
+      // start the interval at all.
+      if (cancelled || !data) return;
       if (data.provisioningStatus === 'READY' || data.provisioningStatus === 'FAILED') {
-        clearInterval(interval);
+        // Auto-route only when both provisioning AND payment are settled.
+        if (data.provisioningStatus === 'READY' && data.paymentProviderStatus === 'active') {
+          router.push('/app');
+        }
+        return;
       }
-    }, 2000);
 
-    return () => clearInterval(interval);
+      const interval = setInterval(async () => {
+        const next = await fetchStatus();
+        if (cancelled || !next) return;
+
+        // Auto-route once everything is good.
+        if (next.provisioningStatus === 'READY' && next.paymentProviderStatus === 'active') {
+          clearInterval(interval);
+          router.push('/app');
+          return;
+        }
+
+        // Stop polling once provisioning is settled. After that the page
+        // is interactive (user clicks "Connect Stripe" or "Skip"); there
+        // is no value in continuing to poll, and the previous shape kept
+        // the timer running indefinitely if the user skipped payment.
+        // See O1 in docs/ui-audit.md.
+        if (next.provisioningStatus === 'READY' || next.provisioningStatus === 'FAILED') {
+          clearInterval(interval);
+        }
+      }, 2000);
+
+      return () => clearInterval(interval);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [fetchStatus, router]);
 
   const handlePaymentSetup = async () => {
@@ -77,12 +99,15 @@ export default function OnboardingStatusPage() {
         },
       });
 
+      // Read the body once — Response.json() throws if called twice.
+      const body = await res.json().catch(() => null);
       if (!res.ok) {
-        const err = unwrapJson(await res.json());
+        const err = unwrapJson(body) as { message?: string };
         throw new Error(err.message || 'Failed to initiate payment setup');
       }
 
-      const { url } = unwrapJson(await res.json());
+      const { url } = unwrapJson(body) as { url?: string };
+      if (!url) throw new Error('Server returned no payment-setup URL.');
       window.location.href = url;
     } catch (err: any) {
       setError(err.message);
@@ -90,6 +115,11 @@ export default function OnboardingStatusPage() {
     }
   };
 
+  // O2: skipping payment routes the user to the dashboard but never tells
+  // the backend that onboarding is paused mid-flow. The dashboard banner
+  // covers the visible "you still need payments" call-to-action; we don't
+  // need to call /complete here (that would mark onboarding done with no
+  // payment provider). Keep the navigation but flag for backend follow-up.
   const handleSkipForNow = () => {
     router.push('/app');
   };

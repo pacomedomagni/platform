@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { Metadata, Viewport } from 'next';
-import { Button } from '@platform/ui';
 import { Search, User } from 'lucide-react';
 import { StoreProviders } from './_components/store-providers';
 import { CartIcon } from './_components/cart-icon';
@@ -64,13 +63,17 @@ const navLinks = [
 
 const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://storefront.example.com';
 
+// Centralized so the JSON-LD schema and the in-page CTAs (sales inquiry,
+// design session, talk to sales) all point at the same address.
+const SALES_EMAIL = 'sales@noslag.com';
+
 // Generate Organization JSON-LD schema for brand identity
 const organizationSchema = generateOrganizationSchema({
   name: 'NoSlag',
   url: BASE_URL,
   logo: `${BASE_URL}/logo.png`,
   description: 'Premium commerce experiences with ERP-grade control, inventory intelligence, and modern operations tooling.',
-  contactEmail: 'sales@noslag.com',
+  contactEmail: SALES_EMAIL,
   sameAs: [
     'https://twitter.com/noslag',
     'https://linkedin.com/company/noslag',
@@ -143,13 +146,12 @@ export default function StorefrontLayout({ children }: { children: React.ReactNo
                 <User className="h-4 w-4" aria-hidden="true" />
                 <span>Account</span>
               </Link>
-              <Button
-                variant="outline"
-                size="sm"
-                className="hidden sm:inline-flex focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              <a
+                href={`mailto:${SALES_EMAIL}?subject=Sales%20inquiry`}
+                className="hidden sm:inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
               >
                 Sales inquiry
-              </Button>
+              </a>
               <CartIcon />
               <MobileMenu />
             </div>
@@ -213,12 +215,6 @@ export default function StorefrontLayout({ children }: { children: React.ReactNo
                 <p id="footer-company-heading" className="font-semibold text-foreground">
                   Company
                 </p>
-                <Link
-                  href="/app"
-                  className="block hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded"
-                >
-                  ERP Suite
-                </Link>
                 <Link
                   href="/storefront/account"
                   className="block hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 rounded"

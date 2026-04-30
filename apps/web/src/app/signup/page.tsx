@@ -109,9 +109,41 @@ function SignupForm() {
     }
   };
 
+  // Subscribe to live form values so the Continue button re-evaluates as
+  // the user types. `form.getValues()` is a snapshot read that does NOT
+  // trigger a re-render, so with mode:'onBlur' the button stayed disabled
+  // until the user clicked out of the last field — even when every field
+  // was already valid.
+  const watchedValues = form.watch();
+
+  // S1: when the user submits from step 3 (Review) and Zod fails on a
+  // step-0 field, react-hook-form aborts the submit silently — the
+  // failing field's <p> error only renders inside step 0's JSX, so the
+  // user on step 3 sees nothing happen. Jump back to whichever step
+  // owns the first failing field and surface a top-level alert.
+  const STEP_FIELDS: Record<number, Array<keyof SignupFormData>> = {
+    0: ['businessName', 'email', 'password', 'subdomain'],
+    1: ['paymentProvider'],
+    2: [],
+  };
+  const onInvalid = (errors: Record<string, unknown>) => {
+    const errored = Object.keys(errors) as Array<keyof SignupFormData>;
+    if (errored.length === 0) return;
+    const firstStep = (Object.entries(STEP_FIELDS).find(([, fields]) =>
+      fields.some((f) => errored.includes(f))
+    )?.[0] ?? '0') as unknown as string;
+    const stepIndex = Number(firstStep);
+    setError(
+      'Some fields need attention. Please review and fix the highlighted errors.'
+    );
+    if (Number.isFinite(stepIndex) && stepIndex !== currentStep) {
+      setCurrentStep(stepIndex);
+    }
+  };
+
   const canProceed = () => {
     if (currentStep === 0) {
-      const { businessName, email, password, subdomain } = form.getValues();
+      const { businessName, email, password, subdomain } = watchedValues;
       return (
         businessName.length >= 2 &&
         email.includes('@') &&
@@ -188,7 +220,7 @@ function SignupForm() {
         </div>
 
         {/* Form */}
-        <form onSubmit={form.handleSubmit(onSubmit)} className="p-8" noValidate>
+        <form onSubmit={form.handleSubmit(onSubmit, onInvalid)} className="p-8" noValidate>
           {/* Step 1: Business Info */}
           {currentStep === 0 && (
             <div className="space-y-5">
@@ -469,10 +501,7 @@ function SignupForm() {
                       <Link href="/login" className="font-medium underline">
                         Sign in instead
                       </Link>
-                      {' or '}
-                      <Link href="/forgot-password" className="font-medium underline">
-                        reset your password
-                      </Link>
+                      .
                     </p>
                   )}
                 </div>

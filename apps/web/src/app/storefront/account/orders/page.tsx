@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button, Card, Spinner, StatusBadge, ToastAction, toast } from '@platform/ui';
-import { ChevronRight, ExternalLink, Package, Repeat } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ExternalLink, Package, Repeat } from 'lucide-react';
 import { useAuthStore } from '../../../../lib/auth-store';
 import { useCartStore } from '../../../../lib/cart-store';
 import { ordersApi, OrderSummary } from '../../../../lib/store-api';
@@ -39,6 +39,13 @@ export default function OrdersPage() {
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [reorderingId, setReorderingId] = useState<string | null>(null);
+  // SF-OR2: server-paginate the order list. The previous limit of 50 silently
+  // dropped older orders for any returning customer with a long history. We
+  // page through them instead.
+  const PAGE_SIZE = 10;
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
 
   useEffect(() => {
     if (!authLoading && !isAuthenticated) {
@@ -47,14 +54,27 @@ export default function OrdersPage() {
     }
 
     if (isAuthenticated) {
-      ordersApi.list({ limit: 50 })
-        .then((res) => setOrders(res.data as OrderRow[]))
-        .catch(console.error)
+      setLoading(true);
+      ordersApi
+        .list({ limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE })
+        .then((res) => {
+          setOrders(res.data as OrderRow[]);
+          setTotal(res.pagination.total);
+          setTotalPages(Math.max(1, Math.ceil(res.pagination.total / PAGE_SIZE)));
+        })
+        .catch((err) => {
+          console.error(err);
+          toast({
+            title: 'Could not load orders',
+            description: err instanceof Error ? err.message : 'Please refresh and try again.',
+            variant: 'destructive',
+          });
+        })
         .finally(() => setLoading(false));
     }
-  }, [isAuthenticated, authLoading, router]);
+  }, [isAuthenticated, authLoading, router, page]);
 
-  if (authLoading || loading) {
+  if (authLoading || (loading && orders.length === 0)) {
     return (
       <div className="mx-auto w-full max-w-3xl px-6 py-20">
         <div className="flex items-center justify-center">
@@ -70,19 +90,38 @@ export default function OrdersPage() {
       // Fetch full detail so we have the line items.
       const detail = await ordersApi.get(orderId);
       let added = 0;
+      let skipped = 0;
       for (const item of detail.items) {
+        // Use product/variant IDs (NOT line-item id — see SF-OC4 / SF-OR1).
+        const idToAdd = item.variantId ?? item.productId;
+        if (!idToAdd) {
+          skipped += 1;
+          continue;
+        }
         // eslint-disable-next-line no-await-in-loop
-        await addItem(item.id, item.quantity)
-          .then(() => {
-            added += 1;
-          })
-          .catch(() => {
-            // skip individual failures
-          });
+        const ok = await addItem(idToAdd, item.quantity)
+          .then(() => true)
+          .catch(() => false);
+        if (ok) added += 1;
+        else skipped += 1;
+      }
+      if (added === 0) {
+        toast({
+          title: 'Could not reorder',
+          description:
+            skipped > 0
+              ? `${skipped} item${skipped === 1 ? '' : 's'} are no longer available.`
+              : 'Please try again or contact support.',
+          variant: 'destructive',
+        });
+        return;
       }
       toast({
         title: `${added} item${added === 1 ? '' : 's'} added to cart`,
-        description: `From order #${detail.orderNumber}`,
+        description:
+          skipped > 0
+            ? `From order #${detail.orderNumber} · ${skipped} skipped (no longer available)`
+            : `From order #${detail.orderNumber}`,
         action: (
           <ToastAction altText="View cart" onClick={() => router.push('/storefront/cart')}>
             View cart
@@ -209,6 +248,48 @@ export default function OrdersPage() {
               </Card>
             );
           })}
+
+          {totalPages > 1 && (
+            <nav
+              className="flex items-center justify-between border-t border-slate-100 pt-4"
+              aria-label="Order list pagination"
+            >
+              <p className="text-xs text-slate-500">
+                Showing{' '}
+                <span className="font-medium text-slate-700">
+                  {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)}
+                </span>{' '}
+                of <span className="font-medium text-slate-700">{total}</span>
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1 || loading}
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+                  Previous
+                </Button>
+                <span className="text-xs text-slate-500" aria-live="polite">
+                  Page {page} of {totalPages}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages || loading}
+                  aria-label="Next page"
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                </Button>
+              </div>
+            </nav>
+          )}
         </div>
       )}
     </div>

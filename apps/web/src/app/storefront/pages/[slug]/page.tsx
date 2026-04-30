@@ -28,7 +28,8 @@ function sanitizeHtml(html: string): string {
 }
 
 type PageProps = {
-  params: { slug: string };
+  // Next.js 16: dynamic-route params arrive as a Promise.
+  params: Promise<{ slug: string }>;
 };
 
 const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://storefront.example.com';
@@ -38,7 +39,8 @@ const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://storefront.example
  * Provides SEO-friendly titles, descriptions, and canonical URLs.
  */
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
-  const page = await pagesApi.getBySlug(params.slug).catch(() => null);
+  const { slug } = await params;
+  const page = await pagesApi.getBySlug(slug).catch(() => null);
 
   if (!page) {
     return {
@@ -46,7 +48,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     };
   }
 
-  const pageUrl = `${BASE_URL}/storefront/pages/${params.slug}`;
+  const pageUrl = `${BASE_URL}/storefront/pages/${slug}`;
 
   return {
     title: page.title,
@@ -64,7 +66,8 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
 }
 
 export default async function StorePage({ params }: PageProps) {
-  const page = await pagesApi.getBySlug(params.slug).catch(() => null);
+  const { slug } = await params;
+  const page = await pagesApi.getBySlug(slug).catch(() => null);
 
   if (!page) {
     notFound();

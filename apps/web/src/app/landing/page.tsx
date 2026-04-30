@@ -1,5 +1,11 @@
 import { Metadata } from 'next';
 import { HeroSection } from '@/components/landing/hero-section';
+
+// 6.16: read the canonical site URL from env so non-NoSlag deploys don't
+// emit canonicals that point at noslag.com (which would deindex their
+// landing in favor of ours). Falls back to the marketing site for the
+// flagship deployment.
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://noslag.com';
 import { FeaturesGrid } from '@/components/landing/features-grid';
 import { Testimonials } from '@/components/landing/testimonials';
 import { HowItWorks } from '@/components/landing/how-it-works';
@@ -29,7 +35,7 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     locale: 'en_US',
-    url: 'https://noslag.com/landing',
+    url: `${SITE_URL}/landing`,
     title: 'NoSlag - Enterprise E-Commerce Platform | Multi-Tenant SaaS',
     description:
       'Build and scale your e-commerce business with NoSlag\'s enterprise-grade platform. Multi-tenant architecture, inventory management, automated workflows, and more.',
@@ -63,7 +69,7 @@ export const metadata: Metadata = {
     },
   },
   alternates: {
-    canonical: 'https://noslag.com/landing',
+    canonical: `${SITE_URL}/landing`,
   },
 };
 
@@ -95,13 +101,9 @@ export default function LandingPage() {
         },
       ],
     },
-    aggregateRating: {
-      '@type': 'AggregateRating',
-      ratingValue: '4.9',
-      ratingCount: '500',
-      bestRating: '5',
-      worstRating: '1',
-    },
+    // Removed fabricated aggregateRating block — Google's structured-data
+    // guidelines require ratings to come from real, on-page user reviews.
+    // Add it back once we have collected genuine ratings on this page.
     description:
       'Enterprise-grade multi-tenant e-commerce platform with built-in inventory management, order processing, payment integration, and customer management.',
     featureList: [
@@ -120,8 +122,8 @@ export default function LandingPage() {
     '@context': 'https://schema.org',
     '@type': 'Organization',
     name: 'NoSlag',
-    url: 'https://noslag.com',
-    logo: 'https://noslag.com/logo.png',
+    url: SITE_URL,
+    logo: `${SITE_URL}/logo.png`,
     sameAs: [
       'https://twitter.com/noslag',
       'https://www.linkedin.com/company/noslag',

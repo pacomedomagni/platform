@@ -93,6 +93,14 @@ export class AuthService {
         });
         const refreshToken = await this.createRefreshToken(user.id, user.tenantId);
 
+        // 6.13: surface the tenant's base currency on login so the admin UI
+        // can format prices correctly without falling back to a hardcoded
+        // USD. Stored in localStorage by the login handler.
+        const tenant = await this.db.tenant.findUnique({
+            where: { id: user.tenantId },
+            select: { baseCurrency: true },
+        });
+
         return {
             access_token: accessToken,
             refresh_token: refreshToken,
@@ -103,6 +111,7 @@ export class AuthService {
                 lastName: user.lastName,
                 tenantId: user.tenantId,
                 roles: user.roles,
+                baseCurrency: tenant?.baseCurrency || 'USD',
             },
         };
     }

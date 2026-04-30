@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Badge, ConfirmDialog, toast, toastUndo } from '@platform/ui';
 import { Info, X as XIcon } from 'lucide-react';
 import Link from 'next/link';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 // Curated short list — covers the high-traffic countries; merchants can free-type for the long tail.
 const COMMON_COUNTRIES: { code: string; name: string }[] = [
@@ -51,15 +51,6 @@ interface ShippingRate {
   isEnabled: boolean;
 }
 
-function getHeaders() {
-  const token = localStorage.getItem('access_token');
-  const tenantId = localStorage.getItem('tenantId');
-  return {
-    'Content-Type': 'application/json',
-    Authorization: `Bearer ${token}`,
-    'x-tenant-id': tenantId || '',
-  };
-}
 
 export default function ShippingTaxPage() {
   const [loading, setLoading] = useState(true);
@@ -73,6 +64,7 @@ export default function ShippingTaxPage() {
 
   // Shipping zones
   const [zones, setZones] = useState<ShippingZone[]>([]);
+  const [zonesError, setZonesError] = useState<string | null>(null);
   const [showAddZone, setShowAddZone] = useState(false);
   const [newZoneName, setNewZoneName] = useState('');
   // Switched from a single comma-separated string to a structured chip set so we
@@ -91,10 +83,8 @@ export default function ShippingTaxPage() {
 
   const fetchSettings = useCallback(async () => {
     try {
-      const headers = getHeaders();
-      const res = await fetch('/api/v1/store/admin/settings', { headers });
-      if (!res.ok) throw new Error('Failed to fetch settings');
-      const data = unwrapJson(await res.json());
+      const res = await api.get<any>('/v1/store/admin/settings');
+      const data = res.data;
 
       setTaxRateDisplay(
         data.defaultTaxRate != null ? String(+(data.defaultTaxRate * 100).toFixed(4)) : ''
@@ -104,7 +94,7 @@ export default function ShippingTaxPage() {
         data.freeShippingThreshold != null ? String(data.freeShippingThreshold) : ''
       );
     } catch (err: any) {
-      setError(err.message);
+      setError(err?.response?.data?.message || err.message);
     } finally {
       setLoading(false);
     }
@@ -112,14 +102,21 @@ export default function ShippingTaxPage() {
 
   const fetchZones = useCallback(async () => {
     try {
-      const headers = getHeaders();
-      const res = await fetch('/api/v1/store/admin/shipping/zones', { headers });
-      if (res.ok) {
-        const data = unwrapJson(await res.json());
-        setZones(data);
-      }
-    } catch {
-      // Non-critical
+      const res = await api.get('/v1/store/admin/shipping/zones');
+      setZones(res.data);
+      setZonesError(null);
+    } catch (err: any) {
+      // SH2: previously this swallowed every failure with "Non-critical".
+      // The result was that if the zones endpoint 500'd the user saw an
+      // empty list and started adding duplicate zones on top of
+      // existing-but-hidden ones.
+      console.error('Failed to load shipping zones', err);
+      const status = err?.response?.status;
+      setZonesError(
+        status
+          ? `Could not load zones (HTTP ${status}).`
+          : 'Network error loading zones — your existing zones are not shown. Refresh to try again.',
+      );
     }
   }, []);
 
@@ -135,24 +132,37 @@ export default function ShippingTaxPage() {
     setSuccessMessage(null);
 
     try {
-      const taxDecimal = taxRateDisplay ? parseFloat(taxRateDisplay) / 100 : 0;
-      const res = await fetch('/api/v1/store/admin/settings', {
-        method: 'PUT',
-        headers: getHeaders(),
-        body: JSON.stringify({
-          defaultTaxRate: taxDecimal,
-          defaultShippingRate: shippingRate ? parseFloat(shippingRate) : 0,
-          freeShippingThreshold: freeShippingThreshold
-            ? parseFloat(freeShippingThreshold)
-            : 0,
-        }),
-      });
-      if (!res.ok) throw new Error('Failed to save settings');
+      // SH3/SH4: only include each field if the user actually typed
+      // something. Blank means "leave unchanged"; previously a cleared
+      // field silently overwrote the saved value with 0. Also reject
+      // NaN so locale-dependent decimal separators don't write null.
+      const body: Record<string, number> = {};
+      const tryNumber = (raw: string): number | null => {
+        if (!raw.trim()) return null;
+        const n = parseFloat(raw);
+        return Number.isFinite(n) ? n : null;
+      };
+      const tax = tryNumber(taxRateDisplay);
+      if (tax !== null) body.defaultTaxRate = tax / 100;
+      const ship = tryNumber(shippingRate);
+      if (ship !== null) body.defaultShippingRate = ship;
+      const free = tryNumber(freeShippingThreshold);
+      if (free !== null) body.freeShippingThreshold = free;
+
+      // No-op save if every field was blank — give clearer feedback.
+      if (Object.keys(body).length === 0) {
+        setSuccessMessage('Nothing to save.');
+        setTimeout(() => setSuccessMessage(null), 3000);
+        setSaving(false);
+        return;
+      }
+
+      await api.put('/v1/store/admin/settings', body);
       setSuccessMessage('Settings saved successfully.');
       toast({ title: 'Defaults saved', variant: 'success' });
       setTimeout(() => setSuccessMessage(null), 4000);
     } catch (err: any) {
-      setError(err.message);
+      setError(err?.response?.data?.message || err.message);
     } finally {
       setSaving(false);
     }
@@ -171,15 +181,22 @@ export default function ShippingTaxPage() {
 
   const handleAddZone = async () => {
     if (!newZoneName.trim()) return;
+    // SH5: don't allow zero-country zones. The empty state directly
+    // contradicts the inline help text ("If a country isn't in any zone,
+    // the default rate applies") because the UI renders "All countries"
+    // for a zero-country zone.
+    if (newZoneCountryCodes.length === 0) {
+      toast({
+        title: 'Add at least one country',
+        description: 'A shipping zone needs at least one country code.',
+        variant: 'destructive',
+      });
+      return;
+    }
     setSavingZone(true);
     try {
       // Country codes are already normalised through addCountryCode so we just send them as-is.
-      const res = await fetch('/api/v1/store/admin/shipping/zones', {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify({ name: newZoneName, countries: newZoneCountryCodes }),
-      });
-      if (!res.ok) throw new Error('Failed to create zone');
+      await api.post('/v1/store/admin/shipping/zones', { name: newZoneName, countries: newZoneCountryCodes });
       setNewZoneName('');
       setNewZoneCountryCodes([]);
       setCountryInput('');
@@ -191,7 +208,7 @@ export default function ShippingTaxPage() {
         variant: 'success',
       });
     } catch (err: any) {
-      setError(err.message);
+      setError(err?.response?.data?.message || err.message);
     } finally {
       setSavingZone(false);
     }
@@ -211,13 +228,9 @@ export default function ShippingTaxPage() {
     if (snapshot) setZones((prev) => prev.filter((z) => z.id !== zoneId));
 
     try {
-      const res = await fetch(`/api/v1/store/admin/shipping/zones/${zoneId}`, {
-        method: 'DELETE',
-        headers: getHeaders(),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await api.delete(`/v1/store/admin/shipping/zones/${zoneId}`);
     } catch (err: any) {
-      toast({ title: 'Delete failed', description: err?.message ?? 'Could not delete zone.', variant: 'destructive' });
+      toast({ title: 'Delete failed', description: err?.response?.data?.message || err?.message || 'Could not delete zone.', variant: 'destructive' });
       // Roll back optimistic UI.
       if (snapshot) setZones((prev) => (prev.find((z) => z.id === snapshot.id) ? prev : [snapshot, ...prev]));
       return;
@@ -229,11 +242,7 @@ export default function ShippingTaxPage() {
       windowMs: 5000,
       onUndo: async () => {
         try {
-          const res = await fetch(`/api/v1/store/admin/shipping/zones/${zoneId}/restore`, {
-            method: 'POST',
-            headers: getHeaders(),
-          });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          await api.post(`/v1/store/admin/shipping/zones/${zoneId}/restore`);
           if (snapshot) setZones((prev) => [snapshot, ...prev]);
           toast({ title: 'Zone restored', variant: 'success' });
         } catch (err: any) {
@@ -252,16 +261,11 @@ export default function ShippingTaxPage() {
     if (!addRateZoneId || !newRateName.trim() || !newRatePrice) return;
     setSavingRate(true);
     try {
-      const res = await fetch(`/api/v1/store/admin/shipping/zones/${addRateZoneId}/rates`, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify({
-          name: newRateName,
-          price: parseFloat(newRatePrice),
-          type: newRateType,
-        }),
+      await api.post(`/v1/store/admin/shipping/zones/${addRateZoneId}/rates`, {
+        name: newRateName,
+        price: parseFloat(newRatePrice),
+        type: newRateType,
       });
-      if (!res.ok) throw new Error('Failed to create rate');
       setAddRateZoneId(null);
       setNewRateName('');
       setNewRatePrice('');
@@ -269,7 +273,7 @@ export default function ShippingTaxPage() {
       await fetchZones();
       toast({ title: 'Rate added', variant: 'success' });
     } catch (err: any) {
-      setError(err.message);
+      setError(err?.response?.data?.message || err.message);
     } finally {
       setSavingRate(false);
     }
@@ -277,13 +281,10 @@ export default function ShippingTaxPage() {
 
   const handleDeleteRate = async (rateId: string) => {
     try {
-      await fetch(`/api/v1/store/admin/shipping/rates/${rateId}`, {
-        method: 'DELETE',
-        headers: getHeaders(),
-      });
+      await api.delete(`/v1/store/admin/shipping/rates/${rateId}`);
       await fetchZones();
     } catch (err: any) {
-      setError(err.message);
+      setError(err?.response?.data?.message || err.message || 'Failed to delete rate');
     }
   };
 
@@ -559,7 +560,19 @@ export default function ShippingTaxPage() {
             </div>
           )}
 
-          {zones.length === 0 ? (
+          {zonesError ? (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+              <p className="font-medium">Couldn&apos;t load shipping zones</p>
+              <p className="mt-1 text-xs">{zonesError}</p>
+              <button
+                type="button"
+                onClick={fetchZones}
+                className="mt-2 text-xs font-medium text-red-700 underline hover:no-underline"
+              >
+                Try again
+              </button>
+            </div>
+          ) : zones.length === 0 ? (
             <div className="rounded-xl border-2 border-dashed border-slate-200 py-8 text-center">
               <p className="text-sm text-slate-500">No shipping zones configured</p>
               <p className="mt-1 text-xs text-slate-400">

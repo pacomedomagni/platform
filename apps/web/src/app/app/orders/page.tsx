@@ -90,20 +90,30 @@ function OrdersInner() {
         if (sortId) params.sort = sortId;
         if (sortDir) params.dir = sortDir;
 
-        const [res, statsRes] = await Promise.all([
+        // O2: stats failure must not kill the orders table. Run them with
+        // allSettled and surface the orders table independently of the
+        // KPI cards.
+        const [resOutcome, statsOutcome] = await Promise.allSettled([
           api.get('/v1/store/orders/admin/all', { params }),
           api.get('/v1/store/orders/admin/stats'),
         ]);
-        setOrders(res.data.data || []);
-        setStats({
-          pending: statsRes.data.pending || 0,
-          processing: (statsRes.data.processing || 0) + (statsRes.data.confirmed || 0),
-          shipped: statsRes.data.shipped || 0,
-          delivered: statsRes.data.delivered || 0,
-        });
-      } catch (error: any) {
-        if (mode === 'initial') {
-          toast({ title: 'Failed to load orders', description: error?.message || 'Please try again.', variant: 'destructive' });
+        if (resOutcome.status === 'fulfilled') {
+          setOrders(resOutcome.value.data.data || []);
+        } else if (mode === 'initial') {
+          toast({
+            title: 'Failed to load orders',
+            description: (resOutcome.reason as Error)?.message || 'Please try again.',
+            variant: 'destructive',
+          });
+        }
+        if (statsOutcome.status === 'fulfilled') {
+          const s = statsOutcome.value.data;
+          setStats({
+            pending: s.pending || 0,
+            processing: (s.processing || 0) + (s.confirmed || 0),
+            shipped: s.shipped || 0,
+            delivered: s.delivered || 0,
+          });
         }
       } finally {
         setLoading(false);
@@ -117,10 +127,34 @@ function OrdersInner() {
     loadOrders('initial');
   }, [loadOrders]);
 
+  // O3: only poll when the tab is visible. Background tabs accumulate noisy
+  // fetches that hammer the API for nothing the user can see; refresh once
+  // when they come back to the tab so the data is fresh.
   useEffect(() => {
     if (!autoRefresh) return;
-    const interval = setInterval(() => loadOrders('refresh'), 30_000);
-    return () => clearInterval(interval);
+    let interval: ReturnType<typeof setInterval> | null = null;
+    const start = () => {
+      if (interval) return;
+      interval = setInterval(() => loadOrders('refresh'), 30_000);
+    };
+    const stop = () => {
+      if (interval) clearInterval(interval);
+      interval = null;
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        loadOrders('refresh');
+        start();
+      } else {
+        stop();
+      }
+    };
+    if (document.visibilityState === 'visible') start();
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [autoRefresh, loadOrders]);
 
   const handleExportCSV = async () => {

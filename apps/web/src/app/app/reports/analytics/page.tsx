@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Button, Input, Card } from '@platform/ui';
 import api from '../../../../lib/api';
 import { ReportAlert, ReportFilters, ReportPage } from '../../reports/_components/report-shell';
+import { useUrlFilters } from '@/lib/hooks/use-url-filters';
 import {
   TrendingUp,
   TrendingDown,
@@ -50,6 +51,15 @@ export default function AnalyticsDashboardPage() {
   });
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [groupBy, setGroupBy] = useState<'day' | 'week' | 'month'>('day');
+
+  useUrlFilters(
+    { startDate, endDate, groupBy },
+    {
+      startDate: setStartDate,
+      endDate: setEndDate,
+      groupBy: (next) => setGroupBy(next as 'day' | 'week' | 'month'),
+    },
+  );
 
   const loadDashboard = async () => {
     setLoading(true);

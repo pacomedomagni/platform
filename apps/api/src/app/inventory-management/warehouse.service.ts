@@ -224,6 +224,23 @@ export class WarehouseService {
         );
       }
 
+      // Active marketplace listings selling against this warehouse must be
+      // ended or repointed first. Otherwise the inventory-sync cron would
+      // start treating the listing as warehouseId=null after the cascade
+      // SetNull, silently freezing eBay's stock view at the last value
+      // synced.
+      const activeListingCount = await tx.marketplaceListing.count({
+        where: {
+          warehouseId: id,
+          status: { in: ['draft', 'pending_approval', 'approved', 'publishing', 'published'] },
+        },
+      });
+      if (activeListingCount > 0) {
+        throw new BadRequestException(
+          `Cannot delete warehouse: ${activeListingCount} active marketplace listing(s) reference it. End or repoint those listings first.`,
+        );
+      }
+
       // Soft delete the warehouse and its locations
       await tx.warehouse.update({
         where: { id, tenantId: ctx.tenantId },

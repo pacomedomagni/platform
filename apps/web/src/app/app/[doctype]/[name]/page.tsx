@@ -35,6 +35,13 @@ export default function DocTypeFormPage() {
 
             } catch (err) {
                 console.error(err);
+                // Surface load failure to the user instead of silently
+                // rendering a blank FormView. See DTN2 in docs/ui-audit.md.
+                toast({
+                    title: 'Could not load document',
+                    description: err instanceof Error ? err.message : 'Please try refreshing.',
+                    variant: 'destructive',
+                });
             } finally {
                 setLoading(false);
             }
@@ -59,15 +66,29 @@ export default function DocTypeFormPage() {
     };
 
     const handleSubmit = async () => {
-        await api.put(`/v1/doc/${docTypeName}/${docName}/submit`);
-        const dataRes = await api.get(`/v1/doc/${docTypeName}/${docName}`);
-        setData(dataRes.data);
+        try {
+            await api.put(`/v1/doc/${docTypeName}/${docName}/submit`);
+            const dataRes = await api.get(`/v1/doc/${docTypeName}/${docName}`);
+            setData(dataRes.data);
+        } catch (e) {
+            // Surface to the user instead of bubbling up to the nearest error
+            // boundary. See DTN1 in docs/ui-audit.md.
+            console.error('Submit failed', e);
+            toast({ title: 'Submit failed', description: 'Could not submit document.', variant: 'destructive' });
+            throw e;
+        }
     };
 
     const handleCancel = async () => {
-        await api.put(`/v1/doc/${docTypeName}/${docName}/cancel`);
-        const dataRes = await api.get(`/v1/doc/${docTypeName}/${docName}`);
-        setData(dataRes.data);
+        try {
+            await api.put(`/v1/doc/${docTypeName}/${docName}/cancel`);
+            const dataRes = await api.get(`/v1/doc/${docTypeName}/${docName}`);
+            setData(dataRes.data);
+        } catch (e) {
+            console.error('Cancel failed', e);
+            toast({ title: 'Cancel failed', description: 'Could not cancel document.', variant: 'destructive' });
+            throw e;
+        }
     };
 
     if (loading || !docType) {

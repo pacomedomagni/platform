@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Badge } from '@platform/ui';
 import api from '../../../../lib/api';
-import { ReportAlert, ReportCard, ReportEmpty, ReportPage, ReportTable } from '../_components/report-shell';
+import { ReportAlert, ReportCard, ReportEmpty, ReportLoading, ReportPage, ReportTable } from '../_components/report-shell';
 import { ReportToolbar, downloadCSV, toCSV } from '../_components/report-toolbar';
+import { useUrlFilters } from '@/lib/hooks/use-url-filters';
 
 type TrialAccount = {
   account: string;
@@ -46,6 +47,8 @@ export default function TrialBalancePage() {
   const [data, setData] = useState<TrialBalance | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useUrlFilters({ asOfDate }, { asOfDate: setAsOfDate });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -127,7 +130,8 @@ export default function TrialBalancePage() {
                 </tr>
               </thead>
               <tbody>
-                {data.accounts.length === 0 && <ReportEmpty colSpan={6} />}
+                {loading && <ReportLoading colSpan={6} />}
+                {!loading && data.accounts.length === 0 && <ReportEmpty colSpan={6} />}
                 {data.accounts.map((row, idx) => (
                   <tr key={`${row.account}-${idx}`} className="border-b last:border-0">
                     <td className="p-3">{row.account}</td>

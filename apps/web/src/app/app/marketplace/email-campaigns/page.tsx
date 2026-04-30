@@ -10,7 +10,7 @@ import {
   RefreshCw,
   X,
 } from 'lucide-react';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface Connection {
   id: string;
@@ -118,17 +118,12 @@ export default function MarketplaceEmailCampaignsPage() {
 
   const loadConnections = async () => {
     try {
-      const res = await fetch('/api/v1/marketplace/connections', {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = unwrapJson<Connection[]>(await res.json());
-        setConnections(data);
-        if (data.length > 0) {
-          setSelectedConnection(data[0].id);
-        } else {
-          setLoading(false);
-        }
+      const res = await api.get<Connection[]>('/v1/marketplace/connections');
+      setConnections(res.data);
+      if (res.data.length > 0) {
+        setSelectedConnection(res.data[0].id);
+      } else {
+        setLoading(false);
       }
     } catch (error) {
       console.error('Failed to load connections:', error);
@@ -139,16 +134,11 @@ export default function MarketplaceEmailCampaignsPage() {
   const loadCampaigns = async () => {
     setLoading(true);
     try {
-      const res = await fetch(
-        `/api/v1/marketplace/email-campaigns?connectionId=${selectedConnection}`,
-        { credentials: 'include' }
+      const res = await api.get<{ campaigns: EmailCampaign[]; total: number }>(
+        '/v1/marketplace/email-campaigns',
+        { params: { connectionId: selectedConnection } },
       );
-      if (res.ok) {
-        const data = unwrapJson<{ campaigns: EmailCampaign[]; total: number }>(
-          await res.json()
-        );
-        setCampaigns(data.campaigns || []);
-      }
+      setCampaigns(res.data.campaigns || []);
     } catch (error) {
       console.error('Failed to load email campaigns:', error);
     } finally {
@@ -158,14 +148,10 @@ export default function MarketplaceEmailCampaignsPage() {
 
   const loadAudiences = async () => {
     try {
-      const res = await fetch(
-        `/api/v1/marketplace/email-campaigns/audiences?connectionId=${selectedConnection}`,
-        { credentials: 'include' }
-      );
-      if (res.ok) {
-        const data = unwrapJson<Audience[]>(await res.json());
-        setAudiences(data);
-      }
+      const res = await api.get<Audience[]>('/v1/marketplace/email-campaigns/audiences', {
+        params: { connectionId: selectedConnection },
+      });
+      setAudiences(res.data);
     } catch (error) {
       console.error('Failed to load audiences:', error);
     }
@@ -183,37 +169,22 @@ export default function MarketplaceEmailCampaignsPage() {
 
     setCreating(true);
     try {
-      const res = await fetch('/api/v1/marketplace/email-campaigns', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          connectionId: selectedConnection,
-          subject: createForm.subject,
-          body: createForm.body,
-          audienceType: createForm.audienceType,
-          scheduledDate: createForm.scheduledDate || undefined,
-        }),
+      await api.post('/v1/marketplace/email-campaigns', {
+        connectionId: selectedConnection,
+        subject: createForm.subject,
+        body: createForm.body,
+        audienceType: createForm.audienceType,
+        scheduledDate: createForm.scheduledDate || undefined,
       });
-
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Email campaign created successfully' });
-        setShowCreateModal(false);
-        setCreateForm({ subject: '', body: '', audienceType: '', scheduledDate: '' });
-        loadCampaigns();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({
-          title: 'Error',
-          description: error.error || 'Failed to create email campaign',
-          variant: 'destructive',
-        });
-      }
-    } catch (error) {
+      toast({ title: 'Success', description: 'Email campaign created successfully' });
+      setShowCreateModal(false);
+      setCreateForm({ subject: '', body: '', audienceType: '', scheduledDate: '' });
+      loadCampaigns();
+    } catch (error: any) {
       console.error('Failed to create email campaign:', error);
       toast({
         title: 'Error',
-        description: 'Failed to create email campaign',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to create email campaign',
         variant: 'destructive',
       });
     } finally {
@@ -226,30 +197,16 @@ export default function MarketplaceEmailCampaignsPage() {
 
     setActionLoading(campaignId);
     try {
-      const res = await fetch(
-        `/api/v1/marketplace/email-campaigns/${campaignId}?connectionId=${selectedConnection}`,
-        {
-          method: 'DELETE',
-          credentials: 'include',
-        }
-      );
-
-      if (res.ok) {
-        toast({ title: 'Success', description: 'Email campaign deleted successfully' });
-        loadCampaigns();
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({
-          title: 'Error',
-          description: error.error || 'Failed to delete email campaign',
-          variant: 'destructive',
-        });
-      }
-    } catch (error) {
+      await api.delete(`/v1/marketplace/email-campaigns/${campaignId}`, {
+        params: { connectionId: selectedConnection },
+      });
+      toast({ title: 'Success', description: 'Email campaign deleted successfully' });
+      loadCampaigns();
+    } catch (error: any) {
       console.error('Failed to delete email campaign:', error);
       toast({
         title: 'Error',
-        description: 'Failed to delete email campaign',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to delete email campaign',
         variant: 'destructive',
       });
     } finally {
@@ -263,25 +220,19 @@ export default function MarketplaceEmailCampaignsPage() {
     setReportData(null);
 
     try {
-      const res = await fetch(
-        `/api/v1/marketplace/email-campaigns/${campaignId}/report?connectionId=${selectedConnection}`,
-        { credentials: 'include' }
+      const res = await api.get<CampaignReport>(
+        `/v1/marketplace/email-campaigns/${campaignId}/report`,
+        { params: { connectionId: selectedConnection } },
       );
-
-      if (res.ok) {
-        const data = unwrapJson<CampaignReport>(await res.json());
-        setReportData(data);
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({
-          title: 'Error',
-          description: error.error || 'Failed to load campaign report',
-          variant: 'destructive',
-        });
-        setShowReportModal(false);
-      }
-    } catch (error) {
+      setReportData(res.data);
+    } catch (error: any) {
       console.error('Failed to load campaign report:', error);
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to load campaign report',
+        variant: 'destructive',
+      });
+      setShowReportModal(false);
       toast({
         title: 'Error',
         description: 'Failed to load campaign report',

@@ -6,8 +6,14 @@ WORKDIR /app
 COPY package*.json ./
 COPY .npmrc* ./
 
-# Install all dependencies (dev needed for build)
-RUN npm install
+# Install all dependencies (dev needed for build).
+# `npm ci` is deterministic from package-lock.json. The retry-tuning flags
+# ride out transient ECONNRESET / ETIMEDOUT during builds — the registry
+# occasionally drops connections mid-tarball-fetch in container builds.
+RUN npm config set fetch-retries 5 \
+ && npm config set fetch-retry-mintimeout 20000 \
+ && npm config set fetch-retry-maxtimeout 120000 \
+ && npm ci
 
 ENV NX_DAEMON=false
 

@@ -1,4 +1,10 @@
-import { Module, DynamicModule, Global } from '@nestjs/common';
+import {
+  Module,
+  DynamicModule,
+  Global,
+  InjectionToken,
+  OptionalFactoryDependency,
+} from '@nestjs/common';
 import { PrintService } from './print.service';
 import { TemplateService } from './template.service';
 import { PrintModuleOptions, PRINT_MODULE_OPTIONS } from './print.types';
@@ -23,7 +29,7 @@ export class PrintModule {
 
   static forRootAsync(options: {
     useFactory: (...args: unknown[]) => Promise<PrintModuleOptions> | PrintModuleOptions;
-    inject?: unknown[];
+    inject?: Array<InjectionToken | OptionalFactoryDependency>;
   }): DynamicModule {
     return {
       module: PrintModule,

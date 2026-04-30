@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface LegalPage {
   id: string;
@@ -30,30 +30,30 @@ export default function LegalPagesPage() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const getHeaders = useCallback(() => {
-    const token = localStorage.getItem('access_token');
-    const tenantId = localStorage.getItem('tenantId');
-    return {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      'x-tenant-id': tenantId || '',
-    };
-  }, []);
+  // Snapshot of the loaded page state so we can detect dirty edits and warn
+  // the user before clobbering them on a tab switch. Without this, switching
+  // tabs silently destroys unsaved input — the worst UX bug on the page.
+  const [loadedSnapshot, setLoadedSnapshot] = useState<{
+    title: string;
+    content: string;
+    isPublished: boolean;
+  } | null>(null);
+  const isDirty =
+    loadedSnapshot !== null &&
+    (title !== loadedSnapshot.title ||
+      content !== loadedSnapshot.content ||
+      isPublished !== loadedSnapshot.isPublished);
 
   const fetchPages = useCallback(async () => {
     try {
-      const res = await fetch('/api/v1/store/admin/pages', {
-        headers: getHeaders(),
-      });
-      if (!res.ok) throw new Error('Failed to fetch legal pages');
-      const data = unwrapJson(await res.json());
-      setPages(data);
+      const res = await api.get<LegalPage[]>('/v1/store/admin/pages');
+      setPages(res.data);
     } catch (err: any) {
-      setError(err.message);
+      setError(err?.response?.data?.message || err.message || 'Failed to fetch legal pages');
     } finally {
       setLoading(false);
     }
-  }, [getHeaders]);
+  }, []);
 
   useEffect(() => {
     fetchPages();
@@ -65,13 +65,35 @@ export default function LegalPagesPage() {
       setTitle(page.title);
       setContent(page.content);
       setIsPublished(page.isPublished);
+      setLoadedSnapshot({
+        title: page.title,
+        content: page.content,
+        isPublished: page.isPublished,
+      });
     } else {
       const tab = DEFAULT_TABS.find((t) => t.slug === activeSlug);
-      setTitle(tab?.label || '');
+      const fallbackTitle = tab?.label || '';
+      setTitle(fallbackTitle);
       setContent('');
       setIsPublished(true);
+      setLoadedSnapshot({ title: fallbackTitle, content: '', isPublished: true });
     }
   }, [activeSlug, pages]);
+
+  // Guarded tab-switch. Prompts the user before discarding unsaved edits.
+  const handleTabSwitch = useCallback(
+    (nextSlug: string) => {
+      if (nextSlug === activeSlug) return;
+      if (isDirty) {
+        const ok = window.confirm(
+          'You have unsaved changes on this page. Discard them and switch tabs?'
+        );
+        if (!ok) return;
+      }
+      setActiveSlug(nextSlug);
+    },
+    [activeSlug, isDirty]
+  );
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,17 +102,15 @@ export default function LegalPagesPage() {
     setSuccessMessage(null);
 
     try {
-      const res = await fetch(`/api/v1/store/admin/pages/${activeSlug}`, {
-        method: 'PUT',
-        headers: getHeaders(),
-        body: JSON.stringify({ title, content, isPublished }),
-      });
-      if (!res.ok) throw new Error('Failed to save page');
+      await api.put(`/v1/store/admin/pages/${activeSlug}`, { title, content, isPublished });
       setSuccessMessage('Page saved successfully.');
       setTimeout(() => setSuccessMessage(null), 4000);
+      // Mark current edits as the new clean baseline so the dirty guard
+      // doesn't fire on the next tab switch.
+      setLoadedSnapshot({ title, content, isPublished });
       await fetchPages();
     } catch (err: any) {
-      setError(err.message);
+      setError(err?.response?.data?.message || err.message || 'Failed to save page');
     } finally {
       setSaving(false);
     }
@@ -164,7 +184,7 @@ export default function LegalPagesPage() {
           return (
             <button
               key={tab.slug}
-              onClick={() => setActiveSlug(tab.slug)}
+              onClick={() => handleTabSwitch(tab.slug)}
               className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition ${
                 isActive
                   ? 'bg-white text-slate-900 shadow-sm'

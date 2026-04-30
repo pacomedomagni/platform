@@ -10,7 +10,7 @@ import {
   CreditCard,
   RefreshCw,
 } from 'lucide-react';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface Connection {
   id: string;
@@ -130,15 +130,10 @@ export default function MarketplaceFinancesPage() {
   const loadConnections = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/v1/marketplace/connections', {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = unwrapJson<Connection[]>(await res.json());
-        setConnections(data);
-        if (data.length > 0) {
-          setSelectedConnection(data[0].id);
-        }
+      const res = await api.get<Connection[]>('/v1/marketplace/connections');
+      setConnections(res.data);
+      if (res.data.length > 0) {
+        setSelectedConnection(res.data[0].id);
       }
     } catch (error) {
       console.error('Failed to load connections:', error);
@@ -156,21 +151,17 @@ export default function MarketplaceFinancesPage() {
   const loadFunds = async () => {
     setFundsLoading(true);
     try {
-      const res = await fetch(
-        `/api/v1/marketplace/finances/funds-summary?connectionId=${selectedConnection}`,
-        { credentials: 'include' }
-      );
-      if (res.ok) {
-        const data = unwrapJson<SellerFunds>(await res.json());
-        setFunds(data);
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to load seller funds', variant: 'destructive' });
-        setFunds(null);
-      }
-    } catch (error) {
+      const res = await api.get<SellerFunds>('/v1/marketplace/finances/funds-summary', {
+        params: { connectionId: selectedConnection },
+      });
+      setFunds(res.data);
+    } catch (error: any) {
       console.error('Failed to load funds:', error);
-      toast({ title: 'Error', description: 'Failed to load seller funds', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to load seller funds',
+        variant: 'destructive',
+      });
       setFunds(null);
     } finally {
       setFundsLoading(false);
@@ -180,21 +171,17 @@ export default function MarketplaceFinancesPage() {
   const loadPayouts = async () => {
     setPayoutsLoading(true);
     try {
-      const res = await fetch(
-        `/api/v1/marketplace/finances/payouts?connectionId=${selectedConnection}&limit=20`,
-        { credentials: 'include' }
-      );
-      if (res.ok) {
-        const data = unwrapJson<Payout[]>(await res.json());
-        setPayouts(data);
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to load payouts', variant: 'destructive' });
-        setPayouts([]);
-      }
-    } catch (error) {
+      const res = await api.get<Payout[]>('/v1/marketplace/finances/payouts', {
+        params: { connectionId: selectedConnection, limit: 20 },
+      });
+      setPayouts(res.data);
+    } catch (error: any) {
       console.error('Failed to load payouts:', error);
-      toast({ title: 'Error', description: 'Failed to load payouts', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to load payouts',
+        variant: 'destructive',
+      });
       setPayouts([]);
     } finally {
       setPayoutsLoading(false);
@@ -204,21 +191,17 @@ export default function MarketplaceFinancesPage() {
   const loadTransactions = async () => {
     setTransactionsLoading(true);
     try {
-      const res = await fetch(
-        `/api/v1/marketplace/finances/transactions?connectionId=${selectedConnection}&limit=20`,
-        { credentials: 'include' }
-      );
-      if (res.ok) {
-        const data = unwrapJson<Transaction[]>(await res.json());
-        setTransactions(data);
-      } else {
-        const error = unwrapJson(await res.json());
-        toast({ title: 'Error', description: error.error || 'Failed to load transactions', variant: 'destructive' });
-        setTransactions([]);
-      }
-    } catch (error) {
+      const res = await api.get<Transaction[]>('/v1/marketplace/finances/transactions', {
+        params: { connectionId: selectedConnection, limit: 20 },
+      });
+      setTransactions(res.data);
+    } catch (error: any) {
       console.error('Failed to load transactions:', error);
-      toast({ title: 'Error', description: 'Failed to load transactions', variant: 'destructive' });
+      toast({
+        title: 'Error',
+        description: error?.response?.data?.error || error?.response?.data?.message || 'Failed to load transactions',
+        variant: 'destructive',
+      });
       setTransactions([]);
     } finally {
       setTransactionsLoading(false);

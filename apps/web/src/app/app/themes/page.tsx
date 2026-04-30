@@ -18,15 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import {
-  ConfirmDialog,
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-  toastUndo,
-} from '@platform/ui';
+import { ConfirmDialog, toastUndo } from '@platform/ui';
 import type { Theme } from '@/lib/theme/types';
 
 export default function ThemesPage() {
@@ -39,19 +31,9 @@ export default function ThemesPage() {
   const [themeToDelete, setThemeToDelete] = useState<Theme | null>(null);
   // Activate confirmation — switching themes hits the live storefront immediately, so we gate on a dialog.
   const [activateConfirmId, setActivateConfirmId] = useState<string | null>(null);
-  // Preview drawer — holds the theme being previewed in an iframe.
-  const [previewTheme, setPreviewTheme] = useState<Theme | null>(null);
 
   const router = useRouter();
   const { toast } = useToast();
-
-  // Best-effort storefront URL for the preview iframe; falls back to the public storefront route.
-  // The storefront does not yet honour ?theme= for live overrides — see report.
-  const storefrontPreviewUrl = (themeId: string) => {
-    if (typeof window === 'undefined') return '/storefront';
-    const base = window.location.origin;
-    return `${base}/storefront?theme=${encodeURIComponent(themeId)}`;
-  };
 
   useEffect(() => {
     loadThemes();
@@ -260,6 +242,13 @@ export default function ThemesPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {/*
+            onPreview omitted intentionally — see T1 in docs/ui-audit.md.
+            The storefront does not honour ?theme= overrides, so the
+            preview iframe always rendered the active theme regardless
+            of which row the user clicked. Re-add `onPreview={() =>
+            setPreviewTheme(theme)}` once the storefront supports it.
+          */}
           {filteredThemes.map((theme) => (
             <ThemeCard
               key={theme.id}
@@ -269,7 +258,6 @@ export default function ThemesPage() {
               onEdit={() => handleEdit(theme.id)}
               onDuplicate={() => handleDuplicate(theme)}
               onDelete={() => handleDelete(theme)}
-              onPreview={() => setPreviewTheme(theme)}
             />
           ))}
         </div>
@@ -308,29 +296,12 @@ export default function ThemesPage() {
       />
 
       {/*
-        Preview drawer — iframe pointing at the storefront. We pass ?theme=<id> for forward-compat;
-        once the storefront honours the override the same URL will start showing the chosen theme.
+        Preview drawer removed — see T1 in docs/ui-audit.md. Storefront
+        does not honour ?theme= overrides, so the preview always rendered
+        the active theme regardless of which row was clicked. Restore the
+        Sheet (and the previewTheme state + onPreview prop above) once the
+        storefront supports per-request theme overrides.
       */}
-      <Sheet open={previewTheme !== null} onOpenChange={(open) => { if (!open) setPreviewTheme(null); }}>
-        <SheetContent side="right" className="!max-w-none w-full sm:w-[80vw] md:w-[70vw] lg:w-[60vw] flex flex-col">
-          <SheetHeader>
-            <SheetTitle>Preview: {previewTheme?.name ?? ''}</SheetTitle>
-            <SheetDescription>
-              Live storefront in an iframe. The override query parameter is included so the preview
-              will reflect this theme once the storefront supports per-request overrides.
-            </SheetDescription>
-          </SheetHeader>
-          {previewTheme && (
-            <div className="mt-4 flex-1 overflow-hidden rounded-lg border">
-              <iframe
-                title={`Preview of ${previewTheme.name}`}
-                src={storefrontPreviewUrl(previewTheme.id)}
-                className="h-full w-full"
-              />
-            </div>
-          )}
-        </SheetContent>
-      </Sheet>
     </div>
   );
 }

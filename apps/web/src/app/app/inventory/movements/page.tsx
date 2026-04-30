@@ -162,6 +162,12 @@ export default function StockMovementsPage() {
     loadMovements();
   }, []);
 
+  // Re-load on page change (IM1).
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-fire on page changes
+  useEffect(() => {
+    loadMovements();
+  }, [page]);
+
   return (
     <ReportPage
       title="Stock Movements"
@@ -301,7 +307,7 @@ export default function StockMovementsPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => { setPage((p) => Math.max(0, p - 1)); loadMovements(); }}
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
                 disabled={page === 0}
               >
                 Previous
@@ -309,7 +315,7 @@ export default function StockMovementsPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => { setPage((p) => p + 1); loadMovements(); }}
+                onClick={() => setPage((p) => p + 1)}
                 disabled={(page + 1) * PAGE_SIZE >= pagination.total}
               >
                 Next
@@ -324,7 +330,15 @@ export default function StockMovementsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <Card className="w-full max-w-lg p-6 space-y-4">
             <h2 className="text-lg font-semibold">Create Stock Movement</h2>
-            
+
+            {/* IM3: wrap inputs in <form> for Enter-to-submit + native required validation. */}
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                createMovement();
+              }}
+            >
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="text-sm font-medium text-muted-foreground">Movement Type</label>
@@ -435,14 +449,15 @@ export default function StockMovementsPage() {
               />
             </div>
 
-            <div className="flex justify-end gap-3 pt-4">
-              <Button variant="outline" onClick={() => setShowCreateModal(false)}>
-                Cancel
-              </Button>
-              <Button onClick={createMovement}>
-                Create Movement
-              </Button>
-            </div>
+              <div className="flex justify-end gap-3 pt-4">
+                <Button type="button" variant="outline" onClick={() => setShowCreateModal(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit">
+                  Create Movement
+                </Button>
+              </div>
+            </form>
           </Card>
         </div>
       )}

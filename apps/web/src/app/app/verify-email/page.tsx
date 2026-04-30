@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { Card } from '@platform/ui';
 import { CheckCircle, XCircle, Loader2 } from 'lucide-react';
 import Link from 'next/link';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 function VerifyEmailContent() {
   const searchParams = useSearchParams();
@@ -22,24 +22,16 @@ function VerifyEmailContent() {
 
     const verify = async () => {
       try {
-        const res = await fetch('/api/v1/onboarding/verify-email', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token }),
-        });
-
-        if (res.ok) {
-          const data = unwrapJson(await res.json());
-          setStatus('success');
-          setMessage(`Your email ${data.email} has been verified!`);
-        } else {
-          const err = unwrapJson(await res.json());
-          setStatus('error');
-          setMessage(err.message || 'Verification failed. The token may be invalid or expired.');
-        }
-      } catch {
+        const res = await api.post<{ email: string }>('/v1/onboarding/verify-email', { token });
+        setStatus('success');
+        setMessage(`Your email ${res.data.email} has been verified!`);
+      } catch (err: any) {
         setStatus('error');
-        setMessage('Something went wrong. Please try again.');
+        setMessage(
+          err?.response?.data?.message ||
+            err?.message ||
+            'Verification failed. The token may be invalid or expired.',
+        );
       }
     };
 

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Card, Button, Input, NativeSelect, Label } from '@platform/ui';
+import { Card, Button, Input, NativeSelect, Label, toast } from '@platform/ui';
 import { Download, Search, Activity, Users, FileText } from 'lucide-react';
 import api from '../../../../lib/api';
 
@@ -41,24 +41,32 @@ export default function AuditLogsPage() {
       if (filters.endDate) params.endDate = filters.endDate;
       if (filters.action) params.action = filters.action;
       if (filters.docType) params.docType = filters.docType;
+      // AU2: push search to the API instead of filtering only the visible
+      // 50 rows in memory. Previously, searching for an order on page 11
+      // returned nothing because the filter ran after the limit.
+      if (filters.search) params.search = filters.search;
 
-      const [logsRes, summaryRes] = await Promise.all([
+      // AU4: don't let the summary endpoint failure kill the logs render.
+      const [logsRes, summaryRes] = await Promise.allSettled([
         api.get('/v1/operations/audit-logs', { params }),
         api.get('/v1/operations/audit-logs/activity-summary', { params: { startDate: filters.startDate, endDate: filters.endDate } }),
       ]);
 
-      let filteredLogs = logsRes.data.data || [];
-
-      if (filters.search) {
-        filteredLogs = filteredLogs.filter((log: AuditLog) =>
-          log.docName.toLowerCase().includes(filters.search.toLowerCase())
-        );
+      if (logsRes.status === 'fulfilled') {
+        setLogs(logsRes.value.data.data || []);
+      } else {
+        console.error('Failed to load audit logs:', logsRes.reason);
+        toast({
+          title: 'Could not load audit logs',
+          description: logsRes.reason instanceof Error ? logsRes.reason.message : 'Try again.',
+          variant: 'destructive',
+        });
       }
-
-      setLogs(filteredLogs);
-      setSummary(summaryRes.data);
-    } catch (error: any) {
-      console.error('Failed to load audit logs:', error);
+      if (summaryRes.status === 'fulfilled') {
+        setSummary(summaryRes.value.data);
+      } else {
+        console.warn('Failed to load activity summary', summaryRes.reason);
+      }
     } finally {
       setLoading(false);
     }
@@ -86,6 +94,17 @@ export default function AuditLogsPage() {
       link.remove();
     } catch (error) {
       console.error('Failed to export logs:', error);
+      // The blob responseType means error.response.data is a Blob, not an
+      // object — so error.response.data.message is undefined. Read the
+      // status code instead. See AU1 in docs/ui-audit.md.
+      const status = (error as any)?.response?.status;
+      toast({
+        title: 'Export failed',
+        description: status
+          ? `Server returned ${status}. Check your filters and try again.`
+          : 'Could not download audit logs. Please try again.',
+        variant: 'destructive',
+      });
     }
   };
 

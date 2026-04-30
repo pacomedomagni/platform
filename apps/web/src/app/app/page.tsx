@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, Skeleton, toast, StatusBadge } from '@platform/ui';
 import { DollarSign, ShoppingCart, Package, Activity, CheckCircle, Circle, ArrowRight, ExternalLink, Loader2, Rocket, X, Mail, FileText, Globe, Plus, CreditCard, Sparkles, Banknote, AlertTriangle, TrendingUp } from 'lucide-react';
 import Link from 'next/link';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface DashboardData {
   totalRevenue: number;
@@ -75,37 +75,24 @@ export default function Dashboard() {
     else setSetupBannerDismissed(false);
   }, []);
 
-  useEffect(() => {
-    const fetchDashboard = async () => {
-      try {
-        const token = localStorage.getItem('access_token');
-        const tenantId = localStorage.getItem('tenantId');
-
-        const res = await fetch('/api/v1/store/admin/dashboard', {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'x-tenant-id': tenantId || '',
-          },
-        });
-
-        if (res.status === 401) {
-          localStorage.removeItem('access_token');
-          localStorage.removeItem('tenantId');
-          router.push('/login');
-          return;
-        }
-        if (!res.ok) throw new Error('Failed to load dashboard');
-        const json = unwrapJson(await res.json());
-        setData(json);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'An error occurred');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchDashboard();
+  // Hoisted so handlers (e.g. publish) can refresh without `window.location.reload()`.
+  const fetchDashboard = useCallback(async () => {
+    try {
+      // 6.1: axios singleton handles auth + tenant headers; the response
+      // interceptor unwraps the { data, meta } envelope and triggers the
+      // global 401 → /login redirect, so no manual handling needed here.
+      const res = await api.get('/v1/store/admin/dashboard');
+      setData(res.data);
+    } catch (err: any) {
+      setError(err?.response?.data?.message || (err instanceof Error ? err.message : 'An error occurred'));
+    } finally {
+      setLoading(false);
+    }
   }, [router]);
+
+  useEffect(() => {
+    fetchDashboard();
+  }, [fetchDashboard]);
 
   if (loading) {
     return (
@@ -222,23 +209,17 @@ export default function Dashboard() {
   const handlePublish = async () => {
     setPublishing(true);
     try {
-      const token = localStorage.getItem('access_token');
-      const tenantId = localStorage.getItem('tenantId');
-      const res = await fetch('/api/v1/store/admin/dashboard/publish', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'x-tenant-id': tenantId || '',
-        },
+      await api.post('/v1/store/admin/dashboard/publish');
+      // D2: re-fetch instead of `window.location.reload()`. The reload
+      // dropped React state, scroll position, and any in-flight requests.
+      toast({ title: 'Store published', variant: 'success' });
+      await fetchDashboard();
+    } catch (err: any) {
+      toast({
+        title: 'Publish failed',
+        description: err?.response?.data?.message || 'Failed to publish store. Please try again.',
+        variant: 'destructive',
       });
-      if (!res.ok) {
-        const err = unwrapJson(await res.json());
-        toast({ title: 'Publish failed', description: err.message || 'Failed to publish store', variant: 'destructive' });
-      } else {
-        window.location.reload();
-      }
-    } catch {
-      toast({ title: 'Publish failed', description: 'Failed to publish store. Please try again.', variant: 'destructive' });
     } finally {
       setPublishing(false);
     }
@@ -248,14 +229,14 @@ export default function Dashboard() {
     {
       label: 'Verify your email',
       done: data.checklist.emailVerified,
-      href: '/app/settings/account',
+      // No /app/settings/account page exists. When verified, route the row
+      // to the dashboard itself so the click is harmless; when unverified
+      // the inline action handler below resends the email and the href is
+      // unused.
+      href: '/app',
       action: !data.checklist.emailVerified ? async () => {
         try {
-          const token = localStorage.getItem('access_token');
-          await fetch('/api/v1/onboarding/resend-verification', {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${token}` },
-          });
+          await api.post('/v1/onboarding/resend-verification');
           toast({ title: 'Email sent', description: 'Verification email sent! Check your inbox.', variant: 'success' });
         } catch {
           toast({ title: 'Email failed', description: 'Failed to send verification email. Please try again.', variant: 'destructive' });
@@ -317,11 +298,7 @@ export default function Dashboard() {
           <button
             onClick={async () => {
               try {
-                const token = localStorage.getItem('access_token');
-                await fetch('/api/v1/onboarding/resend-verification', {
-                  method: 'POST',
-                  headers: { Authorization: `Bearer ${token}` },
-                });
+                await api.post('/v1/onboarding/resend-verification');
                 toast({ title: 'Email sent', description: 'Verification email sent! Check your inbox.', variant: 'success' });
               } catch {
                 toast({ title: 'Failed', description: 'Could not send email. Try again later.', variant: 'destructive' });

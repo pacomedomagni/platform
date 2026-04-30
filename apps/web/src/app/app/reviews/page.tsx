@@ -46,6 +46,11 @@ export default function AdminReviewsPage() {
       await loadReviews();
     } catch (error) {
       console.error('Failed to moderate review:', error);
+      toast({
+        title: 'Could not update review',
+        description: error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -58,6 +63,11 @@ export default function AdminReviewsPage() {
       await loadReviews();
     } catch (error) {
       console.error('Failed to bulk moderate:', error);
+      toast({
+        title: 'Bulk moderation failed',
+        description: error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -71,6 +81,11 @@ export default function AdminReviewsPage() {
       await loadReviews();
     } catch (error) {
       console.error('Failed to add response:', error);
+      toast({
+        title: 'Could not save response',
+        description: error instanceof Error ? error.message : 'Please try again.',
+        variant: 'destructive',
+      });
     }
   };
 
