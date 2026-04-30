@@ -48,7 +48,13 @@ export default function MarketplaceLayout({
     let alive = true;
     const load = async () => {
       try {
-        const res = await api.get('/v1/marketplace/listings', { params: { status: 'ERROR', limit: 1 } });
+        // The listings DTO validates `status` against a lowercase enum
+        // ('draft' | 'approved' | 'published' | 'error' | ...). Sending
+        // 'ERROR' returns a 400 from class-validator's @IsEnum, so we
+        // normalize to lowercase here. The downstream filtering below
+        // does an explicit `.toUpperCase()` compare so it's tolerant of
+        // either case in the response.
+        const res = await api.get('/v1/marketplace/listings', { params: { status: 'error', limit: 1 } });
         if (!alive) return;
         const data: any = res.data;
         const total: number = data?.total ?? data?.count ?? (Array.isArray(data?.data) ? data.data.length : Array.isArray(data) ? data.length : 0);

@@ -53,7 +53,10 @@ export default function MarketplaceLanding() {
       try {
         const [connRes, listRes, ordersRes] = await Promise.allSettled([
           api.get<any>('/v1/marketplace/connections'),
-          api.get<any>('/v1/marketplace/listings', { params: { limit: 200 } }),
+          // The DTO caps `limit` at 100. We aggregate counts client-side
+          // — 100 is enough to surface a recent-activity snapshot on the
+          // landing card; full pagination lives on /app/marketplace/listings.
+          api.get<any>('/v1/marketplace/listings', { params: { limit: 100 } }),
           api.get<any>('/v1/marketplace/orders', { params: { limit: 1 } }),
         ]);
 

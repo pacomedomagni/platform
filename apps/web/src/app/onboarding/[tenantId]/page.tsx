@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { unwrapJson } from '@/lib/admin-fetch';
+import api from '@/lib/api';
 
 interface OnboardingStatus {
   tenantId: string;
@@ -25,59 +25,70 @@ export default function OnboardingStatusPage() {
   const [error, setError] = useState<string | null>(null);
   const [isInitiatingPayment, setIsInitiatingPayment] = useState(false);
 
-  const fetchStatus = useCallback(async () => {
+  // Track the interval id in a ref so the polling effect can stop it from
+  // anywhere (terminal state, unmount, error). The previous shape returned
+  // a cleanup function from inside `.then(...)` — React only honors the
+  // return value of the effect callback itself, so the interval was
+  // leaking on every re-run and amplifying the 401 storm.
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetchStatus = useCallback(async (): Promise<OnboardingStatus | null> => {
     try {
-      const res = await fetch(`/api/v1/onboarding/${tenantId}/status`);
-      if (!res.ok) throw new Error('Failed to fetch status');
-      const data = unwrapJson(await res.json().catch(() => null));
-      setStatus(data);
-      return data;
+      // axios singleton attaches the Bearer token. The previous bare
+      // `fetch` had no Authorization header, so the JWT-guarded
+      // /:tenantId/status endpoint returned 401 on every poll.
+      const res = await api.get<OnboardingStatus>(`/v1/onboarding/${tenantId}/status`);
+      return res.data;
     } catch (err: any) {
-      setError(err.message);
+      // 401 here means the user navigated to onboarding without a valid
+      // session. Send them back to login rather than burning CPU polling.
+      if (err?.response?.status === 401) {
+        router.replace('/login?redirect=' + encodeURIComponent(window.location.pathname));
+        return null;
+      }
+      setError(err?.response?.data?.message || err?.message || 'Failed to fetch status');
       return null;
     }
-  }, [tenantId]);
+  }, [tenantId, router]);
 
   useEffect(() => {
     let cancelled = false;
-    fetchStatus().then((data) => {
-      // If the page mounts already in a terminal state we don't need to
-      // start the interval at all.
-      if (cancelled || !data) return;
-      if (data.provisioningStatus === 'READY' || data.provisioningStatus === 'FAILED') {
-        // Auto-route only when both provisioning AND payment are settled.
-        if (data.provisioningStatus === 'READY' && data.paymentProviderStatus === 'active') {
-          router.push('/app');
-        }
+
+    const stopPolling = () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+
+    const tick = async () => {
+      const next = await fetchStatus();
+      if (cancelled || !next) return;
+      setStatus(next);
+
+      // Auto-route once everything is good.
+      if (next.provisioningStatus === 'READY' && next.paymentProviderStatus === 'active') {
+        stopPolling();
+        router.push('/app');
         return;
       }
 
-      const interval = setInterval(async () => {
-        const next = await fetchStatus();
-        if (cancelled || !next) return;
+      // Stop polling once provisioning is settled. After that the page is
+      // interactive (user clicks "Connect Stripe" or "Skip"); there is
+      // no value in continuing to poll. See O1 in docs/ui-audit.md.
+      if (next.provisioningStatus === 'READY' || next.provisioningStatus === 'FAILED') {
+        stopPolling();
+      }
+    };
 
-        // Auto-route once everything is good.
-        if (next.provisioningStatus === 'READY' && next.paymentProviderStatus === 'active') {
-          clearInterval(interval);
-          router.push('/app');
-          return;
-        }
-
-        // Stop polling once provisioning is settled. After that the page
-        // is interactive (user clicks "Connect Stripe" or "Skip"); there
-        // is no value in continuing to poll, and the previous shape kept
-        // the timer running indefinitely if the user skipped payment.
-        // See O1 in docs/ui-audit.md.
-        if (next.provisioningStatus === 'READY' || next.provisioningStatus === 'FAILED') {
-          clearInterval(interval);
-        }
-      }, 2000);
-
-      return () => clearInterval(interval);
-    });
+    // Kick off the first call immediately, then poll every 2s until a
+    // terminal state is reached.
+    tick();
+    intervalRef.current = setInterval(tick, 2000);
 
     return () => {
       cancelled = true;
+      stopPolling();
     };
   }, [fetchStatus, router]);
 
@@ -86,31 +97,16 @@ export default function OnboardingStatusPage() {
     setError(null);
 
     try {
-      const token = localStorage.getItem('access_token');
-      if (!token) {
-        throw new Error('Please sign in again to continue payment setup.');
-      }
-
-      const res = await fetch(`/api/v1/onboarding/${tenantId}/payment/initiate`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      // Read the body once — Response.json() throws if called twice.
-      const body = await res.json().catch(() => null);
-      if (!res.ok) {
-        const err = unwrapJson(body) as { message?: string };
-        throw new Error(err.message || 'Failed to initiate payment setup');
-      }
-
-      const { url } = unwrapJson(body) as { url?: string };
+      const res = await api.post<{ url?: string }>(`/v1/onboarding/${tenantId}/payment/initiate`);
+      const url = res.data.url;
       if (!url) throw new Error('Server returned no payment-setup URL.');
       window.location.href = url;
     } catch (err: any) {
-      setError(err.message);
+      setError(
+        err?.response?.data?.message ||
+          err?.message ||
+          'Failed to initiate payment setup',
+      );
       setIsInitiatingPayment(false);
     }
   };
@@ -220,7 +216,7 @@ export default function OnboardingStatusPage() {
               </div>
               <h2 className="text-xl font-bold">Store Created</h2>
               <p className="mt-2 text-sm text-slate-500">
-                Now let's connect your payment provider so you can start accepting payments.
+                Now let&apos;s connect your payment provider so you can start accepting payments.
               </p>
 
               <div className="mt-6 rounded-lg border border-blue-200 bg-blue-50 p-5 text-left">
@@ -261,10 +257,10 @@ export default function OnboardingStatusPage() {
                 onClick={handleSkipForNow}
                 className="mt-3 w-full rounded-lg py-2 text-sm text-slate-500 transition hover:text-slate-700"
               >
-                Skip for now, I'll set this up later
+                Skip for now, I&apos;ll set this up later
               </button>
               <p className="mt-1 text-xs text-slate-400">
-                Your store won't be able to accept payments until a payment provider is connected.
+                Your store won&apos;t be able to accept payments until a payment provider is connected.
               </p>
             </div>
           )}

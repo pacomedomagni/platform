@@ -57,11 +57,20 @@ async function bootstrap() {
   });
   
   // Global validation pipe
+  //
+  // `enableImplicitConversion` lets query-string values like `?limit=1` (which
+  // arrive as the string "1") be coerced into the declared TS type so
+  // class-validator's @IsInt / @IsNumber pass. Without it, every numeric
+  // query DTO field has to be decorated manually with @Type(() => Number).
+  // See operations/audit-logs?limit=1 — that 400'd until this was added.
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
       transform: true,
       forbidNonWhitelisted: true,
+      transformOptions: {
+        enableImplicitConversion: true,
+      },
     }),
   );
   

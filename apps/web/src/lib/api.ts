@@ -26,6 +26,18 @@ function processQueue(error: unknown, token: string | null = null) {
 }
 
 api.interceptors.request.use((config) => {
+  // FormData bodies need the auto-generated multipart Content-Type with
+  // the correct `boundary=...` value. The instance-level default of
+  // `application/json` (above) sticks otherwise and the API parses the
+  // body as JSON — multer reports "No file provided" because the
+  // multipart parts never get split. Deleting the header here lets axios
+  // set it properly from the FormData payload.
+  if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+    if (config.headers) {
+      delete (config.headers as Record<string, unknown>)['Content-Type'];
+    }
+  }
+
   if (typeof window !== 'undefined') {
     const path = window.location.pathname;
     // Use customer token for storefront, admin token for app

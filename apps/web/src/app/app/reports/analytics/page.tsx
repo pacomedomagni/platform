@@ -43,14 +43,24 @@ export default function AnalyticsDashboardPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Date filters
-  const [startDate, setStartDate] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 30);
-    return d.toISOString().split('T')[0];
-  });
-  const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
+  // Date filters. Initialize to empty strings so the server-rendered HTML
+  // matches the first client paint — `new Date()` in a useState initializer
+  // runs on both server and client and will diverge when they straddle a
+  // second/midnight boundary, producing a React #418 hydration mismatch.
+  // The effect below seeds the real default-30-day window on mount.
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [groupBy, setGroupBy] = useState<'day' | 'week' | 'month'>('day');
+
+  useEffect(() => {
+    if (startDate || endDate) return; // already set (e.g. URL filters hydrated first)
+    const now = new Date();
+    const startOfWindow = new Date();
+    startOfWindow.setDate(now.getDate() - 30);
+    setStartDate(startOfWindow.toISOString().split('T')[0]);
+    setEndDate(now.toISOString().split('T')[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useUrlFilters(
     { startDate, endDate, groupBy },
