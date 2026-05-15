@@ -242,6 +242,35 @@ export class EbayMediaService {
   }
 
   /**
+   * M5: EPS image staleness guard.
+   *
+   * eBay's EPS retention rules:
+   *   - Unattached image: deleted 30 days after upload.
+   *   - Attached to a listing: kept for listing duration + 90 days.
+   *
+   * Practical implication: a DRAFT listing that sits unpublished for
+   * >25 days carries dead EPS URLs — `imageUrls` references that
+   * eBay will fetch at publish-time and fail to render. The publish
+   * path's `uploadImagesToEps` re-uploads from MinIO on every publish,
+   * which makes this safe end-to-end today. But a sync/feed update
+   * that re-uses the cached EPS URL without going back to MinIO
+   * silently breaks. Surface a warning so ops can spot drafts that
+   * have been sitting in error/draft state too long.
+   *
+   * Returns true when the listing is in the at-risk window.
+   */
+  isDraftEpsStale(listing: { createdAt: Date | string; status: string }): boolean {
+    if (listing.status === 'published') return false;
+    const createdAt =
+      typeof listing.createdAt === 'string'
+        ? new Date(listing.createdAt)
+        : listing.createdAt;
+    const ageMs = Date.now() - createdAt.getTime();
+    const STALE_THRESHOLD_MS = 25 * 24 * 60 * 60 * 1000;
+    return ageMs > STALE_THRESHOLD_MS;
+  }
+
+  /**
    * Upload an image to eBay EPS from MinIO storage.
    * Downloads the image buffer from MinIO, then uploads as binary to eBay.
    * This avoids the problem of eBay not being able to reach internal MinIO URLs.

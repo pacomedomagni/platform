@@ -124,9 +124,10 @@ model Tenant {
   storeThemes StoreTheme[]
 
   // Marketplace integrations
-  marketplaceConnections MarketplaceConnection[]
-  marketplaceListings    MarketplaceListing[]
-  marketplaceOrders      MarketplaceOrder[]
+  marketplaceConnections     MarketplaceConnection[]
+  marketplaceListings        MarketplaceListing[]
+  marketplaceOrders          MarketplaceOrder[]
+  marketplaceOrderLineItems  MarketplaceOrderLineItem[]
 
   marketplaceSyncLogs       MarketplaceSyncLog[]
   marketplaceReturns        MarketplaceReturn[]
@@ -184,6 +185,7 @@ model Tenant {
   marketplaceMessages             MarketplaceMessage[]
   webhookDeliveries               WebhookDelivery[]
   processedWebhookEvents          ProcessedWebhookEvent[]
+  marketplaceWebhookEvents        MarketplaceWebhookEvent[]
   merchantEmailVerificationTokens MerchantEmailVerificationToken[]
   userInvites                     UserInvite[]
 
@@ -1590,7 +1592,10 @@ model Order {
   couponUsage        CouponUsage?
   giftCardsGenerated GiftCard[]            @relation("GiftCardSource")
   shipments          Shipment[]
-  marketplaceOrder   MarketplaceOrder?
+  // Prisma-wise this is a 1:N relation; the DB-level partial unique
+  // index (marketplace_orders_orderId_key) enforces "at most one
+  // MarketplaceOrder per Order when orderId is non-null". See M3.
+  marketplaceOrders  MarketplaceOrder[]
 
   @@unique([tenantId, orderNumber])
   @@index([tenantId, customerId])
@@ -2674,7 +2679,12 @@ model MarketplaceListing {
   price                Decimal @db.Decimal(18, 2)
   quantity             Int
   condition            String
-  conditionDescription String? // Required for used/refurbished items
+  conditionDescription String? // Free-text descriptor (legacy / supplemental)
+  // H3: structured condition descriptors (eBay Jan 2025 mandate for many
+  // used-item categories). Shape: Array<{name, values:[{name}], additionalInfo?}>.
+  // Free-text conditionDescription remains supported for categories that
+  // don't yet require structured descriptors.
+  conditionDescriptors Json?
   categoryId           String
   secondaryCategoryId  String? // Optional second category (paid)
   privateListing       Boolean @default(false) // Hide buyer identity
@@ -2762,6 +2772,9 @@ model MarketplaceListing {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // M4: line-item attribution (back-reference)
+  orderLineItems MarketplaceOrderLineItem[]
+
   @@unique([connectionId, sku])
   @@unique([tenantId, externalOfferId])
   // externalListingId is NOT unique. A multi-variation listing is one
@@ -2784,8 +2797,14 @@ model MarketplaceOrder {
   connectionId String
   connection   MarketplaceConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
 
-  // Link to NoSlag order (created after sync)
-  orderId String? @unique
+  // Link to NoSlag order (created after sync).
+  // The uniqueness contract is "at most one MarketplaceOrder per internal
+  // Order WHEN orderId is non-null". A plain @unique is misleading on a
+  // nullable column because Postgres treats NULLs as distinct; the
+  // partial unique index defined by the migration
+  // 20260515010000_marketplace_orders_order_id_partial_unique enforces
+  // the actual intent.
+  orderId String?
   order   Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
 
   // Platform identifiers
@@ -2829,11 +2848,14 @@ model MarketplaceOrder {
   syncedToOrderAt DateTime?
   errorMessage    String?
 
-  // Items (JSON array - will be normalized to Order → OrderItem)
+  // Items (JSON array — raw snapshot of what eBay sent us; the
+  // normalized form lives in MarketplaceOrderLineItem below for
+  // analytics + sales-attribution joins).
   itemsData Json
 
   // Relations
-  returns MarketplaceReturn[]
+  returns   MarketplaceReturn[]
+  lineItems MarketplaceOrderLineItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2843,6 +2865,55 @@ model MarketplaceOrder {
   @@index([connectionId, syncStatus])
   @@index([externalOrderId])
   @@map("marketplace_orders")
+}
+
+// M4: normalized line items per marketplace order. The MarketplaceOrder
+// row keeps `itemsData` as the raw verbatim payload (forensic trail);
+// this table is the join-friendly form for analytics ("how much GMV did
+// this eBay listing produce last month?") and for surfacing
+// product-level sales in the seller's dashboard.
+//
+// listingId is nullable because some orders come in for SKUs that no
+// longer have a local MarketplaceListing row (listing was deleted, or
+// the order was placed via a sibling tenant). We still want to capture
+// the line.
+model MarketplaceOrderLineItem {
+  id String @id @default(uuid())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  orderId String
+  order   MarketplaceOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  // Linkback to the local listing if we have one — null if the listing
+  // was deleted or the SKU was never managed by our platform.
+  listingId String?
+  listing   MarketplaceListing? @relation(fields: [listingId], references: [id], onDelete: SetNull)
+
+  // eBay-side identifiers from the order line.
+  externalLineItemId String  // eBay lineItemId from getOrder
+  externalItemId     String? // eBay listing id (legacy item id) if present
+  sku                String  // SKU as eBay reports it
+
+  // Snapshot of the seller's listing at sale time.
+  title    String
+  quantity Int
+  unitPrice Decimal @db.Decimal(18, 2)
+  lineTotal Decimal @db.Decimal(18, 2)
+  currency  String  @default("USD")
+
+  // For analytics aggregation — copied from the order header at insert
+  // time so reports avoid a join.
+  soldAt    DateTime
+
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, orderId, externalLineItemId])
+  @@index([tenantId, listingId, soldAt])
+  @@index([tenantId, sku, soldAt])
+  @@index([orderId])
+  @@map("marketplace_order_line_items")
 }
 
 // Sync Logs - Track all sync operations
@@ -3179,6 +3250,63 @@ model ProcessedWebhookEvent {
   @@index([tenantId])
   @@index([eventId])
   @@map("processed_webhook_events")
+}
+
+// H9: marketplace webhook DLQ.
+//
+// Records EVERY signature-verified webhook eBay (or any marketplace)
+// delivers, regardless of downstream success. The redis-backed in-memory
+// dedup in EbayNotificationService prevents double-processing of healthy
+// events, but doesn't help when handler code crashes mid-flight — the
+// event would be lost forever because eBay does not retry inbound
+// notifications.
+//
+// Lifecycle:
+//   received   → row inserted at controller AFTER signature verify
+//   processing → claimed by a worker (or controller's async dispatch)
+//   done       → handler finished successfully
+//   failed     → handler threw; ops can re-trigger via admin endpoint
+//
+// tenantId is nullable: account-deletion notifications are anonymized
+// before processing, and a single notification can fan-out to multiple
+// tenants if the same eBay seller is connected from multiple workspaces.
+model MarketplaceWebhookEvent {
+  id String @id @default(uuid())
+
+  // Scope: platform-wide events have null tenantId; per-tenant events
+  // get pinned during resolution.
+  tenantId String?
+  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  platform String // "EBAY", "AMAZON", "ETSY", ...
+  topic    String // ITEM_SOLD, RETURN_CREATED, MARKETPLACE_ACCOUNT_DELETION, etc.
+
+  // External event identifier extracted from the verified payload, used
+  // as the dedup key. Unique constraint catches eBay re-delivery storms.
+  // Nullable because some payloads omit it (older topics).
+  externalEventId String? @unique
+
+  // The raw, signature-verified body bytes — kept for replay. Headers
+  // are kept too because some replay paths need the original
+  // x-ebay-signature for re-verification before re-dispatching.
+  rawBody String  @db.Text
+  headers Json    @default("{}")
+
+  // Lifecycle
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+  status      String    @default("received") // received | processing | done | failed
+
+  // Failure tracking — we don't retry automatically (eBay's delivery is
+  // already at-least-once on their side, and we don't want to flood our
+  // workers); ops triggers replay manually.
+  attempts      Int       @default(0)
+  lastAttemptAt DateTime?
+  errorMessage  String?
+
+  @@index([platform, status, receivedAt])
+  @@index([tenantId, platform, receivedAt])
+  @@map("marketplace_webhook_events")
 }
 
 // ─── OAuth State Management ─────────────────────────────────────────

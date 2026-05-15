@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService, bypassTenantGuard, runWithTenant } from '@platform/db';
 import { DistributedLockService } from '@platform/queue';
-import { EbayOrderSyncService } from './ebay-order-sync.service';
 import { EbayWebhookService } from './ebay-webhook.service';
 
 /**
@@ -22,7 +21,6 @@ export class EbayNotificationService {
 
   constructor(
     private prisma: PrismaService,
-    private orderSync: EbayOrderSyncService,
     private webhookService: EbayWebhookService,
     private lockService: DistributedLockService,
   ) {}
@@ -40,12 +38,23 @@ export class EbayNotificationService {
   }
 
   /**
-   * Atomic claim of a notificationId — returns true on first sight, false on
+   * Atomic claim of a notification — returns true on first sight, false on
    * duplicate. Uses the W3.2 distributed-lock primitive's underlying
    * SET NX PX.
+   *
+   * M-T6: dedup key includes the topic. eBay's notificationId is
+   * documented as globally unique, but historically there have been bug
+   * reports of the same ID appearing on legitimately different topic
+   * strings. Keying on topic+id is defense-in-depth — for a real
+   * duplicate, both the topic AND id match, so the key collides and
+   * we drop it; for the rare bug where eBay re-uses an id across
+   * topics, both events still get processed.
    */
-  private async claimNotificationId(notificationId: string): Promise<boolean> {
-    const key = `ebay:notif:dedup:${notificationId}`;
+  private async claimNotificationId(
+    topic: string,
+    notificationId: string,
+  ): Promise<boolean> {
+    const key = `ebay:notif:dedup:${topic}:${notificationId}`;
     const token = await this.lockService.tryAcquire(key, this.DEDUP_TTL_MS);
     return token !== null;
   }
@@ -58,7 +67,7 @@ export class EbayNotificationService {
     // Deduplication check (Redis-backed, cross-pod, survives restart)
     const notificationId = this.getNotificationId(payload);
     if (notificationId) {
-      const isFirstSeen = await this.claimNotificationId(notificationId);
+      const isFirstSeen = await this.claimNotificationId(topic, notificationId);
       if (!isFirstSeen) {
         this.logger.log(`Skipping duplicate eBay notification: ${topic} (id=${notificationId})`);
         return;
@@ -67,6 +76,9 @@ export class EbayNotificationService {
 
     this.logger.log(`Processing eBay notification: ${topic}${notificationId ? ` (id=${notificationId})` : ''}`);
 
+    // eBay's Sell Notification API has no ORDER_CREATED / ORDER_UPDATED
+    // topic — order detection is via the 15-min getOrders poll. Item-level
+    // and return topics ARE real and dispatched here.
     try {
       switch (topic) {
         case 'MARKETPLACE_ACCOUNT_DELETION':
@@ -75,11 +87,6 @@ export class EbayNotificationService {
           );
           // Route to webhook service for actual account anonymization
           await this.webhookService.handleAccountDeletion(payload);
-          break;
-
-        case 'ORDER_CREATED':
-        case 'ORDER_UPDATED':
-          await this.handleOrderNotification(payload);
           break;
 
         case 'ITEM_SOLD':
@@ -106,72 +113,6 @@ export class EbayNotificationService {
   }
 
   /**
-   * Handle order-related notifications.
-   *
-   * Resolves which tenant + connection the notification belongs to by the
-   * seller's ebayUserId (persisted at OAuth callback). Once we have the
-   * tenant we kick off an incremental sync that will upsert the order.
-   *
-   * Doing it seller-first — instead of looking up the order by
-   * externalOrderId across all tenants — keeps every read tenant-scoped
-   * and avoids the structural unsoundness of `findFirst` against a
-   * (tenantId, externalOrderId) composite-unique row without supplying
-   * the tenant.
-   */
-  async handleOrderNotification(payload: any): Promise<void> {
-    const externalOrderId = payload?.metadata?.orderId || payload?.resource?.orderId;
-    if (!externalOrderId) {
-      this.logger.warn('Order notification missing orderId in payload');
-      return;
-    }
-
-    const sellerUserId =
-      payload?.metadata?.userId ||
-      payload?.resource?.seller?.username;
-
-    if (!sellerUserId) {
-      this.logger.warn(
-        `Order notification for ${externalOrderId} dropped — no seller identifier in payload`
-      );
-      return;
-    }
-
-    this.logger.log(`Handling order notification for eBay order ${externalOrderId} (seller=${sellerUserId})`);
-
-    // Cross-tenant lookup keyed only on platformConfig.ebayUserId, which
-    // is the canonical seller key written at OAuth callback time.
-    const connection = await bypassTenantGuard(() =>
-      this.prisma.marketplaceConnection.findFirst({
-        where: {
-          platform: 'EBAY',
-          isActive: true,
-          isConnected: true,
-          platformConfig: { path: ['ebayUserId'], equals: sellerUserId },
-        },
-        select: { id: true, tenantId: true },
-      }),
-    );
-
-    if (!connection) {
-      this.logger.warn(
-        `Order notification for order ${externalOrderId}: no eBay connection matches seller ${sellerUserId}`
-      );
-      return;
-    }
-
-    try {
-      await runWithTenant(connection.tenantId, () =>
-        this.orderSync.syncOrders(connection.tenantId, connection.id),
-      );
-    } catch (error) {
-      this.logger.error(
-        `Incremental order sync failed for connection ${connection.id}`,
-        error
-      );
-    }
-  }
-
-  /**
    * Handle item-related notifications (ITEM_SOLD, ITEM_OUT_OF_STOCK).
    * Updates the local listing status and/or quantity based on the event.
    */
@@ -188,10 +129,12 @@ export class EbayNotificationService {
 
     this.logger.log(`Handling item notification for eBay item ${itemId}`);
 
-    // Lookup is cross-tenant (external item id is global on eBay's side);
-    // wrap in bypass for the find, then pin the tenant for the update.
-    const listing = await bypassTenantGuard(() =>
-      this.prisma.marketplaceListing.findFirst({
+    // H7: a single eBay listingId is global, but defense in depth: if the
+    // same SKU is republished from different tenants and somehow shares a
+    // legacy id, findMany ensures all of them get updated. Common case is
+    // exactly one match.
+    const listings = await bypassTenantGuard(() =>
+      this.prisma.marketplaceListing.findMany({
         where: {
           OR: [
             { externalListingId: itemId },
@@ -202,32 +145,30 @@ export class EbayNotificationService {
       }),
     );
 
-    if (!listing) {
+    if (listings.length === 0) {
       this.logger.warn(`No local listing found for eBay item ${itemId}`);
       return;
     }
 
-    // Determine the quantity update from the notification payload
     const quantitySold = payload?.resource?.quantitySold ?? 0;
     const quantityRemaining = payload?.resource?.quantityRemaining;
+    const forceOutOfStock = payload?.metadata?.topic === 'ITEM_OUT_OF_STOCK';
 
-    const updateData: Record<string, any> = {};
+    for (const listing of listings) {
+      const updateData: Record<string, any> = {};
 
-    if (quantityRemaining !== undefined && quantityRemaining !== null) {
-      updateData.quantity = Math.max(0, Number(quantityRemaining));
-    } else if (quantitySold > 0) {
-      updateData.quantity = Math.max(0, listing.quantity - Number(quantitySold));
-    }
+      if (quantityRemaining !== undefined && quantityRemaining !== null) {
+        updateData.quantity = Math.max(0, Number(quantityRemaining));
+      } else if (quantitySold > 0) {
+        updateData.quantity = Math.max(0, listing.quantity - Number(quantitySold));
+      }
 
-    // If item is out of stock, reflect that
-    if (
-      payload?.metadata?.topic === 'ITEM_OUT_OF_STOCK' ||
-      updateData.quantity === 0
-    ) {
-      updateData.quantity = 0;
-    }
+      if (forceOutOfStock || updateData.quantity === 0) {
+        updateData.quantity = 0;
+      }
 
-    if (Object.keys(updateData).length > 0) {
+      if (Object.keys(updateData).length === 0) continue;
+
       await runWithTenant(listing.tenantId, () =>
         this.prisma.marketplaceListing.update({
           where: { id: listing.id },
@@ -236,7 +177,7 @@ export class EbayNotificationService {
       );
 
       this.logger.log(
-        `Updated listing ${listing.id} from item notification: ${JSON.stringify(updateData)}`
+        `Updated listing ${listing.id} (tenant ${listing.tenantId}) from item notification: ${JSON.stringify(updateData)}`,
       );
     }
   }
@@ -260,27 +201,28 @@ export class EbayNotificationService {
         'Will be picked up by next return sync cycle.'
     );
 
-    // If we have an existing return record, update its sync status to trigger re-sync
+    // H7: same defense in depth as item notifications — return IDs are
+    // globally unique on eBay but if any duplication exists across tenants
+    // we want to flag all matches for re-sync, not silently pick one.
     if (returnId) {
-      const existingReturn = await bypassTenantGuard(() =>
-        this.prisma.marketplaceReturn.findFirst({
+      const existingReturns = await bypassTenantGuard(() =>
+        this.prisma.marketplaceReturn.findMany({
           where: { externalReturnId: String(returnId) },
         }),
       );
 
-      if (existingReturn) {
-        await runWithTenant(existingReturn.tenantId, () =>
+      for (const r of existingReturns) {
+        await runWithTenant(r.tenantId, () =>
           this.prisma.marketplaceReturn.update({
-            where: { id: existingReturn.id },
+            where: { id: r.id },
             data: {
               syncStatus: 'pending',
               errorMessage: null,
             },
           }),
         );
-
         this.logger.log(
-          `Marked return ${existingReturn.id} for re-sync due to notification`
+          `Marked return ${r.id} (tenant ${r.tenantId}) for re-sync due to notification`,
         );
       }
     }

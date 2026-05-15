@@ -49,8 +49,17 @@ export class EbayReturnsService implements OnModuleInit, OnModuleDestroy {
       this.logger.log('Scheduled tasks disabled via ENABLE_SCHEDULED_TASKS=false');
       return;
     }
-    this.syncInterval = setInterval(() => this.syncAllActiveReturns(), this.SYNC_INTERVAL_MS);
-    this.logger.log('eBay return sync scheduler started (every 30 minutes)');
+    // M8: jitter so multi-pod deploys spread out
+    const jitter = Math.floor(Math.random() * 2 * 60_000);
+    setTimeout(() => {
+      this.syncInterval = setInterval(
+        () => this.syncAllActiveReturns(),
+        this.SYNC_INTERVAL_MS,
+      );
+      this.logger.log(
+        `eBay return sync scheduler started (every 30 min, jittered +${jitter}ms)`,
+      );
+    }, jitter);
   }
 
   onModuleDestroy() {

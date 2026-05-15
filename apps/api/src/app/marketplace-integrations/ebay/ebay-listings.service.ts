@@ -2,7 +2,7 @@ import { Injectable, Logger, NotFoundException, BadRequestException, ConflictExc
 import { PrismaService } from '@platform/db';
 import { ClsService } from 'nestjs-cls';
 import { EbayStoreService } from './ebay-store.service';
-import { EbayClientService } from './ebay-client.service';
+import { EbayClientService, EbayApiError } from './ebay-client.service';
 import { EbayMediaService } from './ebay-media.service';
 import { EbayTaxonomyService } from './ebay-taxonomy.service';
 import { EbayPolicyService } from './ebay-policy.service';
@@ -86,6 +86,192 @@ export class EbayListingsService {
    */
   private getMarketplaceCurrency(marketplaceId: string): string {
     return EbayListingsService.MARKETPLACE_CURRENCY_MAP[marketplaceId] || 'USD';
+  }
+
+  /**
+   * H2: validate a listing's aspects against the eBay taxonomy.
+   *
+   * Returns a structured report the UI can use to surface remediation
+   * before the seller hits Publish (and before eBay's edge returns the
+   * notoriously opaque "Aspects.Name is required for this category"
+   * error mid-publish). Three classes of issue:
+   *
+   *   1. `missing`         — required aspect not provided at all
+   *   2. `emptyValues`     — aspect key present with empty / whitespace-only values
+   *   3. `invalidValues`   — SELECTION_ONLY aspect with a value not in aspectValues
+   *
+   * Callable from the UI via the listings controller, and ALSO invoked
+   * inline by publishListing so a bad listing can't slip through (used
+   * to be log-only).
+   */
+  async validateListingAspects(listingId: string): Promise<{
+    valid: boolean;
+    categoryId: string | null;
+    missing: string[];
+    emptyValues: string[];
+    invalidValues: Array<{ aspect: string; provided: string[]; allowed: string[] }>;
+  }> {
+    const listing = await this.prisma.marketplaceListing.findUnique({
+      where: { id: listingId },
+    });
+    if (!listing) {
+      throw new NotFoundException(`Listing ${listingId} not found`);
+    }
+    if (!listing.categoryId) {
+      return {
+        valid: false,
+        categoryId: null,
+        missing: ['categoryId (select a category first)'],
+        emptyValues: [],
+        invalidValues: [],
+      };
+    }
+    const connection = await this.ebayStore.getConnection(listing.connectionId);
+    const marketplaceId = connection.marketplaceId || 'EBAY_US';
+
+    const specs = (listing.itemSpecifics ?? {}) as Record<string, string[] | string>;
+    const aspects = await this.taxonomyService.getItemAspectsForCategory(
+      listing.connectionId,
+      marketplaceId,
+      listing.categoryId,
+    );
+
+    const missing: string[] = [];
+    const emptyValues: string[] = [];
+    const invalidValues: Array<{ aspect: string; provided: string[]; allowed: string[] }> = [];
+
+    for (const aspect of aspects) {
+      const name: string = aspect?.localizedAspectName;
+      if (!name) continue;
+
+      const constraint = aspect?.aspectConstraint ?? {};
+      const isRequired = !!constraint.aspectRequired;
+      const isSelectionOnly = constraint.aspectMode === 'SELECTION_ONLY';
+      const allowed: string[] = (aspect?.aspectValues ?? [])
+        .map((v: any) => v?.localizedValue)
+        .filter(Boolean);
+
+      const raw = specs[name];
+      const provided = Array.isArray(raw)
+        ? raw
+        : typeof raw === 'string'
+        ? [raw]
+        : [];
+      const nonEmpty = provided
+        .map((v) => (typeof v === 'string' ? v.trim() : v))
+        .filter((v) => v !== undefined && v !== null && v !== '');
+
+      if (isRequired && nonEmpty.length === 0) {
+        if (raw === undefined) {
+          missing.push(name);
+        } else {
+          emptyValues.push(name);
+        }
+        continue;
+      }
+
+      if (isSelectionOnly && allowed.length > 0 && nonEmpty.length > 0) {
+        const allowedSet = new Set(allowed);
+        const bad = nonEmpty.filter((v) => !allowedSet.has(v as string));
+        if (bad.length > 0) {
+          invalidValues.push({
+            aspect: name,
+            provided: bad as string[],
+            allowed,
+          });
+        }
+      }
+    }
+
+    // H3: structured condition descriptors for used items.
+    // eBay (Jan 2025+) requires category-specific condition aspects for
+    // non-NEW items. These typically appear in `getItemAspectsForCategory`
+    // either with names prefixed "Condition:" or with
+    // aspectConstraint.aspectCategoryName === "CONDITION_DESCRIPTORS".
+    // If the listing is non-NEW and the category surfaces any such
+    // aspects but the seller filled none of them AND left
+    // conditionDescription blank, flag as missing — eBay will likely
+    // reject the publish or demote in search.
+    const conditionMissing: string[] = [];
+    const isUsed =
+      typeof listing.condition === 'string' &&
+      listing.condition.length > 0 &&
+      !/^NEW$/i.test(listing.condition) &&
+      !/^NEW_/.test(listing.condition);
+
+    if (isUsed) {
+      const descriptorAspectNames = aspects
+        .filter((a: any) => {
+          const n: string = a?.localizedAspectName ?? '';
+          return (
+            n.toLowerCase().startsWith('condition:') ||
+            a?.aspectConstraint?.aspectCategoryName === 'CONDITION_DESCRIPTORS'
+          );
+        })
+        .map((a: any) => a.localizedAspectName as string);
+
+      const anyDescriptorFilled = descriptorAspectNames.some((n) => {
+        const raw = specs[n];
+        const provided = Array.isArray(raw) ? raw : typeof raw === 'string' ? [raw] : [];
+        return provided.some((v) => typeof v === 'string' && v.trim() !== '');
+      });
+      const hasFreeText =
+        !!listing.conditionDescription && listing.conditionDescription.trim().length > 0;
+
+      if (descriptorAspectNames.length > 0 && !anyDescriptorFilled && !hasFreeText) {
+        // Treat as missing — surface in the same `missing` channel so the
+        // publish path's assertValidAspects rolls it into the same
+        // BadRequestException.
+        conditionMissing.push(
+          `condition descriptors (one of: ${descriptorAspectNames.join(', ')}) or conditionDescription`,
+        );
+      }
+    }
+
+    const allMissing = [...missing, ...conditionMissing];
+
+    return {
+      valid:
+        allMissing.length === 0 &&
+        emptyValues.length === 0 &&
+        invalidValues.length === 0,
+      categoryId: listing.categoryId,
+      missing: allMissing,
+      emptyValues,
+      invalidValues,
+    };
+  }
+
+  /**
+   * Throwing variant used inline by the publish path: same checks as
+   * validateListingAspects, but converts a failed report into a
+   * BadRequestException with a human-readable message instead of the
+   * previous log-only behavior that let bad listings reach eBay.
+   */
+  private async assertValidAspects(listingId: string): Promise<void> {
+    const report = await this.validateListingAspects(listingId);
+    if (report.valid) return;
+    const parts: string[] = [];
+    if (report.missing.length) {
+      parts.push(`missing required aspects: ${report.missing.join(', ')}`);
+    }
+    if (report.emptyValues.length) {
+      parts.push(`empty values for: ${report.emptyValues.join(', ')}`);
+    }
+    if (report.invalidValues.length) {
+      const detail = report.invalidValues
+        .map(
+          (v) =>
+            `${v.aspect}=[${v.provided.join('|')}] (allowed: ${v.allowed.slice(0, 5).join(', ')}${
+              v.allowed.length > 5 ? '…' : ''
+            })`,
+        )
+        .join('; ');
+      parts.push(`SELECTION_ONLY aspects with disallowed values: ${detail}`);
+    }
+    throw new BadRequestException(
+      `Listing aspects fail eBay category ${report.categoryId} requirements — ${parts.join(' | ')}`,
+    );
   }
 
   /**
@@ -195,6 +381,57 @@ export class EbayListingsService {
 
     this.logger.log(`Created eBay listing draft ${listing.id} for product ${product.displayName}`);
     return listing;
+  }
+
+  /**
+   * L19: bulk-create draft listings from a parsed payload (e.g. CSV).
+   *
+   * Each input row is attempted independently — one malformed row does
+   * not abort the rest of the import. Returns a structured per-row
+   * report so the caller (typically a CSV importer UI) can mark which
+   * rows succeeded and surface validation errors for the rest.
+   *
+   * Drafts only — publishing is a separate step. This keeps imports
+   * cheap (no eBay round-trips) and gives the seller a chance to
+   * review before going live.
+   *
+   * Hard cap of 500 rows per call to keep request lifetime reasonable
+   * and avoid pathological partial failures across thousands of rows.
+   */
+  async bulkCreateDirectListings(
+    rows: Array<Parameters<EbayListingsService['createDirectListing']>[0]>,
+  ): Promise<{
+    succeeded: Array<{ index: number; listingId: string; sku?: string }>;
+    failed: Array<{ index: number; sku?: string; error: string }>;
+  }> {
+    if (rows.length === 0) {
+      return { succeeded: [], failed: [] };
+    }
+    if (rows.length > 500) {
+      throw new BadRequestException(
+        `Bulk import is limited to 500 rows per request; received ${rows.length}`,
+      );
+    }
+    const succeeded: Array<{ index: number; listingId: string; sku?: string }> = [];
+    const failed: Array<{ index: number; sku?: string; error: string }> = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      try {
+        const result = await this.createDirectListing(row);
+        succeeded.push({ index: i, listingId: result.id, sku: (row as any)?.sku });
+      } catch (err) {
+        failed.push({
+          index: i,
+          sku: (row as any)?.sku,
+          error: (err as Error)?.message ?? String(err),
+        });
+      }
+    }
+    this.logger.log(
+      `Bulk listing import: ${succeeded.length} created, ${failed.length} failed (total ${rows.length})`,
+    );
+    return { succeeded, failed };
   }
 
   /**
@@ -658,6 +895,17 @@ export class EbayListingsService {
       client = await this.ebayStore.getClient(listing.connectionId);
       const photos = JSON.parse(listing.photos as string) as string[];
 
+      // M5: drafts older than 25 days are in the EPS retention danger
+      // zone. We re-upload from MinIO at publish anyway (next line), so
+      // the actual publish is safe — but flag stale drafts so ops can
+      // notice that something has been sitting unpublished too long.
+      if (this.mediaService.isDraftEpsStale(listing)) {
+        this.logger.warn(
+          `Listing ${listingId} is a stale draft (createdAt=${listing.createdAt.toISOString()}). ` +
+            'Re-uploading from MinIO to avoid expired EPS URLs.',
+        );
+      }
+
       // C1: Upload images to eBay Picture Services (EPS) before creating inventory item.
       // Downloads each image from MinIO storage, uploads binary to eBay EPS.
       // eBay requires EPS-hosted URLs for full listing features (zoom, 24 images, etc).
@@ -670,22 +918,26 @@ export class EbayListingsService {
         ? JSON.parse(listing.platformData as string)
         : {};
 
-      // M8: Validate item specifics/aspects against eBay taxonomy if available
-      if (listing.itemSpecifics && listing.categoryId) {
+      // H2: strict pre-publish aspect validation. Used to be log-only;
+      // now we fail fast with a remediation-friendly message instead of
+      // letting eBay's edge reject with opaque "Aspects.Brand is required
+      // for this category" partway through createOrReplaceInventoryItem.
+      //
+      // Taxonomy lookup failures (e.g. transient 5xx from eBay) still
+      // shouldn't block — the publish itself will surface the issue if
+      // there is one, and we don't want a flaky taxonomy endpoint to
+      // permanently brick listing creation.
+      if (listing.categoryId) {
         try {
-          const aspects = await this.taxonomyService.getItemAspectsForCategory(
-            listing.connectionId, connection.marketplaceId || 'EBAY_US', listing.categoryId
-          );
-          const requiredAspects = aspects
-            .filter((a: any) => a.aspectConstraint?.aspectRequired)
-            .map((a: any) => a.localizedAspectName);
-          const providedAspects = Object.keys(listing.itemSpecifics as any);
-          const missing = requiredAspects.filter((a: string) => !providedAspects.includes(a));
-          if (missing.length > 0) {
-            this.logger.warn(`Listing ${listingId} missing required aspects: ${missing.join(', ')}`);
+          await this.assertValidAspects(listingId);
+        } catch (validationError) {
+          if (validationError instanceof BadRequestException) {
+            throw validationError;
           }
-        } catch {
-          // Non-blocking: if taxonomy lookup fails, proceed anyway
+          this.logger.warn(
+            `Taxonomy lookup failed during pre-publish aspect validation for ${listingId}; proceeding without strict check`,
+            validationError,
+          );
         }
       }
 
@@ -709,6 +961,18 @@ export class EbayListingsService {
       // L4: Include video IDs if present (uploaded via Media API)
       if (platformData.videoIds && Array.isArray(platformData.videoIds) && platformData.videoIds.length > 0) {
         productPayload.videoIds = platformData.videoIds;
+      }
+
+      // H3: structured condition descriptors (eBay Jan 2025 mandate).
+      // Many used-item categories now REQUIRE this in product.conditionDescriptors
+      // instead of (or in addition to) free-text conditionDescription. We
+      // forward whatever the seller persisted; eBay ignores the field for
+      // categories that don't need it. NEW listings typically don't need either.
+      const conditionDescriptors = Array.isArray(listing.conditionDescriptors)
+        ? (listing.conditionDescriptors as unknown[])
+        : null;
+      if (conditionDescriptors && conditionDescriptors.length > 0) {
+        productPayload.conditionDescriptors = conditionDescriptors;
       }
 
       const inventoryItem = await this.ebayClient.createOrReplaceInventoryItem(client, listing.sku, {
@@ -863,13 +1127,27 @@ export class EbayListingsService {
     } catch (error) {
       this.logger.error(`Failed to publish listing ${listingId}`, error);
 
-      // Rollback partially created eBay resources. The withdraw is
-      // synchronous on our side but eBay's offer purge is async; if we
-      // try to delete the inventory item right after withdraw, eBay
-      // often returns "inventory item is referenced by an offer". So we
-      // attempt the delete inline once; on failure, schedule a deferred
-      // retry via FailedOperationsService instead of leaving an orphan.
-      if (client) {
+      // C4: Only roll back on TERMINAL errors. Rolling back on transient
+      // 429/5xx is dangerous in two ways:
+      //   (1) If eBay actually published the offer server-side but the
+      //       response was lost (timeout, partial read), the rollback
+      //       would delete a now-live listing.
+      //   (2) Under throttle the publish should retry, not delete-and-
+      //       recreate — creating churn that worsens the throttle.
+      //
+      // Per EbayApiError.category:
+      //   REQUEST  — 4xx, malformed/invalid input    → terminal, roll back
+      //   BUSINESS — eBay rule violation              → terminal, roll back
+      //   APPLICATION — 5xx server error              → transient, leave intact
+      //   UNKNOWN  — fail closed for unrecognized     → leave intact
+      // Plus: HTTP 429 (rate-limit) is classified as REQUEST by some eBay
+      // responses, so we also check the statusCode explicitly.
+      const isTerminal =
+        error instanceof EbayApiError &&
+        (error.category === 'REQUEST' || error.category === 'BUSINESS') &&
+        error.statusCode !== 429;
+
+      if (client && isTerminal) {
         if (offerCreated && offerId) {
           try {
             await this.ebayClient.withdrawOffer(client, offerId);
@@ -896,13 +1174,24 @@ export class EbayListingsService {
             );
           }
         }
+      } else if (client && (offerCreated || inventoryItemCreated)) {
+        // Transient — leave the partial state for the next retry to find
+        // and either resume or correctly fail. Marked as PENDING_RETRY so
+        // ops can spot stuck listings.
+        this.logger.warn(
+          `Publish failed transiently for listing ${listingId} (status=${(error as any)?.statusCode}, ` +
+            `category=${(error as any)?.category}). Keeping partial state (offer=${offerCreated}, item=${inventoryItemCreated}) for retry.`,
+        );
       }
 
       await this.prisma.marketplaceListing.update({
         where: { id: listingId },
         data: {
-          status: ListingStatus.ERROR,
-          syncStatus: SyncStatus.ERROR,
+          // Transient errors leave partial state intact; surface as PENDING so a
+          // reconciliation pass picks the listing up. Terminal eBay rejections
+          // (REQUEST/BUSINESS) become ERROR and require user intervention.
+          status: isTerminal ? ListingStatus.ERROR : ListingStatus.PUBLISHING,
+          syncStatus: isTerminal ? SyncStatus.ERROR : SyncStatus.PENDING,
           errorMessage: error?.message || String(error) || 'Failed to publish listing',
         },
       });
@@ -1197,6 +1486,38 @@ export class EbayListingsService {
 
     this.logger.log(`Updated published listing ${listingId} offer`);
     return { success: true, listingId };
+  }
+
+  /**
+   * M2: deterministic, collision-safe inventory-item-group key.
+   *
+   * Previously the controller passed `dto.groupTitle` (the human-
+   * readable group title) directly as the eBay group key, which had two
+   * problems:
+   *   1. Two sellers using the same group title would collide on eBay's
+   *      side (group keys are scoped per-seller-account, so a single
+   *      seller in two of our tenants would clobber the other tenant's
+   *      group on republish).
+   *   2. Free-text titles can contain chars eBay's group-key endpoint
+   *      doesn't accept.
+   *
+   * Format: "t-<shortTenantHash>-p-<productListingId>" — deterministic
+   * so a re-publish targets the SAME eBay group (idempotency), and
+   * includes the tenant hash so cross-tenant collisions are impossible
+   * even for the same product listing replicated in two tenants.
+   */
+  generateInventoryGroupKey(tenantId: string, productListingId: string): string {
+    // eBay key character set: alphanumeric + underscore + hyphen.
+    // Tenant hash kept short (8 hex) — Birthday-paradox collision on
+    // 32-bit prefix at 10k tenants is ~1%, well below the per-seller-
+    // account scope where a clash actually matters.
+    const tenantHash = require('crypto')
+      .createHash('sha256')
+      .update(tenantId)
+      .digest('hex')
+      .slice(0, 8);
+    const safeProductId = productListingId.replace(/[^A-Za-z0-9_-]/g, '_');
+    return `t-${tenantHash}-p-${safeProductId}`;
   }
 
   /**

@@ -53,11 +53,17 @@ export class EbayMessagingService implements OnModuleInit, OnModuleDestroy {
       this.logger.log('Scheduled tasks disabled via ENABLE_SCHEDULED_TASKS=false');
       return;
     }
-    this.syncInterval = setInterval(
-      () => this.syncAllActiveMessages(),
-      this.SYNC_INTERVAL_MS
-    );
-    this.logger.log('eBay message sync scheduler started (every 10 minutes)');
+    // M8: stagger across pods.
+    const jitter = Math.floor(Math.random() * 90_000);
+    setTimeout(() => {
+      this.syncInterval = setInterval(
+        () => this.syncAllActiveMessages(),
+        this.SYNC_INTERVAL_MS
+      );
+      this.logger.log(
+        `eBay message sync scheduler started (every 10 min, jittered +${jitter}ms)`,
+      );
+    }, jitter);
   }
 
   onModuleDestroy() {

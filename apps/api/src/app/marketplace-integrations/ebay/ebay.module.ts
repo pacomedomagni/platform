@@ -7,6 +7,7 @@ import { MarketplaceAuditService } from '../shared/marketplace-audit.service';
 import { DistributedLockService } from '../shared/distributed-lock.service';
 import { EbayClientService } from './ebay-client.service';
 import { EbayStoreService } from './ebay-store.service';
+import { EbayOnboardingService } from './ebay-onboarding.service';
 import { EbayAuthService } from './ebay-auth.service';
 import { EbayAuthController } from './ebay-auth.controller';
 import { EbayListingsService } from './ebay-listings.service';
@@ -16,6 +17,8 @@ import { EbayOrdersController } from './ebay-orders.controller';
 import { EbayWebhookService } from './ebay-webhook.service';
 import { EbayWebhookController } from './ebay-webhook.controller';
 import { EbayNotificationService } from './ebay-notification.service';
+import { EbayNotificationBootstrapService } from './ebay-notification-bootstrap.service';
+import { EbayNotificationBootstrapController } from './ebay-notification-bootstrap.controller';
 import { EbayReturnsService } from './ebay-returns.service';
 import { EbayReturnsController } from './ebay-returns.controller';
 import { EbayMessagingService } from './ebay-messaging.service';
@@ -77,6 +80,7 @@ import { EbayPolicyService } from './ebay-policy.service';
     EbayListingsController,
     EbayOrdersController,
     EbayWebhookController,
+    EbayNotificationBootstrapController,
     EbayReturnsController,
     EbayMessagingController,
     EbayTaxonomyController,
@@ -108,11 +112,13 @@ import { EbayPolicyService } from './ebay-policy.service';
     DistributedLockService,
     EbayClientService,
     EbayStoreService,
+    EbayOnboardingService,
     EbayAuthService,
     EbayListingsService,
     EbayOrderSyncService,
     EbayWebhookService,
     EbayNotificationService,
+    EbayNotificationBootstrapService,
     EbayReturnsService,
     EbayMessagingService,
     EbayTaxonomyService,
@@ -142,11 +148,13 @@ import { EbayPolicyService } from './ebay-policy.service';
   exports: [
     EbayClientService,
     EbayStoreService,
+    EbayOnboardingService,
     EbayAuthService,
     EbayListingsService,
     EbayOrderSyncService,
     EbayWebhookService,
     EbayNotificationService,
+    EbayNotificationBootstrapService,
     EbayReturnsService,
     EbayMessagingService,
     EbayTaxonomyService,

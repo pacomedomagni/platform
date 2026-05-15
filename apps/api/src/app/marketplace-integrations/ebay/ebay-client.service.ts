@@ -1,4 +1,5 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, Optional } from '@nestjs/common';
+import { ClsService } from 'nestjs-cls';
 import eBayApi from 'ebay-api';
 import Redis from 'ioredis';
 import type {
@@ -74,6 +75,21 @@ export class EbayClientService implements OnModuleDestroy {
 
   // Revision tracking per listing per day (H4)
   private readonly MAX_REVISIONS_PER_DAY = 250;
+
+  // M-T1: per-tenant share of the per-app daily quota. Defaults to 1/10
+  // — i.e. we assume up to 10 concurrently active tenants share the
+  // app's daily call budget. Tunable per-env if a deployment has more
+  // tenants. The floor (PER_TENANT_FLOOR) keeps small tenants
+  // operational even if the share math would otherwise starve them.
+  private readonly PER_TENANT_FRACTION = parseFloat(
+    process.env['EBAY_PER_TENANT_FRACTION'] ?? '0.1',
+  );
+  private readonly PER_TENANT_FLOOR = parseInt(
+    process.env['EBAY_PER_TENANT_FLOOR'] ?? '1000',
+    10,
+  );
+
+  constructor(@Optional() private readonly cls?: ClsService) {}
 
   private getRedis(): Redis {
     if (!this.redis) {
@@ -248,6 +264,26 @@ export class EbayClientService implements OnModuleDestroy {
   async trackApiCall(apiGroup: string): Promise<boolean> {
     const limit = this.API_DAILY_LIMITS[apiGroup] || 100_000;
 
+    // M-T1: per-tenant pre-check. eBay rate limits are per APP, so one
+    // tenant can starve every other tenant by saturating the daily
+    // quota. We enforce a per-tenant share BEFORE the global cap so the
+    // global cap remains an absolute ceiling, and a runaway tenant gets
+    // back-pressured without blocking the rest.
+    const tenantId = this.cls?.get?.('tenantId') ?? null;
+    if (tenantId) {
+      const perTenantCap = Math.max(
+        this.PER_TENANT_FLOOR,
+        Math.floor(limit * this.PER_TENANT_FRACTION),
+      );
+      const tenantCount = await this.getTenantDailyCount(apiGroup, tenantId);
+      if (tenantCount >= perTenantCap) {
+        this.logger.warn(
+          `eBay per-tenant daily limit reached for ${apiGroup} tenant=${tenantId}: ${tenantCount}/${perTenantCap}`,
+        );
+        return false;
+      }
+    }
+
     // Check current count before incrementing
     const currentCount = await this.getDailyCount(apiGroup);
     if (currentCount >= limit) {
@@ -256,10 +292,23 @@ export class EbayClientService implements OnModuleDestroy {
     }
 
     const newCount = await this.incrementDailyCount(apiGroup);
+    if (tenantId) {
+      await this.incrementTenantDailyCount(apiGroup, tenantId);
+    }
 
-    if (newCount >= limit * 0.95) {
+    // M1: proactive headroom alerts — warn loudly at 70%, error at 90%,
+    // before we hit the absolute cap. This gives ops time to either
+    // shed load, request a quota increase from eBay, or pause non-
+    // critical sync jobs. The previous single warning at 95% gave
+    // essentially no warning before saturation.
+    if (newCount === Math.floor(limit * 0.7)) {
       this.logger.warn(
-        `eBay API daily limit warning: ${apiGroup} at ${newCount}/${limit} (95% threshold)`
+        `eBay API headroom: ${apiGroup} crossed 70% (${newCount}/${limit})`,
+      );
+    }
+    if (newCount === Math.floor(limit * 0.9)) {
+      this.logger.error(
+        `eBay API headroom CRITICAL: ${apiGroup} crossed 90% (${newCount}/${limit})`,
       );
     }
     if (newCount > limit) {
@@ -268,6 +317,25 @@ export class EbayClientService implements OnModuleDestroy {
     }
 
     return true;
+  }
+
+  /**
+   * M-T1: per-tenant daily call counter — separate from the app-wide
+   * counter so we can enforce fair share without losing the absolute
+   * cap visibility.
+   */
+  private async getTenantDailyCount(apiGroup: string, tenantId: string): Promise<number> {
+    const today = new Date().toISOString().split('T')[0];
+    const key = `ebay:rate:daily:tenant:${tenantId}:${apiGroup}:${today}`;
+    const count = await this.redisGet(key);
+    return count ?? 0;
+  }
+
+  private async incrementTenantDailyCount(apiGroup: string, tenantId: string): Promise<number> {
+    const today = new Date().toISOString().split('T')[0];
+    const key = `ebay:rate:daily:tenant:${tenantId}:${apiGroup}:${today}`;
+    const count = await this.redisIncr(key);
+    return count ?? 0;
   }
 
   /**
@@ -310,12 +378,86 @@ export class EbayClientService implements OnModuleDestroy {
   }
 
   /**
+   * L17: simple circuit breaker per API group. After
+   * CIRCUIT_FAILURE_THRESHOLD consecutive 5xx responses, the circuit
+   * opens for CIRCUIT_OPEN_MS and all calls fast-fail without hitting
+   * eBay. After the cooldown a single probe call goes through to
+   * test recovery (half-open). This prevents retry storms from
+   * compounding an eBay outage and burning rate-limit quota for
+   * nothing.
+   *
+   * Keyed per apiGroup so a Marketing-API outage doesn't break
+   * inventory sync.
+   */
+  private readonly CIRCUIT_FAILURE_THRESHOLD = 5;
+  private readonly CIRCUIT_OPEN_MS = 30_000;
+  private readonly circuit = new Map<string, { failures: number; openUntil: number }>();
+
+  private circuitAllow(apiGroup: string): boolean {
+    const state = this.circuit.get(apiGroup);
+    if (!state) return true;
+    if (state.openUntil > Date.now()) return false;
+    // Cooldown elapsed — allow one probe through. failures stays at
+    // threshold; a successful probe will reset it via circuitOnSuccess.
+    return true;
+  }
+
+  private circuitOnFailure(apiGroup: string): void {
+    const state = this.circuit.get(apiGroup) ?? { failures: 0, openUntil: 0 };
+    state.failures += 1;
+    if (state.failures >= this.CIRCUIT_FAILURE_THRESHOLD) {
+      state.openUntil = Date.now() + this.CIRCUIT_OPEN_MS;
+      this.logger.error(
+        `Circuit breaker OPEN for ${apiGroup} (${state.failures} consecutive failures); fast-fail until ${new Date(state.openUntil).toISOString()}`,
+      );
+    }
+    this.circuit.set(apiGroup, state);
+  }
+
+  private circuitOnSuccess(apiGroup: string): void {
+    const state = this.circuit.get(apiGroup);
+    if (state && (state.failures > 0 || state.openUntil > 0)) {
+      this.circuit.set(apiGroup, { failures: 0, openUntil: 0 });
+    }
+  }
+
+  /**
+   * L18: env-toggled per-call request/response body logging.
+   *
+   * Off by default — eBay payloads contain PII (buyer addresses, emails)
+   * and can be huge. When set, logs the function name, response shape,
+   * and error body. Toggled via EBAY_DEBUG_LOG_BODIES=true. Useful for
+   * incident response when you need to see what eBay actually returned.
+   */
+  private get debugBodies(): boolean {
+    return process.env['EBAY_DEBUG_LOG_BODIES'] === 'true';
+  }
+
+  private logDebugBody(label: string, body: unknown): void {
+    if (!this.debugBodies) return;
+    try {
+      // Cap at 4 KB to avoid OOM on huge payloads.
+      const text = typeof body === 'string' ? body : JSON.stringify(body);
+      this.logger.debug(`[ebay:${label}] ${text.slice(0, 4096)}${text.length > 4096 ? '…(truncated)' : ''}`);
+    } catch {
+      // Don't let logging itself blow up the request path.
+    }
+  }
+
+  /**
    * Execute an eBay API call with automatic retry handling.
    * Retries on: HTTP 429 (rate limit), 500, 502, 503 (transient server errors).
    * Uses exponential backoff and respects the Retry-After header when present.
    * Classifies errors per eBay's spec and detects revoked tokens.
    */
   private async withRetry<T>(operation: () => Promise<T>, apiGroup?: string): Promise<T> {
+    if (apiGroup && !this.circuitAllow(apiGroup)) {
+      throw new EbayApiError(
+        `eBay API circuit open for ${apiGroup} (recent failures). Will retry after cooldown.`,
+        503,
+        'APPLICATION',
+      );
+    }
     if (apiGroup && !(await this.trackApiCall(apiGroup))) {
       throw new EbayApiError(
         `eBay API daily limit exceeded for ${apiGroup}. Try again tomorrow.`,
@@ -326,12 +468,21 @@ export class EbayClientService implements OnModuleDestroy {
     let lastError: any;
     for (let attempt = 0; attempt <= this.MAX_RETRIES; attempt++) {
       try {
-        return await operation();
+        const result = await operation();
+        if (apiGroup) this.circuitOnSuccess(apiGroup);
+        if (apiGroup) this.logDebugBody(`${apiGroup}:response`, result);
+        return result;
       } catch (error: any) {
         lastError = error;
 
         const status = error?.statusCode ?? error?.status ?? error?.response?.status;
         const isRetryable = (status === 429 || status === 500 || status === 502 || status === 503);
+        if (apiGroup) {
+          this.logDebugBody(
+            `${apiGroup}:error[${status}]`,
+            error?.response?.data ?? error?.errors ?? error?.message,
+          );
+        }
 
         if (isRetryable && attempt < this.MAX_RETRIES) {
           const retryAfterHeader =
@@ -352,6 +503,11 @@ export class EbayClientService implements OnModuleDestroy {
           continue;
         }
 
+        // L17: trip the breaker on terminal 5xx; 4xx is a client problem
+        // (don't fast-fail every caller because one of them sent bad data).
+        if (apiGroup && status >= 500) {
+          this.circuitOnFailure(apiGroup);
+        }
         // Classify and throw structured error
         throw this.classifyError(error);
       }
@@ -633,6 +789,81 @@ export class EbayClientService implements OnModuleDestroy {
   }
 
   /**
+   * H5: batched price + quantity update across up to 25 SKUs in a single
+   * call. Returns the per-SKU response payload so callers can apply
+   * status to the local rows.
+   *
+   * Use this for the periodic inventory sync — running
+   * updateInventoryQuantity in a loop burns one HTTP call per SKU AND
+   * counts against the per-listing 250-revisions-per-day cap quickly,
+   * because the loop's `getInventoryItem + createOrReplaceInventoryItem`
+   * pattern is two calls per SKU. bulkUpdatePriceQuantity is one call
+   * per 25 SKUs and registers as one revision per listing.
+   *
+   * For >25 SKUs callers must batch themselves; this method enforces
+   * the limit so an oversized batch fails locally rather than at eBay's
+   * edge with a confusing 400.
+   */
+  async bulkUpdatePriceQuantity(
+    client: eBayApi,
+    items: Array<{
+      sku: string;
+      offerId?: string;
+      price?: { value: string; currency: string };
+      availability?: { shipToLocationAvailability: { quantity: number } };
+    }>,
+  ): Promise<any> {
+    if (items.length === 0) return { responses: [] };
+    if (items.length > 25) {
+      throw new Error(
+        `bulkUpdatePriceQuantity supports up to 25 items per call; received ${items.length}`,
+      );
+    }
+    if (this.mockMode) {
+      this.logger.log(`[MOCK] bulkUpdatePriceQuantity for ${items.length} SKU(s)`);
+      return {
+        responses: items.map((i) => ({ sku: i.sku, statusCode: 200 })),
+      };
+    }
+    return this.withRetry(async () => {
+      try {
+        const body = {
+          requests: items.map((item) => ({
+            sku: item.sku,
+            offerId: item.offerId,
+            availability: item.availability,
+            // Only set shipping price keys eBay expects (price under offer).
+            ...(item.price
+              ? {
+                  shipToLocationAvailability: undefined,
+                  offers: [
+                    {
+                      offerId: item.offerId,
+                      price: item.price,
+                    },
+                  ],
+                }
+              : {}),
+          })),
+        };
+        const result = await (client.sell.inventory as any).bulkUpdatePriceQuantity(
+          body,
+        );
+        this.logger.log(
+          `bulkUpdatePriceQuantity: ${items.length} SKU(s) updated`,
+        );
+        return result;
+      } catch (error) {
+        this.logger.error(
+          `bulkUpdatePriceQuantity failed for ${items.length} SKU(s)`,
+          error,
+        );
+        throw error;
+      }
+    });
+  }
+
+  /**
    * Get orders from eBay
    */
   async getOrders(
@@ -660,6 +891,47 @@ export class EbayClientService implements OnModuleDestroy {
   }
 
   /**
+   * M7: validate carrier code against eBay's recognized enum. Falling
+   * back to "Other" silently voids eBay's tracking-based defect
+   * protection (the seller gets a late-shipment defect even with
+   * valid tracking, because eBay can't read it without knowing the
+   * carrier). We fail closed so callers get a clear error to remap.
+   *
+   * List captured from eBay's ShippingCarrierEnum (Fulfillment API);
+   * we keep it conservative — better to reject a real carrier and
+   * make ops add it than to silently degrade to "Other".
+   */
+  private static readonly KNOWN_CARRIERS: ReadonlySet<string> = new Set([
+    // Domestic US
+    'USPS', 'UPS', 'FedEx', 'DHL', 'DHLeCommerce', 'OnTrac', 'LaserShip',
+    'GLS', 'Spee_Dee', 'Pilot', 'OldDominion',
+    // International (still appear in US-marketplace order shipments)
+    'DHLGlobalMail', 'DHLExpress', 'TNT', 'AramexUS', 'Aramex',
+    'CanadaPost', 'CanadaPostUS', 'EBAY', 'Other',
+    'Borderlinx', 'PostalConnections',
+    // Common rate-shop carriers / 3PL aggregators that eBay accepts
+    'Pitney_Bowes', 'PB', 'eBayShipping', 'GenericCarrier',
+  ]);
+
+  private validateCarrierCode(carrier: string): void {
+    if (!carrier || !carrier.trim()) {
+      throw new EbayApiError('shippingCarrierCode is required', 400, 'REQUEST');
+    }
+    // Case-insensitive match — eBay accepts USPS / Usps / usps.
+    const normalized = carrier.trim();
+    const allowed = Array.from(EbayClientService.KNOWN_CARRIERS);
+    const hit = allowed.find((c) => c.toLowerCase() === normalized.toLowerCase());
+    if (!hit) {
+      throw new EbayApiError(
+        `Unknown shippingCarrierCode "${carrier}". Defect protection requires a recognized carrier. ` +
+          `Map to one of: ${allowed.slice(0, 15).join(', ')}, ...`,
+        400,
+        'REQUEST',
+      );
+    }
+  }
+
+  /**
    * Create shipping fulfillment (mark order as shipped)
    */
   async createShippingFulfillment(
@@ -674,6 +946,10 @@ export class EbayClientService implements OnModuleDestroy {
       trackingNumber: string;
     }
   ): Promise<EbayFulfillment> {
+    // M7: validate carrier BEFORE the API call — clearer error and we
+    // avoid burning a request against the rate limit for known-bad input.
+    this.validateCarrierCode(data.shippingCarrierCode);
+
     if (this.mockMode) {
       this.logger.log(`[MOCK] Created shipping fulfillment for order: ${orderId}`);
       return { fulfillmentId: `mock_fulfill_${Date.now()}` };

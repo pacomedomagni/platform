@@ -7,6 +7,12 @@ import * as crypto from 'crypto';
  * Handles ECDSA signature verification, challenge responses, and account deletion
  * for eBay marketplace notification webhooks.
  */
+interface EbayPublicKey {
+  key: crypto.KeyObject;
+  algorithm: string; // e.g. "ECDSA"
+  digest: string;    // e.g. "SHA1" or "SHA256" — eBay tells us per-key
+}
+
 @Injectable()
 export class EbayWebhookService {
   private readonly logger = new Logger(EbayWebhookService.name);
@@ -14,27 +20,36 @@ export class EbayWebhookService {
 
   /**
    * In-memory cache for eBay public keys.
-   * Each entry stores the PEM key object and an expiry timestamp (1 hour TTL).
+   * Each entry stores the PEM KeyObject, the signing algorithm metadata eBay
+   * reports for that key (algorithm + digest), and an expiry timestamp.
+   * The metadata is per-key because eBay rotates keys and the digest can be
+   * SHA1 on legacy keys / SHA256 on newer ones — hardcoding either is wrong.
    */
   private readonly publicKeyCache = new Map<
     string,
-    { key: crypto.KeyObject; expiry: number }
+    EbayPublicKey & { expiry: number }
   >();
   private readonly KEY_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
   constructor(private prisma: PrismaService) {}
 
   /**
-   * Verify the ECDSA signature from the X-EBAY-SIGNATURE header.
+   * Verify the digital signature on an inbound eBay notification.
    *
-   * Header format: base64-encoded JSON `{ "kid": "...", "signature": "..." }`
-   * Digest = SHA-256(requestBody + timestamp + webhookEndpoint + verificationToken)
-   * Signature algorithm: ECDSA with SHA-256
+   * Per eBay's own SDK contract (event-notification-java-sdk SignatureValidator):
+   *   - X-EBAY-SIGNATURE is base64-encoded JSON `{kid, signature, ...}`
+   *   - The signature covers the RAW REQUEST BODY BYTES only — NOT
+   *     body+timestamp+endpoint+verificationToken (that's the marketplace
+   *     account-deletion CHALLENGE handshake construction, a different thing).
+   *   - The hash algorithm is reported by getPublicKey (digest field),
+   *     not hardcoded. Production keys today use SHA1/ECDSA; eBay can rotate.
+   *
+   * Reference:
+   *   https://github.com/eBay/event-notification-java-sdk/blob/main/src/main/java/com/ebay/commerce/notification/utils/SignatureValidator.java
    */
   async verifySignature(
     body: string,
     signatureHeader: string,
-    timestamp: string
   ): Promise<boolean> {
     if (this.mockMode) {
       this.logger.log('[MOCK] Skipping webhook signature verification');
@@ -42,7 +57,6 @@ export class EbayWebhookService {
     }
 
     try {
-      // Decode the X-EBAY-SIGNATURE header
       const headerJson = Buffer.from(signatureHeader, 'base64').toString(
         'utf8'
       );
@@ -53,30 +67,25 @@ export class EbayWebhookService {
         return false;
       }
 
-      // Fetch (or retrieve from cache) the public key for this key ID
-      const publicKey = await this.getPublicKey(kid);
+      const pk = await this.getPublicKey(kid);
 
-      // Build the digest: SHA-256(body + timestamp + endpoint + verificationToken)
-      const verificationToken = process.env['EBAY_VERIFICATION_TOKEN'] || '';
-      const endpoint = process.env['EBAY_WEBHOOK_ENDPOINT'] || '';
-
-      const digestPayload = body + timestamp + endpoint + verificationToken;
-      const digest = crypto
-        .createHash('sha256')
-        .update(digestPayload)
-        .digest();
-
-      // Verify the ECDSA signature against the digest
+      // Node's crypto.verify takes the digest algorithm name and the
+      // un-hashed message bytes — it hashes internally. This matches the
+      // Java Signature.getInstance("SHA1withECDSA"); update(body); verify()
+      // contract in eBay's SDK.
+      const digestAlgo = pk.digest.toLowerCase(); // 'sha1' | 'sha256'
       const signatureBuffer = Buffer.from(signature, 'base64');
       const isValid = crypto.verify(
-        'sha256',
-        digest,
-        publicKey,
+        digestAlgo,
+        Buffer.from(body, 'utf8'),
+        pk.key,
         signatureBuffer
       );
 
       if (!isValid) {
-        this.logger.warn('eBay webhook signature verification failed');
+        this.logger.warn(
+          `eBay webhook signature verification failed (kid=${kid}, algo=${digestAlgo}with${pk.algorithm})`
+        );
       }
 
       return isValid;
@@ -88,32 +97,30 @@ export class EbayWebhookService {
 
   /**
    * Fetch an eBay public key by key ID from the Notification API.
+   * Returns the key plus the algorithm metadata eBay associates with it.
    * Results are cached in memory for 1 hour to avoid repeated network calls.
    */
-  async getPublicKey(keyId: string): Promise<crypto.KeyObject> {
-    // Check cache first
+  async getPublicKey(keyId: string): Promise<EbayPublicKey> {
     const cached = this.publicKeyCache.get(keyId);
     if (cached && Date.now() < cached.expiry) {
-      return cached.key;
+      return cached;
     }
 
     if (this.mockMode) {
       this.logger.log('[MOCK] Returning mock public key');
-      // Generate a throwaway EC key pair for mock mode
       const { publicKey } = crypto.generateKeyPairSync('ec', {
         namedCurve: 'prime256v1',
       });
-      this.publicKeyCache.set(keyId, {
+      const entry: EbayPublicKey & { expiry: number } = {
         key: publicKey,
+        algorithm: 'ECDSA',
+        digest: 'SHA256',
         expiry: Date.now() + this.KEY_CACHE_TTL_MS,
-      });
-      return publicKey;
+      };
+      this.publicKeyCache.set(keyId, entry);
+      return entry;
     }
 
-    // E-8: respect EBAY_SANDBOX so signature verification works in non-prod
-    // environments. Previously the URL was hardcoded to prod, meaning a
-    // sandbox eBay webhook would fail to verify (and was being papered over
-    // by mockMode in tests).
     const isSandbox = process.env['EBAY_SANDBOX'] === 'true';
     const baseUrl = isSandbox
       ? 'https://api.sandbox.ebay.com'
@@ -140,7 +147,7 @@ export class EbayWebhookService {
     }
 
     const data = await response.json();
-    // eBay returns { publicKey: "<PEM-encoded key>", algorithm: "ECDSA", digest: "SHA256" }
+    // eBay returns { key: "<PEM-encoded>", algorithm: "ECDSA", digest: "SHA1" | "SHA256" }
     const pemKey = data.key || data.publicKey;
 
     if (!pemKey) {
@@ -150,15 +157,21 @@ export class EbayWebhookService {
     }
 
     const keyObject = crypto.createPublicKey(pemKey);
-
-    // Cache the key
-    this.publicKeyCache.set(keyId, {
+    const entry: EbayPublicKey & { expiry: number } = {
       key: keyObject,
+      algorithm: typeof data.algorithm === 'string' ? data.algorithm : 'ECDSA',
+      // eBay has historically used SHA1; newer keys may report SHA256.
+      // Default to SHA1 only if the field is missing entirely.
+      digest: typeof data.digest === 'string' ? data.digest : 'SHA1',
       expiry: Date.now() + this.KEY_CACHE_TTL_MS,
-    });
+    };
 
-    this.logger.log(`Cached eBay public key: ${keyId}`);
-    return keyObject;
+    this.publicKeyCache.set(keyId, entry);
+
+    this.logger.log(
+      `Cached eBay public key: ${keyId} (algo=${entry.digest}with${entry.algorithm})`
+    );
+    return entry;
   }
 
   /**

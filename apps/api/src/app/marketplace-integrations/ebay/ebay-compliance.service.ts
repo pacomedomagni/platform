@@ -43,11 +43,18 @@ export class EbayComplianceService implements OnModuleInit, OnModuleDestroy {
       this.logger.log('Scheduled tasks disabled via ENABLE_SCHEDULED_TASKS=false');
       return;
     }
-    this.syncInterval = setInterval(
-      () => this.syncAllActiveViolations(),
-      this.SYNC_INTERVAL_MS
-    );
-    this.logger.log('eBay compliance violation sync scheduler started (every 60 minutes)');
+    // M8: jitter the startup so multi-pod deploys don't all wake up
+    // at the same wall-clock minute. Up to 5 minutes of spread.
+    const jitter = Math.floor(Math.random() * 5 * 60_000);
+    setTimeout(() => {
+      this.syncInterval = setInterval(
+        () => this.syncAllActiveViolations(),
+        this.SYNC_INTERVAL_MS
+      );
+      this.logger.log(
+        `eBay compliance violation sync scheduler started (every 60 min, jittered +${jitter}ms)`,
+      );
+    }, jitter);
   }
 
   onModuleDestroy() {

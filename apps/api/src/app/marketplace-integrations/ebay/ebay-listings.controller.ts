@@ -58,9 +58,17 @@ export class EbayListingsController {
     @Tenant() tenantId: string,
     @Body(ValidationPipe) dto: CreateVariationListingDto
   ) {
+    // M2: derive a deterministic, tenant-namespaced group key instead of
+    // using the human-readable title (which collides on republish and
+    // can contain chars eBay rejects).
+    const groupKey = this.listingsService.generateInventoryGroupKey(
+      tenantId,
+      dto.productListingId,
+    );
+
     return this.listingsService.createVariationListing({
       connectionId: dto.connectionId,
-      groupKey: dto.groupTitle,
+      groupKey,
       title: dto.groupTitle,
       description: dto.description,
       categoryId: dto.categoryId,
@@ -84,6 +92,33 @@ export class EbayListingsController {
   }
 
   /**
+   * L19: bulk-create eBay draft listings from a parsed CSV payload.
+   *
+   * The client parses the CSV (browser-side or via a separate upload
+   * pipeline) and posts a `rows` array. Each row is attempted
+   * independently — partial failures are returned in the response so
+   * the importer UI can mark which rows succeeded and re-prompt for
+   * the rest.
+   *
+   * Drafts only. The seller publishes after review via the standard
+   * publish endpoint.
+   *
+   * POST /api/marketplace/ebay/listings/bulk-import
+   */
+  @Post('bulk-import')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
+  @Throttle({ short: { limit: 2, ttl: 60_000 } })
+  async bulkImport(
+    @Tenant() tenantId: string,
+    @Body() body: { rows: any[] },
+  ) {
+    if (!body || !Array.isArray(body.rows)) {
+      return { succeeded: [], failed: [], error: 'Body must contain `rows: Array`' };
+    }
+    return this.listingsService.bulkCreateDirectListings(body.rows);
+  }
+
+  /**
    * Update published listing on eBay (price, quantity, description)
    * PATCH /api/marketplace/ebay/listings/:id/offer
    */
@@ -94,6 +129,21 @@ export class EbayListingsController {
     @Body(ValidationPipe) dto: UpdatePublishedListingDto
   ) {
     return this.listingsService.updatePublishedListing(id, dto);
+  }
+
+  /**
+   * H2: pre-publish aspect validation. Returns the same report the
+   * Publish path uses internally — empty `missing`/`emptyValues`/
+   * `invalidValues` means the listing will not be rejected on aspects
+   * grounds. UI calls this to gate the Publish button so the seller
+   * sees specific remediation instead of an opaque eBay edge error.
+   *
+   * GET /api/marketplace/ebay/listings/:id/validate-aspects
+   */
+  @Get(':id/validate-aspects')
+  @Roles('admin', 'System Manager', 'Inventory Manager')
+  async validateAspects(@Param('id') id: string) {
+    return this.listingsService.validateListingAspects(id);
   }
 
   /**

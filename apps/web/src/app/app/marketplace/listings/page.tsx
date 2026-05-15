@@ -43,10 +43,34 @@ interface Listing {
   errorMessage?: string;
   createdAt: string;
   updatedAt: string;
+  publishedAt?: string | null;
   connection?: {
     name: string;
     marketplaceId: string;
   };
+}
+
+/**
+ * L20: format a Date-or-ISO into a short relative-time string
+ * ("3m ago", "2h ago", "yesterday", "Apr 14"). Used on the sync
+ * badge so the seller can see at a glance how fresh the cached
+ * state is.
+ */
+function formatRelative(iso?: string | null): string {
+  if (!iso) return '—';
+  const ts = typeof iso === 'string' ? Date.parse(iso) : iso;
+  if (!ts || Number.isNaN(ts)) return '—';
+  const deltaMs = Date.now() - ts;
+  const sec = Math.floor(deltaMs / 1000);
+  if (sec < 60) return 'just now';
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day === 1) return 'yesterday';
+  if (day < 7) return `${day}d ago`;
+  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 // Filter values the API expects. Dashboard tiles deep-link with both
@@ -214,13 +238,22 @@ export default function MarketplaceListingsPage() {
           <h1 className="text-3xl font-bold text-gray-900">eBay Listings</h1>
           <p className="text-gray-600 mt-2">Manage your product listings across eBay stores</p>
         </div>
-        <Link
-          href="/app/marketplace/listings/new"
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          <PlusIcon className="w-5 h-5" />
-          Create Listing
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/app/marketplace/listings/bulk-import"
+            className="flex items-center gap-2 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200"
+          >
+            <Upload className="w-5 h-5" />
+            Bulk import
+          </Link>
+          <Link
+            href="/app/marketplace/listings/new"
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          >
+            <PlusIcon className="w-5 h-5" />
+            Create Listing
+          </Link>
+        </div>
       </div>
 
       {/* Filters */}
@@ -463,7 +496,11 @@ function ListingRow({
         <div className="text-sm text-gray-900">{listing.quantity}</div>
       </td>
       <td className="px-6 py-4">
-        <StatusBadge status={listing.status} syncStatus={listing.syncStatus} />
+        <StatusBadge
+          status={listing.status}
+          syncStatus={listing.syncStatus}
+          updatedAt={listing.updatedAt}
+        />
       </td>
       <td className="px-6 py-4">
         <div className="flex items-center gap-2">
@@ -512,7 +549,7 @@ function ListingRow({
   );
 }
 
-function StatusBadge({ status, syncStatus }: { status: string; syncStatus: string }) {
+function StatusBadge({ status, syncStatus, updatedAt }: { status: string; syncStatus: string; updatedAt?: string }) {
   const getStatusConfig = () => {
     switch (status) {
       case 'draft':
@@ -553,6 +590,18 @@ function StatusBadge({ status, syncStatus }: { status: string; syncStatus: strin
       </span>
       {syncStatus !== 'synced' && status === 'published' && (
         <span className="text-xs text-gray-500">Sync: {syncStatus}</span>
+      )}
+      {/* L20: last-synced timestamp for published+synced listings so the
+          seller can see at a glance whether the cached price/qty is
+          fresh. Hidden for drafts/errors where it would be confusing
+          (the timestamp reflects the last DB write, not eBay state). */}
+      {status === 'published' && syncStatus === 'synced' && updatedAt && (
+        <span
+          className="text-xs text-gray-400"
+          title={new Date(updatedAt).toLocaleString()}
+        >
+          Synced {formatRelative(updatedAt)}
+        </span>
       )}
     </div>
   );

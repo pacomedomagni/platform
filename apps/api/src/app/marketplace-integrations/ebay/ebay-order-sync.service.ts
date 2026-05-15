@@ -49,13 +49,34 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // Start scheduled sync for all active connections with autoSyncOrders enabled
-    this.syncInterval = setInterval(() => this.syncAllActiveConnections(), this.SYNC_INTERVAL_MS);
-    this.logger.log('eBay order sync scheduler started (every 15 minutes)');
+    // M8: cron jitter. Pods deployed together would otherwise wake up
+    // at the exact same wall-clock millisecond every interval — a
+    // thundering herd against eBay's rate limit AND our own Redis
+    // distributed-lock cache. A random startup delay spreads the
+    // schedule across the interval. We don't need cryptographic
+    // randomness here; Math.random gives us enough spread.
+    const orderJitter = Math.floor(Math.random() * 60_000); // up to 1 min
+    const inventoryJitter = Math.floor(Math.random() * 120_000); // up to 2 min
 
-    // Start scheduled inventory sync for connections with autoSyncInventory enabled
-    this.inventorySyncInterval = setInterval(() => this.syncAllActiveInventory(), this.INVENTORY_SYNC_INTERVAL_MS);
-    this.logger.log('eBay inventory sync scheduler started (every 30 minutes)');
+    setTimeout(() => {
+      this.syncInterval = setInterval(
+        () => this.syncAllActiveConnections(),
+        this.SYNC_INTERVAL_MS,
+      );
+      this.logger.log(
+        `eBay order sync scheduler started (every 15 min, jittered +${orderJitter}ms)`,
+      );
+    }, orderJitter);
+
+    setTimeout(() => {
+      this.inventorySyncInterval = setInterval(
+        () => this.syncAllActiveInventory(),
+        this.INVENTORY_SYNC_INTERVAL_MS,
+      );
+      this.logger.log(
+        `eBay inventory sync scheduler started (every 30 min, jittered +${inventoryJitter}ms)`,
+      );
+    }, inventoryJitter);
   }
 
   onModuleDestroy() {
@@ -135,6 +156,90 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
       total: new Decimal(pricingSummary.total?.value || '0'),
       currency: pricingSummary.total?.currency || 'USD',
     };
+  }
+
+  /**
+   * M4: upsert normalized line-item rows for an order so analytics can
+   * join sales to listings without parsing the itemsData JSON column.
+   *
+   * Resolves listingId by (connectionId, sku) — eBay's SKU is the only
+   * stable handle into our MarketplaceListing rows; we don't ship
+   * externalLineItemId into listings. Null if no local listing exists
+   * (deleted, or order came from a SKU the seller no longer sells).
+   */
+  private async persistOrderLineItems(
+    tenantId: string,
+    connectionId: string,
+    orderId: string,
+    soldAt: Date,
+    lineItems: MappedOrderLineItem[],
+  ): Promise<void> {
+    if (!lineItems || lineItems.length === 0) return;
+
+    // Batch the listingId lookups so we don't issue one query per line.
+    const skus = lineItems
+      .map((li) => li.sku)
+      .filter((sku): sku is string => typeof sku === 'string' && sku.length > 0);
+    const listingMatches = skus.length
+      ? await this.prisma.marketplaceListing.findMany({
+          where: { tenantId, connectionId, sku: { in: skus } },
+          select: { id: true, sku: true },
+        })
+      : [];
+    const listingIdBySku = new Map(
+      listingMatches.map((l) => [l.sku, l.id] as const),
+    );
+
+    for (const li of lineItems) {
+      if (!li.lineItemId) continue;
+      const unitPriceNum = Number(li.unitPrice ?? 0);
+      const qty = Number(li.quantity ?? 0);
+      const lineTotal = unitPriceNum * qty;
+      const listingId = (li.sku && listingIdBySku.get(li.sku)) || null;
+
+      try {
+        await this.prisma.marketplaceOrderLineItem.upsert({
+          where: {
+            tenantId_orderId_externalLineItemId: {
+              tenantId,
+              orderId,
+              externalLineItemId: li.lineItemId,
+            },
+          },
+          create: {
+            tenantId,
+            orderId,
+            listingId,
+            externalLineItemId: li.lineItemId,
+            externalItemId: li.legacyItemId ?? null,
+            sku: li.sku ?? '',
+            title: li.title ?? '',
+            quantity: qty,
+            unitPrice: new Prisma.Decimal(unitPriceNum.toFixed(2)),
+            lineTotal: new Prisma.Decimal(lineTotal.toFixed(2)),
+            currency: li.currency ?? 'USD',
+            soldAt,
+          },
+          update: {
+            listingId,
+            externalItemId: li.legacyItemId ?? null,
+            sku: li.sku ?? '',
+            title: li.title ?? '',
+            quantity: qty,
+            unitPrice: new Prisma.Decimal(unitPriceNum.toFixed(2)),
+            lineTotal: new Prisma.Decimal(lineTotal.toFixed(2)),
+            currency: li.currency ?? 'USD',
+          },
+        });
+      } catch (err) {
+        // Line-item persistence failure must not break the parent order
+        // sync — the MarketplaceOrder row is already written and the
+        // raw itemsData JSON is intact as the forensic source.
+        this.logger.warn(
+          `Failed to upsert line item ${li.lineItemId} on order ${orderId}: ${(err as Error)?.message ?? err}`,
+        );
+      }
+    }
   }
 
   /**
@@ -312,6 +417,18 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
               errorMessage: null,
             },
           });
+
+          // M4: normalize line items into MarketplaceOrderLineItem rows
+          // for sales-attribution analytics. Idempotent — re-syncing an
+          // order will re-upsert each line via the
+          // (tenantId, orderId, externalLineItemId) unique key.
+          await this.persistOrderLineItems(
+            tenantId,
+            connectionId,
+            upsertedOrder.id,
+            orderDate,
+            lineItems,
+          );
 
           // Auto-create NoSlag Order for paid orders that aren't yet linked.
           // If unified-order creation fails, mark the marketplace order as
@@ -965,6 +1082,120 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * H5: bulk inventory sync via bulkUpdatePriceQuantity. Up to 25 SKUs
+   * per HTTP call; chunks transparently. On per-SKU failure inside a
+   * batch, falls back to the single-SKU path for the bad SKU so one
+   * malformed listing doesn't poison the whole batch.
+   */
+  private async bulkSyncListingsInventory(
+    connection: { id: string; tenantId: string },
+    listings: Array<{
+      id: string;
+      sku: string;
+      externalOfferId: string | null;
+      warehouseId: string | null;
+      productListing: { itemId: string } | null;
+    }>,
+  ): Promise<void> {
+    type Item = {
+      sku: string;
+      offerId: string;
+      availability: { shipToLocationAvailability: { quantity: number } };
+      listingId: string;
+    };
+
+    // Compute availability per listing (warehouse balance minus reserved).
+    const items: Item[] = [];
+    for (const listing of listings) {
+      if (!listing.warehouseId || !listing.productListing || !listing.externalOfferId) continue;
+      const balance = await this.prisma.warehouseItemBalance.findUnique({
+        where: {
+          tenantId_itemId_warehouseId: {
+            tenantId: connection.tenantId,
+            itemId: listing.productListing.itemId,
+            warehouseId: listing.warehouseId,
+          },
+        },
+      });
+      const qty = balance
+        ? Math.max(0, balance.actualQty.toNumber() - balance.reservedQty.toNumber())
+        : 0;
+      items.push({
+        sku: listing.sku,
+        offerId: listing.externalOfferId,
+        availability: { shipToLocationAvailability: { quantity: qty } },
+        listingId: listing.id,
+      });
+    }
+    if (items.length === 0) return;
+
+    const client = await this.ebayStore.getClient(connection.id, connection.tenantId);
+    const BATCH = 25;
+    for (let i = 0; i < items.length; i += BATCH) {
+      const batch = items.slice(i, i + BATCH);
+      try {
+        const result = await this.ebayClient.bulkUpdatePriceQuantity(
+          client,
+          batch.map((b) => ({
+            sku: b.sku,
+            offerId: b.offerId,
+            availability: b.availability,
+          })),
+        );
+        // Apply per-SKU result back to local rows. eBay returns a
+        // `responses[]` array with the same length as the request.
+        const responses: any[] = result?.responses ?? [];
+        for (let j = 0; j < batch.length; j++) {
+          const itemResult = responses[j];
+          const ok =
+            !itemResult ||
+            itemResult.statusCode === undefined ||
+            (itemResult.statusCode >= 200 && itemResult.statusCode < 300);
+          if (ok) {
+            await this.prisma.marketplaceListing.update({
+              where: { id: batch[j].listingId },
+              data: {
+                quantity: batch[j].availability.shipToLocationAvailability.quantity,
+                syncStatus: SyncStatus.SYNCED,
+                errorMessage: null,
+              },
+            });
+          } else {
+            // Fallback to per-SKU path so the single-SKU helper's
+            // distributed lock + revision-count guard kicks in for
+            // the listing that needs special handling.
+            this.logger.warn(
+              `Bulk inventory sync failed for SKU ${batch[j].sku}: ${JSON.stringify(itemResult)}. Falling back to per-SKU sync.`,
+            );
+            await this.syncListingInventoryWithLock(connection, {
+              id: batch[j].listingId,
+              sku: batch[j].sku,
+              warehouseId:
+                listings.find((l) => l.id === batch[j].listingId)?.warehouseId ?? null,
+              productListing:
+                listings.find((l) => l.id === batch[j].listingId)?.productListing ?? null,
+            });
+          }
+        }
+      } catch (batchError) {
+        this.logger.error(
+          `Bulk inventory batch (${batch.length} items) failed; falling back to per-SKU`,
+          batchError,
+        );
+        for (const item of batch) {
+          const listing = listings.find((l) => l.id === item.listingId);
+          if (!listing) continue;
+          try {
+            await this.syncListingInventoryWithLock(connection, listing);
+          } catch (err) {
+            this.logger.error(`Per-SKU fallback failed for listing ${listing.id}`, err);
+          }
+        }
+      }
+    }
+  }
+
+  /**
    * Update inventory for a single listing with distributed SKU-level locking.
    * M10: Replaced in-memory Map lock with DistributedLockService to work across instances.
    */
@@ -1059,16 +1290,12 @@ export class EbayOrderSyncService implements OnModuleInit, OnModuleDestroy {
               },
             });
 
-            for (const listing of listings) {
-              try {
-                await this.syncListingInventoryWithLock(connection, listing);
-              } catch (listingError) {
-                this.logger.error(
-                  `Scheduled inventory sync failed for listing ${listing.id}`,
-                  listingError
-                );
-              }
-            }
+            // H5: batch in groups of 25 (eBay's bulkUpdatePriceQuantity
+            // limit). Each batch is one HTTP call regardless of size, and
+            // counts as one revision per listing instead of the
+            // previous (read-then-write) two-call pattern. Falls back to
+            // per-listing sync only on partial failures.
+            await this.bulkSyncListingsInventory(connection, listings);
           });
         } catch (error) {
           this.logger.error(

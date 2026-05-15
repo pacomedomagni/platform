@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { ConfirmDialog, toast } from '@platform/ui';
-import { PlusIcon, CheckCircle2, XCircle, RefreshCw, Palmtree } from 'lucide-react';
+import { PlusIcon, CheckCircle2, XCircle, RefreshCw, Palmtree, AlertTriangle, ShieldOff, ExternalLink } from 'lucide-react';
 import api from '@/lib/api';
 
 interface Connection {
@@ -23,7 +23,68 @@ interface ConnectionStatus {
   hasPolicies: boolean;
   canPublishListings: boolean;
   marketplaceId: string;
+  // H8: scopes eBay actually granted at OAuth time. Optional-tier
+  // features (Promoted Listings, Finances reports, etc.) are gated on
+  // these — a missing scope yields a confusing 403 from eBay at the
+  // call site otherwise.
+  grantedScopes?: string[];
+  // M-T8: distinguishes "user revoked consent" (Reconnect helps) from
+  // "eBay account closed/banned" (must contact eBay support first).
+  disconnectionReason?: 'account_closed' | 'consent_revoked' | null;
+  // H1: post-OAuth setup state. setupErrors is the human-readable list
+  // of issues the seller needs to resolve before publishing will work.
+  setupErrors?: string[];
+  optedIn?: {
+    policyManagement?: boolean;
+    outOfStockControl?: boolean;
+  } | null;
+  privileges?: {
+    sellerRegistrationCompleted?: boolean;
+    sellingLimit?: {
+      quantity?: number;
+      amount?: { value?: string; currency?: string };
+    };
+  } | null;
 }
+
+/**
+ * Translate the onboarding service's machine-tagged setup errors into
+ * human-readable hints. The backend prefixes each entry with a kebab
+ * tag — strip it and replace with a friendlier sentence. Unknown tags
+ * fall through to the raw message so we never hide information.
+ */
+function prettySetupError(raw: string): string {
+  if (raw.startsWith('first-manual-listing-required')) {
+    return 'eBay requires this account to complete one listing manually on eBay.com before publishing via API. Open eBay, list something simple (anything), then come back here.';
+  }
+  if (raw.startsWith('policy-management-opt-in')) {
+    return 'Business-policy management opt-in failed. Open Account → Site Preferences on eBay and enable Business Policies, then click Reconnect.';
+  }
+  if (raw.startsWith('out-of-stock-opt-in')) {
+    return 'Out-of-Stock Control opt-in failed. Listings will end automatically at quantity 0 until this is resolved.';
+  }
+  if (raw.startsWith('business-policies')) {
+    return 'Could not load business policies. Make sure you have at least one Payment, Shipping, and Return policy configured on eBay.';
+  }
+  if (raw.startsWith('privileges-fetch')) {
+    return 'Could not read seller privileges from eBay (we will retry).';
+  }
+  return raw;
+}
+
+// Mapping from a granted OAuth scope to the user-facing feature it
+// unlocks. Used to render permission badges + "feature unavailable"
+// hints in the UI when a seller declined an optional consent.
+const OPTIONAL_FEATURE_SCOPES: Array<{ scope: string; label: string }> = [
+  { scope: 'https://api.ebay.com/oauth/api_scope/sell.marketing', label: 'Promoted Listings (Marketing)' },
+  { scope: 'https://api.ebay.com/oauth/api_scope/sell.finances', label: 'Finances & Payouts' },
+  { scope: 'https://api.ebay.com/oauth/api_scope/sell.payment.dispute', label: 'Payment Disputes' },
+  { scope: 'https://api.ebay.com/oauth/api_scope/sell.analytics.readonly', label: 'Seller Analytics' },
+  { scope: 'https://api.ebay.com/oauth/api_scope/sell.compliance', label: 'Listing Compliance' },
+  { scope: 'https://api.ebay.com/oauth/api_scope/sell.negotiation', label: 'Best Offer Negotiation' },
+  { scope: 'https://api.ebay.com/oauth/api_scope/sell.feed', label: 'Bulk Feed Uploads' },
+  { scope: 'https://api.ebay.com/oauth/api_scope/commerce.identity.readonly', label: 'Buyer Email Enrichment' },
+];
 
 interface VacationStatus {
   enabled: boolean;
@@ -456,6 +517,81 @@ function ConnectionCard({
         Marketplace: {connection.marketplaceId}
       </div>
 
+      {/* H1: post-OAuth setup remediation. setupErrors come from the
+          onboarding service — selling-policy opt-in failed, privileges
+          check showed the seller hasn't completed a manual first
+          listing on eBay.com, etc. Rendered as actionable hints so the
+          seller resolves them before hitting publish. */}
+      {connection.isConnected && (status?.setupErrors?.length ?? 0) > 0 && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-xs font-medium text-amber-900 mb-1">
+                Setup needs attention
+              </p>
+              <ul className="text-xs text-amber-800 space-y-1 list-disc pl-4">
+                {status!.setupErrors!.map((err, i) => (
+                  <li key={i}>{prettySetupError(err)}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* H8: optional-feature permission badges. Hide entirely if the
+          seller granted everything — clean state stays clean. */}
+      {connection.isConnected && status?.grantedScopes && (() => {
+        const declined = OPTIONAL_FEATURE_SCOPES.filter(
+          (s) => !status.grantedScopes?.includes(s.scope),
+        );
+        if (declined.length === 0) return null;
+        return (
+          <div className="mb-4 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+            <p className="text-xs font-medium text-gray-700 mb-1">
+              Optional features unavailable
+            </p>
+            <ul className="text-xs text-gray-600 space-y-0.5">
+              {declined.map((d) => (
+                <li key={d.scope} className="flex items-center gap-1">
+                  <ShieldOff className="w-3 h-3" />
+                  {d.label}
+                </li>
+              ))}
+            </ul>
+            <button
+              onClick={() => onReconnect(connection.id)}
+              className="mt-1 text-xs text-blue-600 hover:underline"
+            >
+              Reconnect to grant
+            </button>
+          </div>
+        );
+      })()}
+
+      {/* M-T8: reason-aware disconnect notice. Shown when the seller
+          revoked consent OR eBay closed the account. */}
+      {!connection.isConnected && status?.disconnectionReason === 'account_closed' && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+          <p className="text-xs font-medium text-red-900 mb-1">
+            eBay account closed or suspended
+          </p>
+          <p className="text-xs text-red-800">
+            Reconnecting won&apos;t work until eBay restores access. Contact
+            eBay support first.
+          </p>
+        </div>
+      )}
+      {!connection.isConnected && status?.disconnectionReason === 'consent_revoked' && (
+        <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+          <p className="text-xs text-blue-900">
+            Access revoked on eBay. Reconnect to restore listing &
+            order sync.
+          </p>
+        </div>
+      )}
+
       {/* Vacation Mode */}
       {connection.isConnected && (
         <div className="border-t border-gray-200 pt-4 mb-4">
@@ -522,12 +658,26 @@ function ConnectionCard({
 
       <div className="flex gap-2">
         {!connection.isConnected ? (
-          <button
-            onClick={() => onReconnect(connection.id)}
-            className="flex-1 px-3 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
-          >
-            Connect
-          </button>
+          status?.disconnectionReason === 'account_closed' ? (
+            // M-T8: closed accounts can't OAuth back in — link to eBay
+            // support instead of pretending Reconnect will work.
+            <a
+              href="https://www.ebay.com/help/contact_us"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 inline-flex items-center justify-center gap-1 px-3 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700"
+            >
+              Contact eBay Support
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          ) : (
+            <button
+              onClick={() => onReconnect(connection.id)}
+              className="flex-1 px-3 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700"
+            >
+              {status?.disconnectionReason === 'consent_revoked' ? 'Reconnect' : 'Connect'}
+            </button>
+          )
         ) : (
           <>
             <button

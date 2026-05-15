@@ -1,5 +1,6 @@
 import { Injectable, Logger, NotFoundException, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '@platform/db';
+import { Prisma } from '@prisma/client';
 import { ClsService } from 'nestjs-cls';
 import eBayApi from 'ebay-api';
 import Redis from 'ioredis';
@@ -304,18 +305,38 @@ export class EbayStoreService implements OnModuleDestroy {
       tokens = await this.refreshAccessToken(refreshToken);
     } catch (error: any) {
       await this.lockService.release(lockKey, acquired).catch(() => {});
-      // H2: If token is revoked, mark connection as disconnected
+      // H2 + M-T8: mark connection disconnected on revoked refresh, AND
+      // record the reason (closed-account vs. user-revoked) in
+      // platformConfig.disconnectionReason so the UI can show the right
+      // CTA — "Reconnect" vs. "Contact eBay support".
       if (error?.isTokenRevoked) {
-        await this.prisma.marketplaceConnection.update({
-          where: { id: connectionId },
-          data: {
-            isConnected: false,
-            accessToken: null,
-            accessTokenExpiry: null,
-          },
+        const reason: 'account_closed' | 'consent_revoked' = error?.accountClosed
+          ? 'account_closed'
+          : 'consent_revoked';
+        await this.prisma.$transaction(async (tx) => {
+          const current = await tx.marketplaceConnection.findUniqueOrThrow({
+            where: { id: connectionId },
+            select: { platformConfig: true },
+          });
+          const merged = {
+            ...((current.platformConfig as Record<string, unknown>) ?? {}),
+            disconnectionReason: reason,
+            disconnectedAt: new Date().toISOString(),
+          };
+          await tx.marketplaceConnection.update({
+            where: { id: connectionId },
+            data: {
+              isConnected: false,
+              accessToken: null,
+              accessTokenExpiry: null,
+              platformConfig: merged as Prisma.InputJsonValue,
+            },
+          });
         });
         this.clientCache.delete(connectionId);
-        this.logger.error(`Connection ${connectionId} disconnected due to revoked token`);
+        this.logger.error(
+          `Connection ${connectionId} disconnected (reason=${reason})`,
+        );
       }
       throw error;
     }
@@ -387,21 +408,48 @@ export class EbayStoreService implements OnModuleDestroy {
       const errorText = await response.text();
       this.logger.error(`Token refresh failed: ${response.status} - ${errorText}`);
 
-      // H2: Detect revoked/invalid refresh tokens
+      // H2 + M-T8: Detect revoked/invalid refresh tokens and classify
+      // the underlying reason so the UI shows the right CTA.
+      //
+      // eBay returns the same generic `invalid_grant` for several
+      // distinct conditions, but the textual hint differs:
+      //   - "account_disabled" / "account is closed" → the seller's
+      //     entire eBay account was closed (suspended, voluntary
+      //     deactivation, or eBay-initiated ban). Reconnecting WILL
+      //     NOT help — they need to contact eBay support first.
+      //   - "consent_revoked" / "user revoked" → the seller hit
+      //     "remove access" on eBay's third-party authorizations page.
+      //     Reconnect IS the right CTA.
+      //   - generic "invalid_grant" (token expired / refreshed past
+      //     18-month lifetime) → reconnect.
       if (response.status === 400 || response.status === 401) {
-        const isRevoked = errorText.includes('invalid_grant') ||
-          errorText.includes('token') ||
-          errorText.includes('revoked') ||
-          errorText.includes('expired');
+        const lc = errorText.toLowerCase();
+        const isRevoked =
+          lc.includes('invalid_grant') ||
+          lc.includes('token') ||
+          lc.includes('revoked') ||
+          lc.includes('expired');
 
         if (isRevoked) {
+          // Distinguish "account closed/banned" from "user revoked
+          // consent". eBay's error payload includes hints like
+          // "account_disabled", "account_closed", or "user disabled".
+          const looksAccountClosed =
+            lc.includes('account_disabled') ||
+            lc.includes('account_closed') ||
+            lc.includes('account is closed') ||
+            lc.includes('account has been disabled') ||
+            lc.includes('user disabled');
+
+          const message = looksAccountClosed
+            ? 'eBay account is closed or suspended. Reconnecting will not work — contact eBay support to restore the account.'
+            : 'eBay refresh token revoked. Please reconnect your eBay account.';
           this.logger.error(
-            `Refresh token appears to be revoked or expired. User must re-authenticate.`
+            `${message} (status=${response.status}, errorText=${errorText.slice(0, 200)})`,
           );
-          // Mark connection as disconnected so UI shows re-auth prompt
-          // We can't update DB here without connectionId, so throw a specific error
-          const err = new Error('eBay refresh token revoked. Please reconnect your eBay account.');
+          const err = new Error(message);
           (err as any).isTokenRevoked = true;
+          (err as any).accountClosed = looksAccountClosed;
           throw err;
         }
       }
@@ -554,6 +602,31 @@ export class EbayStoreService implements OnModuleDestroy {
   }
 
   /**
+   * H8: check whether the seller granted a specific OAuth scope.
+   *
+   * Required-tier scopes are validated at OAuth callback time (the connection
+   * would not have been saved otherwise), so for those this method always
+   * returns true. For optional-tier scopes (sell.marketing, sell.finances,
+   * sell.payment.dispute, etc.) callers must gate features on the response —
+   * a missing scope yields HTTP 403 "Insufficient permissions" from eBay at
+   * request time and that error is opaque to the seller.
+   *
+   * `scope` should be the full URL form, e.g.
+   * "https://api.ebay.com/oauth/api_scope/sell.marketing".
+   */
+  async hasScope(connectionId: string, scope: string): Promise<boolean> {
+    const connection = await this.getConnection(connectionId);
+    const cfg = (connection.platformConfig ?? {}) as Record<string, unknown>;
+    const granted = cfg['grantedScopes'];
+    if (!Array.isArray(granted)) {
+      // No scope record persisted (pre-H8 connection or non-eBay).
+      // Be permissive: caller will see an eBay 403 at runtime if missing.
+      return true;
+    }
+    return granted.includes(scope);
+  }
+
+  /**
    * Get connection status for UI
    */
   async getConnectionStatus(connectionId: string) {
@@ -566,12 +639,42 @@ export class EbayStoreService implements OnModuleDestroy {
       connection.returnPolicyId
     );
 
+    const cfg = (connection.platformConfig ?? {}) as Record<string, unknown>;
+    const grantedScopes = Array.isArray(cfg['grantedScopes'])
+      ? (cfg['grantedScopes'] as unknown[]).filter(
+          (s): s is string => typeof s === 'string',
+        )
+      : [];
+    const disconnectionReason =
+      typeof cfg['disconnectionReason'] === 'string'
+        ? (cfg['disconnectionReason'] as string)
+        : null;
+    // H1: surface the post-OAuth setup report so the UI can render a
+    // remediation panel ("complete one manual listing on eBay.com first",
+    // "opt-in to selling policies failed", etc.) instead of letting the
+    // seller bounce off opaque publish-time errors.
+    const setupErrors = Array.isArray(cfg['setupErrors'])
+      ? (cfg['setupErrors'] as unknown[]).filter(
+          (s): s is string => typeof s === 'string',
+        )
+      : [];
+    const optedIn = (cfg['optedIn'] as Record<string, unknown>) ?? null;
+    const privileges = cfg['privileges'] ?? null;
+
     return {
       hasCredentials,
       isConnected,
       hasPolicies,
       canPublishListings: hasCredentials && isConnected && hasPolicies,
       marketplaceId: connection.marketplaceId,
+      grantedScopes,
+      // M-T8: surface the disconnection reason so the UI shows the
+      // right CTA (Reconnect vs. Contact eBay support).
+      disconnectionReason,
+      // H1: post-OAuth setup state for remediation UI.
+      setupErrors,
+      optedIn,
+      privileges,
     };
   }
 

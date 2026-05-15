@@ -3,6 +3,7 @@ import * as crypto from 'crypto';
 import { PrismaService, bypassTenantGuard, runWithTenant } from '@platform/db';
 import { Prisma } from '@prisma/client';
 import { EbayStoreService } from './ebay-store.service';
+import { EbayOnboardingService } from './ebay-onboarding.service';
 import { MarketplaceAuditService } from '../shared/marketplace-audit.service';
 
 /**
@@ -16,6 +17,7 @@ export class EbayAuthService implements OnModuleDestroy {
 
   constructor(
     private ebayStore: EbayStoreService,
+    private onboarding: EbayOnboardingService,
     private prisma: PrismaService,
     private audit: MarketplaceAuditService
   ) {
@@ -145,6 +147,17 @@ export class EbayAuthService implements OnModuleDestroy {
           accessTokenExpiry: new Date(Date.now() + tokens.expires_in * 1000),
         });
 
+        // H8: persist the exact scope set eBay granted. Required vs.
+        // optional scope distinction: we hard-fail the OAuth flow above
+        // when REQUIRED_EBAY_SCOPES is missing (publish/orders/policies
+        // are non-negotiable), but OPTIONAL scopes (sell.marketing,
+        // sell.finances, sell.payment.dispute, etc.) may be silently
+        // dropped by eBay if the seller toggled them off on the consent
+        // screen. Persist the granted set so feature-level callers can
+        // gate (e.g. "Promoted Listings is unavailable for this seller —
+        // they didn't grant sell.marketing").
+        await this.saveGrantedScopes(connectionId, tokens.scope);
+
         // Fetch and persist the eBay seller's userId. This is required for
         // (a) the GDPR account-deletion webhook to find which connection
         //     to anonymize, and (b) routing inbound order notifications to
@@ -156,8 +169,23 @@ export class EbayAuthService implements OnModuleDestroy {
           tokens.access_token,
         );
 
-        // Fetch and save business policies (pass tenantId explicitly since OAuth callback has no CLS context)
-        await this.ebayStore.fetchAndSaveBusinessPolicies(connectionId, tenantId);
+        // H1 + M-T7: silent post-OAuth setup. The seller must not see a
+        // wizard — every required server-side bootstrap runs here. Order
+        // matters: opt-in to SELLING_POLICY_MANAGEMENT BEFORE we try to
+        // fetch policies, otherwise Account API silently returns empty.
+        // The onboarding service runs opt-ins → privileges check → cache
+        // policies in one pass and writes a setup report to platformConfig
+        // for the UI to display remediation.
+        const setupReport = await this.onboarding.runPostOAuthSetup(
+          connectionId,
+          tenantId,
+          tokens.access_token,
+        );
+        if (setupReport.setupErrors.length > 0) {
+          this.logger.warn(
+            `Connection ${connectionId} setup completed with issues: ${setupReport.setupErrors.join('; ')}`,
+          );
+        }
 
         // Clean up state from database
         await this.prisma.oAuthState.delete({ where: { id: state } });
@@ -256,6 +284,37 @@ export class EbayAuthService implements OnModuleDestroy {
     });
 
     this.logger.log(`Saved ebayUserId=${userId} for connection ${connectionId}`);
+  }
+
+  /**
+   * Persist the granted scope set in platformConfig.grantedScopes.
+   * Read-modify-write under a transaction to avoid clobbering sibling
+   * keys (ebayUserId, ebayUsername) written nearby.
+   */
+  private async saveGrantedScopes(
+    connectionId: string,
+    grantedScope: string | undefined,
+  ): Promise<void> {
+    if (!grantedScope) return; // assertGrantedScopes already warned
+    const scopes = grantedScope.split(/\s+/).filter(Boolean);
+    await this.prisma.$transaction(async (tx) => {
+      const current = await tx.marketplaceConnection.findUniqueOrThrow({
+        where: { id: connectionId },
+        select: { platformConfig: true },
+      });
+      const merged = {
+        ...((current.platformConfig as Record<string, unknown>) ?? {}),
+        grantedScopes: scopes,
+        grantedScopesAt: new Date().toISOString(),
+      };
+      await tx.marketplaceConnection.update({
+        where: { id: connectionId },
+        data: { platformConfig: merged as Prisma.InputJsonValue },
+      });
+    });
+    this.logger.log(
+      `Persisted ${scopes.length} granted scope(s) for connection ${connectionId}`,
+    );
   }
 
   /**
